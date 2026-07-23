@@ -81,6 +81,17 @@ async function main(): Promise<void> {
   await startMcpServer(flags, version);
 }
 
+// Last-resort process guards: a stray rejection/exception must go to STDERR (never
+// stdout — that would corrupt the JSON-RPC stream) and must not crash silently.
+process.on("unhandledRejection", (reason) => {
+  const msg = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
+  process.stderr.write(`unhandledRejection: ${msg}\n`);
+});
+process.on("uncaughtException", (err) => {
+  process.stderr.write(`uncaughtException: ${err.stack ?? String(err)}\n`);
+  process.exit(1);
+});
+
 main().catch((e) => {
   process.stderr.write(`fatal: ${(e as Error).stack ?? String(e)}\n`);
   process.exit(1);
