@@ -25,6 +25,7 @@ import {
   type RankedRow,
 } from "../tools/shared.js";
 import { scoreAgent } from "../lib/ranking.js";
+import type { GetAgentsParams } from "../lib/explorer.js";
 import { resolveAgentId } from "../lib/identifier.js";
 import { buildSelfDeclaredFields } from "../lib/sanitize.js";
 import { parseQuery } from "../lib/nlparse.js";
@@ -404,22 +405,34 @@ async function cmdProfile(deps: ToolDeps, flags: CliFlags): Promise<number> {
 }
 
 async function cmdServices(deps: ToolDeps, flags: CliFlags): Promise<number> {
-  const params: Record<string, unknown> = { hasServices: true, page: 1, limit: flags.limit ?? 20 };
+  const limit = flags.limit ?? 20;
   const search = flags.positionals.slice(1).join(" ").trim();
-  if (search) params.search = search;
-  if (flags.x402) params.x402 = true;
-  if (flags.minScore !== undefined) params.minScore = flags.minScore;
+  const filters: Omit<NonNullable<GetAgentsParams>, "search" | "page"> = { hasServices: true };
+  if (flags.x402) filters.x402 = true;
+  if (flags.minScore !== undefined) filters.minScore = flags.minScore;
 
-  let agents = (await deps.explorer.getAgents(params)).data ?? [];
-  if (flags.mpp) agents = agents.filter((a) => deriveCapabilities(a).mpp);
+  // Discover via stem-matching (the explorer `search=` misses "Scrapper").
+  const pool = await deps.explorer.findAgents(search, { filters, pages: 2, match: "any" });
 
-  const scored = agents
+  const scored = pool
     .map((a) => ({ a, result: scoreAgent(toRankInput(a), { weights: deps.config.weights, scoreMax: deps.config.scoreMax }) }))
     .sort((x, y) => y.result.score100 - x.result.score100);
 
+  // The LIST endpoint omits services[] + metadata, so hydrate the top agents via
+  // getAgent(id) — otherwise every agent yields zero service rows. Hydrate a wider
+  // head when filtering MPP so it can be applied to the detail after hydration.
+  const headCount = flags.mpp ? Math.min(scored.length, limit * 3) : limit;
+  const head = scored.slice(0, headCount);
+  const hydrated = await Promise.all(
+    head.map(({ a }) => deps.explorer.getAgent(a.id).then((r) => r.data).catch(() => a)),
+  );
+  let pairs = head.map((s, i) => ({ a: hydrated[i] ?? s.a, result: s.result }));
+  if (flags.mpp) pairs = pairs.filter(({ a }) => deriveCapabilities(a).mpp);
+  pairs = pairs.slice(0, limit);
+
   const rows: string[][] = [];
   const jsonRows: unknown[] = [];
-  for (const { a, result } of scored) {
+  for (const { a, result } of pairs) {
     const caps = deriveCapabilities(a);
     const ids = agentIds(deps.config, a.id);
     const services = buildSelfDeclaredFields({ services: a.services ?? null }).services;
@@ -444,7 +457,7 @@ async function cmdServices(deps: ToolDeps, flags: CliFlags): Promise<number> {
     out(`No services found on ${deps.config.network}.`);
     return 0;
   }
-  out(`${rows.length} service(s) across ${scored.length} agent(s) on ${deps.config.network}:`);
+  out(`${rows.length} service(s) across ${pairs.length} agent(s) on ${deps.config.network}:`);
   out();
   out(table(["AGENT", "SCORE", "X402", "MPP", "SERVICE (self-declared)", "ENDPOINT (self-declared)"], rows));
   return 0;

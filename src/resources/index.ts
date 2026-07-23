@@ -46,15 +46,25 @@ import { scoreAgent } from "../lib/ranking.js";
 import {
   buildStellarId,
   buildCaip2Id,
+  validWalletOrNull,
   G_ADDRESS_RE,
 } from "../lib/identifier.js";
 import {
   CAPS,
   buildSelfDeclaredFields,
+  sanitizeNullable,
   sanitizeText,
   safe,
   serverText,
 } from "../lib/sanitize.js";
+// Reuse the SAME typed adapters the tool layer uses so the resource and tool
+// surfaces cannot diverge (capabilities/reputation/sanitization) — the file's
+// stated "same canonical AgentProfile (no divergence)" contract.
+import {
+  agentScores,
+  declaredReputation,
+  deriveCapabilities,
+} from "../tools/shared.js";
 
 // ---------------------------------------------------------------------------
 // Dependencies (structurally identical to server.ts `Deps`; accepted by value
@@ -103,33 +113,20 @@ async function fetchAgentsPaged(
   return [...byId.values()];
 }
 
-/** Typed capability flags from an AgentResponse (mpp lives on the index sig). */
+/** Typed capability flags — delegates to the shared adapter (reduced shape). */
 function capsFrom(agent: AgentResponse): Capabilities & { hasServices: boolean } {
-  const services = agent.services ?? [];
-  return {
-    x402: Boolean(agent.x402Enabled),
-    mpp: Boolean(agent["mpp"] ?? agent["mppEnabled"]),
-    hasServices: Boolean(agent.hasServices ?? services.length > 0),
-  };
+  const c = deriveCapabilities(agent);
+  return { x402: c.x402, mpp: c.mpp, hasServices: c.hasServices };
 }
 
-/** Declared reputation from the explorer's pre-joined scores (detail or list). */
+/** Declared reputation — delegates to the shared adapter (nulls avg when unrated). */
 function declaredFrom(agent: AgentResponse): DeclaredReputation {
-  const average = agent.scores?.average ?? agent.avgScore ?? null;
-  return {
-    average: average == null ? null : Number(average),
-    feedbackCount: agent.scores?.feedbackCount ?? agent.feedbackCount ?? 0,
-    uniqueClients: agent.scores?.uniqueClients ?? agent.uniqueClients ?? 0,
-  };
+  return declaredReputation(agent);
 }
 
-function scoresFrom(agent: AgentResponse, declared: DeclaredReputation): AgentScores {
-  return {
-    average: declared.average,
-    total: agent.scores?.total ?? agent.totalScore ?? null,
-    feedbackCount: declared.feedbackCount,
-    uniqueClients: declared.uniqueClients,
-  };
+/** Joined score summary — delegates to the shared adapter. */
+function scoresFrom(agent: AgentResponse, _declared: DeclaredReputation): AgentScores {
+  return agentScores(agent);
 }
 
 /**
@@ -145,8 +142,10 @@ async function buildProfile(deps: ResourceDeps, id: number): Promise<AgentProfil
 
   const identity = config.stellar.contracts.identity;
   const declared = declaredFrom(agent);
-  const caps = capsFrom(agent);
-  const supportedTrust = agent.supportedTrust ?? [];
+  // Full typed capabilities (supportedTrust sanitized + length-bounded here,
+  // exactly as the tool path does — the resource JSON must not carry raw text).
+  const caps = deriveCapabilities(agent);
+  const supportedTrust = caps.supportedTrust;
 
   const verification = await verifier.verifyAgainst(id, declared);
 
@@ -178,15 +177,10 @@ async function buildProfile(deps: ResourceDeps, id: number): Promise<AgentProfil
     stellarId: buildStellarId(config.network, identity, id),
     caip2Id: buildCaip2Id(config.network, identity, id),
     network: config.network,
-    owner: agent.owner,
-    wallet: agent.wallet ?? null,
-    agentUri: agent.agentUri ?? null,
-    capabilities: {
-      x402: caps.x402,
-      mpp: caps.mpp,
-      hasServices: caps.hasServices,
-      supportedTrust,
-    },
+    owner: sanitizeText(agent.owner, 60),
+    wallet: validWalletOrNull(agent.wallet),
+    agentUri: sanitizeNullable(agent.agentUri, CAPS.serviceEndpoint),
+    capabilities: caps,
     supportedTrust,
     scores: scoresFrom(agent, declared),
     verification,
@@ -707,11 +701,13 @@ function firstVar(v: string | string[] | undefined): string {
 
 function parseIdVar(v: string | string[] | undefined): number {
   const raw = firstVar(v).trim();
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < 0) {
+  // Digit-only + safe-integer gate. Number() alone accepts "0x1f" (→31),
+  // "1e3" (→1000) and "" (→0), silently fetching the wrong agent instead of
+  // erroring on a malformed URI.
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
     throw new Error(`Invalid agent id in resource URI: '${raw}' (expected a non-negative integer)`);
   }
-  return n;
+  return Number(raw);
 }
 
 function parseAddressVar(v: string | string[] | undefined): string {

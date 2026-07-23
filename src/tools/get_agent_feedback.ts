@@ -9,7 +9,7 @@
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ValidationError } from "@trionlabs/stellar8004";
+import { ValidationError, type FeedbackResponse } from "@trionlabs/stellar8004";
 import { resolveAgentId, STELLAR_ID_RE } from "../lib/identifier.js";
 import { safe, selfDeclared, serverText } from "../lib/sanitize.js";
 import {
@@ -67,12 +67,26 @@ export function registerGetAgentFeedback(server: McpServer, deps: ToolDeps): voi
         throw new ValidationError(`Could not resolve agent reference '${String(args.agent)}'.`);
       }
 
-      const params: { page?: number; tag?: string } = { page: args.page };
-      if (args.tag) params.tag = args.tag;
-      const raw = (await deps.explorer.getFeedback(id, params)).data ?? [];
-
-      const visible = args.includeRevoked ? raw : raw.filter((f) => !f.isRevoked);
-      const revokedHidden = args.includeRevoked ? 0 : raw.length - visible.length;
+      // The SDK getFeedback only accepts {page, tag}; `limit` is ours to honor.
+      // Page from args.page until we have `limit` VISIBLE (post-revoke-filter)
+      // rows or the indexer signals no more pages. Previously `limit` was ignored
+      // (capped by the server page size) and page/limit windows misaligned.
+      const MAX_PAGES = 20;
+      const visible: FeedbackResponse[] = [];
+      let revokedHidden = 0;
+      for (let p = args.page, fetched = 0; fetched < MAX_PAGES; p++, fetched++) {
+        const res = await deps.explorer.getFeedback(id, args.tag ? { page: p, tag: args.tag } : { page: p });
+        const batch = res.data ?? [];
+        for (const f of batch) {
+          if (!args.includeRevoked && f.isRevoked) {
+            revokedHidden++;
+            continue;
+          }
+          visible.push(f);
+        }
+        if (visible.length >= args.limit) break;
+        if (!res.meta?.pagination?.hasMore || batch.length === 0) break;
+      }
       const entries = visible.slice(0, args.limit).map(toSafeFeedback);
 
       const ids = agentIds(deps.config, id);

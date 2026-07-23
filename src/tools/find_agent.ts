@@ -12,6 +12,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { parseQuery } from "../lib/nlparse.js";
 import type { GetAgentsParams } from "../lib/explorer.js";
 import {
+  filterMpp,
   handler,
   rankAndVerify,
   summarizeRanked,
@@ -24,11 +25,13 @@ import {
   VERIFY_TOP_K,
   type ToolDeps,
 } from "./shared.js";
-import { deriveCapabilities } from "./shared.js";
 import { zInterpretedQuery, zRankedAgent } from "./schemas.js";
 
 const CANDIDATE_PAGE_SIZE = 50;
-const CANDIDATE_PAGES = 2;
+// 4 pages of headroom for the client-side stem match (the explorer has no
+// server-side text filter). The fetch stops early when the indexer signals no
+// more pages, so this costs nothing until the registry outgrows ~2 pages.
+const CANDIDATE_PAGES = 4;
 
 const inputShape = {
   query: z
@@ -96,8 +99,8 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
         match: "any",
       });
 
-      // MPP has no server-side filter → apply client-side.
-      if (effective.mpp) pool = pool.filter((a) => deriveCapabilities(a).mpp);
+      // MPP has no server-side filter and is not on list rows → hydrate + filter.
+      if (effective.mpp) pool = await filterMpp(deps, pool);
 
       const rows = await rankAndVerify(deps, pool, {
         weights: deps.config.weights,

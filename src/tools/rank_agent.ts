@@ -15,7 +15,7 @@ import { parseQuery } from "../lib/nlparse.js";
 import { normalizeWeights } from "../lib/ranking.js";
 import type { GetAgentsParams } from "../lib/explorer.js";
 import {
-  deriveCapabilities,
+  filterMpp,
   handler,
   rankAndVerify,
   summarizeRanked,
@@ -101,7 +101,7 @@ async function gatherByQuery(deps: ToolDeps, query: string): Promise<AgentRespon
     pages: 2,
     match: "any",
   });
-  if (parsed.filters.mpp) pool = pool.filter((a) => deriveCapabilities(a).mpp);
+  if (parsed.filters.mpp) pool = await filterMpp(deps, pool);
   return pool;
 }
 

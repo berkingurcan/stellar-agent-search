@@ -52,11 +52,26 @@ export function buildCaip2Id(network: Network, identity: string, id: number): st
 }
 
 function parseId(raw: string): number {
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < 0) {
+  // Digit-only guard first: Number("0x1f")/Number("1e3")/Number("") would all
+  // coerce to a plausible-looking integer otherwise. isSafeInteger rejects
+  // oversized ids (>2^53) that lose precision.
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
     throw new Error(`Invalid agent id '${raw}' (expected a non-negative integer)`);
   }
-  return n;
+  return Number(raw);
+}
+
+/**
+ * Return a wallet string ONLY if it is a valid Stellar G- or C-address, else
+ * null. The on-chain `wallet` field is owner-authored and unvalidated by the
+ * indexer, so it is untrusted: never emit it as a "typed/verified" value, an
+ * A2A card field documented "safe to interpolate", or an x402 payTo unless it
+ * actually parses as an address. (Callers previously passed it through raw.)
+ */
+export function validWalletOrNull(wallet: unknown): string | null {
+  if (typeof wallet !== "string") return null;
+  const w = wallet.trim();
+  return G_ADDRESS_RE.test(w) || C_ADDRESS_RE.test(w) ? w : null;
 }
 
 /**

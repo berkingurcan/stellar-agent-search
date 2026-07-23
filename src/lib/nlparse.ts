@@ -89,7 +89,10 @@ const RE_TRUST_VALIDATION = /\b(validation|validated|validator[s]?)\b/;
 const RE_TRUST_TEE = /\b(tee|enclave|attest\w*)\b/;
 
 // Numeric score: "score/rated/rating ... N" or "above/over/at least N".
-const RE_SCORE_NUM = /(?:score|scored|rated|rating)\D{0,12}(\d{1,3})/;
+// The \b anchors are essential: without them "curated"/"operated"/"generated"
+// all contain "rated" and would inject a spurious minScore (e.g. "a curated
+// feed of 100 sources" → minScore=100, silently emptying discovery).
+const RE_SCORE_NUM = /\b(?:score|scored|rated|rating)\b\D{0,12}(\d{1,3})/;
 const RE_SCORE_ABOVE = /\b(?:above|over|at\s+least|minimum|min)\s+(\d{1,3})\b/;
 // Qualitative reputation phrases → implied minScore.
 const RE_SCORE_TOP = /\b(top[- ]?rated|best|excellent|highest[- ]?rated)\b/;

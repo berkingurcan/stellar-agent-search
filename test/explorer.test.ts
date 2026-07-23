@@ -221,6 +221,23 @@ describe("findAgents discovery primitive", () => {
     expect(hits.map((a) => a.id).sort()).toEqual([1, 2]);
   });
 
+  it("match:'all' still REQUIRES a meaningful 2-char token (ai/ml/db)", async () => {
+    // Dropping <3-char stems made match:'all' stop requiring "ai", so "ai agent"
+    // wrongly matched a non-AI "Payment Agent". Both tokens must be required.
+    const mock = new MockFetch(() =>
+      jsonResponse(
+        agentPage([
+          agent(1, "AI Agent", "an ai assistant"),
+          agent(2, "Payment Agent", "handles payments"),
+        ]),
+      ),
+    );
+    const svc = new ExplorerService(config, { fetch: mock.fn });
+
+    const hits = await svc.findAgents("ai agent", { match: "all" });
+    expect(hits.map((a) => a.id)).toEqual([1]); // #2 lacks "ai"
+  });
+
   it("match:'all' requires every token; match:'any' requires one", async () => {
     const mock = new MockFetch(() =>
       jsonResponse(

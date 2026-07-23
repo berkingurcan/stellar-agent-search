@@ -179,7 +179,11 @@ export class ReputationVerifier {
   private async allClients(agentId: number): Promise<{ clients: string[]; truncated: boolean }> {
     const client = this.client!;
     const out: string[] = [];
-    for (let start = 0; start < CLIENTS_HARD_CAP; start += CLIENTS_PAGE) {
+    // `<=` so we make one probe fetch AT the cap boundary: an agent with exactly
+    // CLIENTS_HARD_CAP clients returns full pages up to the cap, then an empty
+    // page at `start == CLIENTS_HARD_CAP` proving the set is complete. Without the
+    // probe, exactly-cap client sets were wrongly flagged truncated → "unavailable".
+    for (let start = 0; start <= CLIENTS_HARD_CAP; start += CLIENTS_PAGE) {
       const tx = await client.get_clients_paginated({
         agent_id: agentId,
         start,
@@ -233,9 +237,28 @@ export class ReputationVerifier {
       return { status: "unavailable", declared, checkedAt };
     }
 
-    const dAvg = declared.average == null ? null : Math.abs(declared.average - onchain.average);
     const dCount = Math.abs(declared.feedbackCount - onchain.count);
     const dUnique = Math.abs(declared.uniqueClients - onchain.uniqueClients);
+
+    // Nothing declared to verify: an agent with no declared reputation cannot be
+    // "verified". A null declared average previously forced avgWithin=true, so an
+    // unrated agent (declared null, on-chain empty) was wrongly reported
+    // "verified" and earned the +P_VERIFIED rank bonus. Distinguish the two real
+    // cases instead: on-chain is also empty → "unavailable" (no signal either
+    // side); on-chain HAS feedback the indexer doesn't → "mismatch".
+    if (declared.average == null) {
+      const chainEmpty =
+        onchain.average === 0 && onchain.count === 0 && onchain.uniqueClients === 0;
+      return {
+        status: chainEmpty ? "unavailable" : "mismatch",
+        declared,
+        verified: onchain,
+        deltas: { average: 0, count: dCount, uniqueClients: dUnique },
+        checkedAt,
+      };
+    }
+
+    const dAvg = Math.abs(declared.average - onchain.average);
 
     // Drive verified/mismatch off the AVERAGE (the reputation signal) and the
     // UNIQUE-CLIENT count (both should agree). The on-chain `get_summary.count` has
@@ -243,7 +266,7 @@ export class ReputationVerifier {
     // the CLIENT list), so a feedbackCount-vs-count mismatch is common on a healthy
     // agent (e.g. Scrapper: 8 feedback / 4 clients). Report it as an informational
     // delta only — never a mismatch trigger — to avoid false negatives.
-    const avgWithin = dAvg == null ? true : dAvg <= this.tolerance.average;
+    const avgWithin = dAvg <= this.tolerance.average;
     const uniqueWithin = dUnique <= this.tolerance.uniqueClients;
     const within = avgWithin && uniqueWithin;
 
@@ -251,7 +274,7 @@ export class ReputationVerifier {
       status: within ? "verified" : "mismatch",
       declared,
       verified: onchain,
-      deltas: { average: dAvg ?? 0, count: dCount, uniqueClients: dUnique },
+      deltas: { average: dAvg, count: dCount, uniqueClients: dUnique },
       checkedAt,
     };
   }

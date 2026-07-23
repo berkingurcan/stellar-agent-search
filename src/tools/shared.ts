@@ -31,6 +31,7 @@ import {
 import {
   buildCaip2Id,
   buildStellarId,
+  validWalletOrNull,
 } from "../lib/identifier.js";
 import {
   buildSelfDeclaredFields,
@@ -106,14 +107,27 @@ export const VERIFY_TOP_K = 5;
 // AgentResponse → typed domain adapters
 // ---------------------------------------------------------------------------
 
-/** Best-effort MPP detection (the explorer has no first-class MPP field). */
+/**
+ * Best-effort MPP detection (the explorer has no first-class MPP field).
+ * NOTE: `metadata` is only present on DETAIL responses, so this returns false
+ * for list rows — callers that filter on MPP must hydrate first (see filterMpp).
+ */
 function deriveMpp(a: AgentResponse): boolean {
   const rec = a as Record<string, unknown>;
   if (typeof rec.mpp === "boolean") return rec.mpp;
   if (typeof rec.mppEnabled === "boolean") return rec.mppEnabled;
   const md = a.metadata;
   if (md) {
-    for (const k of Object.keys(md)) if (k.toLowerCase().includes("mpp")) return true;
+    for (const [k, v] of Object.entries(md)) {
+      const key = k.toLowerCase();
+      // Match a whole known key and honor its VALUE. The old `key.includes("mpp")`
+      // returned true for any substring hit ("tempPrice" contains "mpp") and
+      // ignored the value, so {"mppEnabled":"false"} still enabled MPP.
+      if (key === "mpp" || key === "mppenabled" || key === "mpp_enabled") {
+        const val = String(v).trim().toLowerCase();
+        return val === "true" || val === "1" || val === "yes" || val === "enabled";
+      }
+    }
   }
   return false;
 }
@@ -237,7 +251,7 @@ export function toRankedRow(
     caip2Id: ids.caip2Id,
     network: config.network,
     owner: sanitizeText(a.owner, 60),
-    wallet: a.wallet ?? null,
+    wallet: validWalletOrNull(a.wallet),
     capabilities: caps,
     supportedTrust: caps.supportedTrust,
     scores: agentScores(a),
@@ -315,6 +329,42 @@ export async function rankAndVerify(
       includeBreakdown: opts.includeBreakdown,
     }),
   );
+}
+
+/** Bound on how many candidates filterMpp will hydrate per call (RPC/HTTP cost). */
+export const MPP_HYDRATE_CAP = 40;
+
+/**
+ * Filter a candidate pool to MPP-capable agents.
+ *
+ * MPP is only derivable from the detail-only `metadata` field, so filtering it
+ * over LIST rows (deriveMpp === false for every one) silently emptied the pool
+ * and returned "No matching agents found". Instead: cheaply pre-rank the pool
+ * (declared-only), hydrate the top `cap` candidates via getAgent, and filter on
+ * the hydrated detail. Bounded so cost stays predictable; if the pool exceeds
+ * the cap the tail is left unchecked (logged by the explorer layer).
+ */
+export async function filterMpp(
+  deps: ToolDeps,
+  pool: AgentResponse[],
+  cap = MPP_HYDRATE_CAP,
+): Promise<AgentResponse[]> {
+  if (pool.length === 0) return pool;
+  const pre = rankAgents(
+    pool.map((a) => toRankInput(a)),
+    { weights: deps.config.weights, scoreMax: deps.config.scoreMax, sortBy: "relevance" },
+  );
+  const byId = new Map(pool.map((a) => [a.id, a] as const));
+  const head = pre.slice(0, cap).map((r) => byId.get(r.id)!);
+  const hydrated = await Promise.all(
+    head.map((a) =>
+      deps.explorer
+        .getAgent(a.id)
+        .then((r) => r.data)
+        .catch(() => a),
+    ),
+  );
+  return hydrated.filter((a) => deriveCapabilities(a).mpp);
 }
 
 // ---------------------------------------------------------------------------

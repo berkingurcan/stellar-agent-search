@@ -242,6 +242,7 @@ export class ExplorerService {
     const q = (query ?? "").trim();
 
     const collected: AgentResponse[] = [];
+    let moreAvailable = false;
     for (let page = 1; page <= pages; page++) {
       // NOTE: we deliberately do NOT forward the free-text query to the explorer's
       // `search=` param. It substring-matches the raw stored name poorly — e.g.
@@ -252,8 +253,19 @@ export class ExplorerService {
       const res = await this.getAgents(params);
       const batch = res.data ?? [];
       collected.push(...batch);
+      moreAvailable = Boolean(res.meta?.pagination?.hasMore) && batch.length > 0;
       // Stop early when the explorer signals no more pages.
-      if (!res.meta?.pagination?.hasMore || batch.length === 0) break;
+      if (!moreAvailable) break;
+    }
+    // Legibility for the known scale limit: because there is no server-side text
+    // filter, we only ever inspect the first `pages` pages in the explorer's
+    // default order. If more pages exist, a matching agent past this window is
+    // NOT seen — surface it rather than silently under-returning.
+    if (moreAvailable) {
+      this.logger.debug("findAgents fetch window exhausted; more pages available (unscanned)", {
+        pages,
+        scanned: collected.length,
+      });
     }
 
     // De-dupe by id (pages can overlap under concurrent indexer writes).
@@ -266,7 +278,10 @@ export class ExplorerService {
     const tokens = tokenize(q);
     if (tokens.length === 0) return agents;
     const mode = opts.match ?? "all";
-    const stems = tokens.map(stem).filter((s) => s.length >= 3);
+    // Keep 2-char stems (ai/ml/os/db/3d/io): dropping them made match:"all" stop
+    // REQUIRING those tokens, so "ai agent" wrongly matched "Payment Agent".
+    // tokenize() already floors at length 2, and stem() leaves short tokens as-is.
+    const stems = tokens.map(stem).filter((s) => s.length >= 2);
     const qLower = q.toLowerCase();
 
     const matchesAgent = (a: AgentResponse, requireAll: boolean): boolean => {
