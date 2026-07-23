@@ -4,9 +4,10 @@
 stellar-agent-mcp` with no subcommand — because the binary starts the MCP server automatically when its
 stdin is not a TTY. Below are copy-paste configs for each supported client.
 
-All clients share the same `mcpServers` JSON shape **except VS Code**, which uses a `servers` key.
+All clients share the same `mcpServers` JSON shape **except VS Code** (`servers` key) and **Codex CLI**
+(TOML `[mcp_servers.*]`).
 
-The canonical stdio entry (works for Claude Code, Cursor, Windsurf, Claude Desktop):
+The canonical stdio entry (works for Claude Code, Cursor, Windsurf, Claude Desktop, Gemini CLI):
 
 ```json
 {
@@ -176,6 +177,52 @@ Manage it from the Cascade panel's **Manage plugins / raw config** button.
 
 ---
 
+## Codex CLI
+
+Codex uses **TOML**, not JSON, and the table is `[mcp_servers.<name>]` (snake_case `mcp_servers`, not
+`mcpServers`).
+
+**File:** `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.stellar-agent]
+command = "npx"
+args = ["-y", "stellar-agent-mcp"]
+env = { STELLAR_NETWORK = "mainnet" }
+```
+
+Or add it from the CLI:
+
+```bash
+codex mcp add stellar-agent -- npx -y stellar-agent-mcp
+```
+
+> A JSON `mcpServers` block does nothing in Codex — the table name must be `mcp_servers`.
+
+---
+
+## Gemini CLI
+
+**File:** `~/.gemini/settings.json` (global) or project `.gemini/settings.json`. Same `mcpServers` shape as
+Claude Code, plus an optional `trust` field that skips the per-call approval prompt:
+
+```json
+{
+  "mcpServers": {
+    "stellar-agent": {
+      "command": "npx",
+      "args": ["-y", "stellar-agent-mcp"],
+      "env": { "STELLAR_NETWORK": "mainnet" },
+      "trust": true
+    }
+  }
+}
+```
+
+> Every tool here is read-only and keyless, so `trust: true` is safe.
+
+---
+
 ## Config matrix
 
 | Client | Config file | Root key | Client-specific fields | Register via |
@@ -186,6 +233,8 @@ Manage it from the Cascade panel's **Manage plugins / raw config** button.
 | Cline | `cline_mcp_settings.json` | `mcpServers` | `disabled`, `autoApprove` | MCP Servers → Configure |
 | Claude Desktop | `claude_desktop_config.json` | `mcpServers` | `type` | edit file |
 | VS Code | `.vscode/mcp.json` | **`servers`** | `${input:}` | edit file |
+| Codex CLI | `~/.codex/config.toml` | **`mcp_servers`** (TOML) | — | `codex mcp add stellar-agent -- npx -y stellar-agent-mcp` |
+| Gemini CLI | `~/.gemini/settings.json` | `mcpServers` | `trust` | edit file |
 
 ---
 

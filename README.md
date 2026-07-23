@@ -49,6 +49,7 @@ All three MCP primitives, all read-only:
 | | `get_agents_by_owner` | Every agent an owner operates |
 | | `get_agent_feedback` | Recent on-chain reviews (sanitized, labeled) |
 | | `verify_reputation` | Standalone declared-vs-on-chain reputation check |
+| | `get_agent_card` | Portable A2A AgentCard (v0.3) + x402 hint — the interop surface |
 | | `get_registry_stats` | Aggregate registry statistics |
 | | `get_registry_health` | Per-registry indexer staleness |
 

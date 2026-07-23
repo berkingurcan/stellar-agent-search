@@ -36,9 +36,10 @@ in this session, **install the server now** using the [Install](#install-do-this
 
 - The **`stellar-agent-mcp`** npm package: a read-only stdio MCP server wrapping `@trionlabs/stellar8004`'s
   `ExplorerClient` (registry reads) + Soroban `ReputationClient` bindings (trust-minimized on-chain verification).
-- **12 read tools.** The 4 primary (documented below) — `find_agent`, `rank_agent`, `get_agent_profile`,
-  `list_services` — plus 8 complete-core tools: `list_agents`, `leaderboard`, `resolve_agent`,
-  `get_agents_by_owner`, `get_agent_feedback`, `verify_reputation`, `get_registry_stats`, `get_registry_health`.
+- **13 read tools.** The 4 primary (documented below) — `find_agent`, `rank_agent`, `get_agent_profile`,
+  `list_services` — plus 9 complete-core tools: `list_agents`, `leaderboard`, `resolve_agent`,
+  `get_agents_by_owner`, `get_agent_feedback`, `verify_reputation`, `get_agent_card` (A2A card),
+  `get_registry_stats`, `get_registry_health`.
   (Your client's `/mcp` panel will list all 12.)
 - **Resources** under the `stellar8004://` scheme (`@`-mentionable context) and **Prompts** (slash-command workflows) —
   see [Resources](#resources) and [Prompts](#prompts).

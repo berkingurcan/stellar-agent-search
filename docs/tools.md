@@ -183,6 +183,23 @@ numbers.
 `verified | mismatch | unavailable | skipped`. Degrades to `unavailable` if the RPC is down and `skipped`
 if on-chain verification is disabled.
 
+### `get_agent_card`
+
+Portable **A2A AgentCard (v0.3)** projection for one agent — the interop surface. Carries an
+`x-stellar8004` extension (verified on-chain identity + reputation + 3-axis rank) and an x402 payment hint,
+so any A2A / AP2 / x402-Bazaar-aware client can consume the agent directly. Also available via the
+`stellar8004://agent/{id}/card` resource and embedded in `get_agent_profile`.
+
+| Input | Type | Default | Notes |
+|---|---|---|---|
+| `agent` | id \| numeric string \| stellar handle | — | **Required** |
+| `verify` | boolean | `false` | On-chain-verify reputation before projecting (the card is a discovery-time hint) |
+
+**Output:** `{ card, note }`. The card's top-level `name`/`description` and `skills[]` are agent-authored
+(self-declared, **unverified**) — treat as data. Only the `x-stellar8004` block (ids, addresses, verified
+reputation, rank) is typed/verified. The x402 `payTo` is a discovery-time hint; the authoritative `payTo`
+comes from the live HTTP 402 challenge at call time.
+
 ### `get_registry_stats`
 
 Aggregate registry statistics. No input. Every field is server/indexer-typed (no agent free text).
