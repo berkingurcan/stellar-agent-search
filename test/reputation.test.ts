@@ -72,11 +72,32 @@ describe("verifyAgainst: rated agent (rep sanity)", () => {
 
   it("absorbs integer-vs-fractional average (contract 96 vs indexer 96.75) → 'verified'", async () => {
     // The real Scrapper case: on-chain get_summary is integer-scaled (96) while
-    // the indexer reports 96.75. Δ0.75 must be within tolerance (=1.0), not a
-    // false mismatch. Verified live on mainnet during the R7 fix.
+    // the indexer reports 96.75. The 0.75 gap is a representation artifact, not a
+    // mismatch — declared is floored to the on-chain integer precision at compare
+    // time. Verified live on mainnet during the R7 fix.
     const v = new ReputationVerifier(cfg, { client: fakeClient(C(4), 96) });
     const declared: DeclaredReputation = { average: 96.75, feedbackCount: 8, uniqueClients: 4 };
     const res = await v.verifyAgainst(10, declared);
     expect(res.status).toBe("verified");
+  });
+
+  it("still catches a real >=1-point divergence after normalization", async () => {
+    // 94 declared vs 96 on-chain (both plausibly integer-scaled) is a genuine
+    // 2-point gap — floor(94)=94 vs 96 → mismatch, not masked by normalization.
+    const v = new ReputationVerifier(cfg, { client: fakeClient(C(4), 96) });
+    const declared: DeclaredReputation = { average: 94, feedbackCount: 8, uniqueClients: 4 };
+    const res = await v.verifyAgainst(11, declared);
+    expect(res.status).toBe("mismatch");
+  });
+});
+
+describe("construction: R7 no-account read path (rep-#11 guard)", () => {
+  it("constructs a real ReputationClient with no publicKey and stays enabled", () => {
+    // Guards the R7 fix: omitting publicKey must still yield an ENABLED verifier
+    // (the SDK fabricates NULL_ACCOUNT internally, no getAccount lookup). If a
+    // future SDK version requires a source account at construction, this fails
+    // loudly here instead of silently degrading every verify to "unavailable".
+    const v = new ReputationVerifier(cfg); // no injected client → real binding path
+    expect(v.isEnabled).toBe(true);
   });
 });

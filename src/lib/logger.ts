@@ -38,14 +38,18 @@ export interface LoggerOptions {
   write?: (line: string) => void;
 }
 
+/** Type guard: is `v` a valid log level string? */
+export function isLogLevel(v: unknown): v is LogLevel {
+  return v === "debug" || v === "info" || v === "warn" || v === "error";
+}
+
 function envLevel(): LogLevel {
   const v = (process.env.LOG_LEVEL ?? "").trim().toLowerCase();
-  if (v === "debug" || v === "info" || v === "warn" || v === "error") return v;
-  return "info";
+  return isLogLevel(v) ? v : "info";
 }
 
 export class Logger {
-  private readonly level: LogLevel;
+  private level: LogLevel;
   private readonly base: LogFields;
   private readonly clock: Clock;
   private readonly write: (line: string) => void;
@@ -55,6 +59,11 @@ export class Logger {
     this.base = opts.base ?? {};
     this.clock = opts.clock ?? systemClock;
     this.write = opts.write ?? ((line) => process.stderr.write(line + "\n"));
+  }
+
+  /** Set the minimum emit level. Children created AFTER this inherit it. */
+  setLevel(level: LogLevel): void {
+    this.level = level;
   }
 
   /** Derive a child logger with additional bound fields (e.g. requestId). */
