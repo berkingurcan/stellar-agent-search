@@ -12,32 +12,18 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ValidationError } from "@trionlabs/stellar8004";
-import { resolveAgentId, STELLAR_ID_RE, validWalletOrNull } from "../lib/identifier.js";
-import { scoreAgent } from "../lib/ranking.js";
+import { resolveAgentId, STELLAR_ID_RE } from "../lib/identifier.js";
 import { toAgentCard } from "../lib/agentcard.js";
+import { safe, selfDeclared, serverText } from "../lib/sanitize.js";
 import {
-  buildSelfDeclaredFields,
-  safe,
-  sanitizeNullable,
-  sanitizeText,
-  selfDeclared,
-  serverText,
-  CAPS,
-} from "../lib/sanitize.js";
-import {
-  agentIds,
-  agentScores,
-  declaredReputation,
-  deriveCapabilities,
+  buildAgentProfile,
   handler,
   toolResult,
   toSafeFeedback,
-  toRankInput,
   READ_ANNOTATIONS,
   type ToolDeps,
 } from "./shared.js";
 import { zAgentProfile, zSelfDeclaredSlot, zVerification } from "./schemas.js";
-import type { AgentProfile } from "../types.js";
 
 const inputShape = {
   agent: z
@@ -82,54 +68,21 @@ export function registerGetAgentProfile(server: McpServer, deps: ToolDeps): void
 
       // Fetch detail and feedback concurrently: feedback depends only on `id`, so
       // firing it up front overlaps it with the slow multi-RPC on-chain verify
-      // instead of serializing behind it.
+      // (which buildAgentProfile runs) instead of serializing behind it.
       const [detailRes, feedbackRes] = await Promise.all([
         deps.explorer.getAgent(id),
         args.feedbackLimit > 0
           ? deps.explorer.getFeedback(id, { page: 1 })
           : Promise.resolve(null),
       ]);
-      const detail = detailRes.data;
-      const declared = declaredReputation(detail);
-      const verification = await deps.verifier.verifyAgainst(id, declared, { skip: !args.verify });
 
-      const result = scoreAgent(toRankInput(detail, verification.status), {
-        weights: deps.config.weights,
-        scoreMax: deps.config.scoreMax,
+      const { profile, verification, caps, declared } = await buildAgentProfile(deps, id, {
+        verify: args.verify,
+        detail: detailRes.data,
       });
-
-      const ids = agentIds(deps.config, id);
-      const caps = deriveCapabilities(detail);
-
-      const profile: AgentProfile = {
-        id,
-        stellarId: ids.stellarId,
-        caip2Id: ids.caip2Id,
-        network: deps.config.network,
-        owner: sanitizeText(detail.owner, 60),
-        wallet: validWalletOrNull(detail.wallet),
-        agentUri: sanitizeNullable(detail.agentUri, CAPS.serviceEndpoint),
-        capabilities: caps,
-        supportedTrust: caps.supportedTrust,
-        scores: agentScores(detail),
-        verification,
-        verified: verification.status === "verified",
-        flags: result.flags,
-        rank: result,
-        createdAt: detail.createdAt ?? null,
-        txHash: detail.txHash ?? null,
-        resolveStatus: detail.resolveStatus ?? null,
-        selfDeclared: buildSelfDeclaredFields({
-          name: detail.name ?? null,
-          description: detail.description ?? null,
-          image: detail.image ?? null,
-          services: detail.services ?? null,
-          metadata: detail.metadata ?? null,
-        }),
-      };
+      const rank = profile.rank!; // buildAgentProfile always sets it
 
       // Recent feedback: drop revoked, cap to feedbackLimit, sanitize + label.
-      // (Already fetched concurrently above.)
       let recent: ReturnType<typeof toSafeFeedback>[] = [];
       if (feedbackRes) {
         recent = (feedbackRes.data ?? [])
@@ -145,8 +98,8 @@ export function registerGetAgentProfile(server: McpServer, deps: ToolDeps): void
         verification.status,
       )}, declared avg ${avg == null ? safe("n/a") : avg} over ${declared.feedbackCount} feedback(s), ${
         declared.uniqueClients
-      } unique client(s). Score ${result.score100}/100, confidence ${Math.round(
-        result.confidence * 100,
+      } unique client(s). Score ${rank.score100}/100, confidence ${Math.round(
+        rank.confidence * 100,
       )}%. x402=${caps.x402}, mpp=${caps.mpp}, services=${profile.selfDeclared.services.length}.`;
 
       return toolResult(text, {

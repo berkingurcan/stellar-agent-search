@@ -245,6 +245,38 @@ export function scoreAgent(input: RankInput, opts: ScoreOptions = {}): RankResul
   };
 }
 
+/**
+ * Round every float in a RankResult to `dp` decimals for clean OUTPUT (avoids
+ * 0.4285714285714 spew in structuredContent). Apply only at projection time —
+ * internal scoring/sorting uses full precision. score100 is already an integer.
+ */
+export function roundRankResult(r: RankResult, dp = 4): RankResult {
+  const f = (n: number): number => {
+    const p = 10 ** dp;
+    return Math.round(n * p) / p;
+  };
+  const ax = (a: RankAxis): RankAxis => ({
+    raw: a.raw === null ? null : f(a.raw),
+    norm: f(a.norm),
+    weight: f(a.weight),
+    weighted: f(a.weighted),
+  });
+  return {
+    quality: ax(r.quality),
+    volume: ax(r.volume),
+    breadth: ax(r.breadth),
+    paymentBonus: f(r.paymentBonus),
+    endpointBonus: f(r.endpointBonus),
+    verifiedBonus: f(r.verifiedBonus),
+    base: f(r.base),
+    score: f(r.score),
+    score100: r.score100,
+    sortScore: f(r.sortScore),
+    confidence: f(r.confidence),
+    flags: r.flags,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Ranking (score + stable sort)
 // ---------------------------------------------------------------------------

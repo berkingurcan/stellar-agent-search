@@ -42,7 +42,7 @@ import type {
 import { ExplorerService } from "../lib/explorer.js";
 import { ReputationVerifier } from "../lib/reputation.js";
 import { toAgentCard } from "../lib/agentcard.js";
-import { scoreAgent } from "../lib/ranking.js";
+import { scoreAgent, roundRankResult } from "../lib/ranking.js";
 import {
   buildStellarId,
   buildCaip2Id,
@@ -186,7 +186,7 @@ async function buildProfile(deps: ResourceDeps, id: number): Promise<AgentProfil
     verification,
     verified: verification.status === "verified",
     flags: rank.flags,
-    rank,
+    rank: roundRankResult(rank),
     createdAt: agent.createdAt ?? null,
     txHash: agent.txHash ?? null,
     resolveStatus: agent.resolveStatus ?? null,
