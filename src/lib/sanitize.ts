@@ -44,6 +44,9 @@ const TRUNCATION_MARK = "…[truncated]";
  *   - DEL + C1 controls (0x7F-0x9F)
  *   - zero-width space/joiners + word-joiner + invisible ops (0x200B-0x200F,
  *     0x2060-0x2064)
+ *   - line/paragraph separators (0x2028-0x2029) — real line terminators in JS
+ *     and many renderers, so they must be stripped alongside \r\n or untrusted
+ *     text could still fake multi-line structure / escape a labeled blockquote
  *   - bidi embeddings/overrides + isolates (0x202A-0x202E, 0x2066-0x2069)
  *   - BOM / zero-width no-break space (0xFEFF)
  */
@@ -53,6 +56,7 @@ const UNSAFE_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x0e, 0x1f],
   [0x7f, 0x9f],
   [0x200b, 0x200f],
+  [0x2028, 0x2029],
   [0x202a, 0x202e],
   [0x2060, 0x2064],
   [0x2066, 0x2069],

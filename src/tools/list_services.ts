@@ -72,21 +72,23 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
       annotations: { title: "List Services", ...READ_ANNOTATIONS },
     },
     handler<Args>(async (args) => {
-      const params: GetAgentsParams = {
+      const filters: Omit<NonNullable<GetAgentsParams>, "search" | "page"> = {
         hasServices: true,
-        page: args.page,
-        limit: args.limit,
       };
-      if (args.search) params.search = args.search;
-      if (args.x402 !== undefined) params.x402 = args.x402;
-      if (args.trust !== undefined) params.trust = args.trust;
-      if (args.minScore !== undefined) params.minScore = args.minScore;
+      if (args.x402 !== undefined) filters.x402 = args.x402;
+      if (args.trust !== undefined) filters.trust = args.trust;
+      if (args.minScore !== undefined) filters.minScore = args.minScore;
 
-      let agents = (await deps.explorer.getAgents(params)).data ?? [];
-      if (args.mpp) agents = agents.filter((a) => deriveCapabilities(a).mpp);
+      // Discover via the same stem-matching primitive find_agent uses: the
+      // explorer `search=` substring param misses "Scrapper" for "scraper".
+      const pool = await deps.explorer.findAgents(args.search ?? "", {
+        filters,
+        pages: 2,
+        match: "any",
+      });
 
       // Score declared-only (fast) and order agents by score before fan-out.
-      const scored = agents
+      const scored = pool
         .map((a) => ({
           a,
           result: scoreAgent(toRankInput(a), {
@@ -96,12 +98,15 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
         }))
         .sort((x, y) => y.result.score100 - x.result.score100);
 
-      // The explorer LIST endpoint omits services[] (endpoints live only in the
-      // per-agent detail), so hydrate the top agents via getAgent(id) — bounded by
-      // `limit` and cached — otherwise every row would carry zero callable endpoints.
-      const top = scored.slice(0, args.limit);
+      // The explorer LIST endpoint omits services[] AND metadata (both live only
+      // in the per-agent detail), so hydrate the top agents via getAgent(id) —
+      // otherwise every row would carry zero callable endpoints. When `mpp` is
+      // requested we hydrate a wider head so we can filter on the detail-only MPP
+      // signal AFTER hydration (filtering list rows would drop everything).
+      const headCount = args.mpp ? Math.min(scored.length, args.limit * 3) : args.limit;
+      const head = scored.slice(0, headCount);
       const hydrated = await Promise.all(
-        top.map(({ a }) =>
+        head.map(({ a }) =>
           deps.explorer
             .getAgent(a.id)
             .then((r) => r.data)
@@ -109,10 +114,12 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
         ),
       );
 
+      let pairs = head.map((s, i) => ({ a: hydrated[i] ?? s.a, result: s.result }));
+      if (args.mpp) pairs = pairs.filter(({ a }) => deriveCapabilities(a).mpp);
+      pairs = pairs.slice(0, args.limit);
+
       const rows = [];
-      for (let i = 0; i < top.length; i++) {
-        const a = hydrated[i] ?? top[i].a;
-        const result = top[i].result;
+      for (const { a, result } of pairs) {
         const caps = deriveCapabilities(a);
         const ids = agentIds(deps.config, a.id);
         const services = buildSelfDeclaredFields({ services: a.services ?? null }).services;
@@ -134,7 +141,7 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
         }
       }
 
-      const text = serverText`${rows.length} service(s) across ${top.length} agent(s) on ${safe(
+      const text = serverText`${rows.length} service(s) across ${pairs.length} agent(s) on ${safe(
         deps.config.network,
       )} (page ${args.page}).`;
 

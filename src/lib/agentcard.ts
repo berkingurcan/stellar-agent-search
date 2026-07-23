@@ -203,8 +203,11 @@ export function toAgentCard(profile: AgentProfile, options: AgentCardOptions = {
   const transport = options.preferredTransport ?? DEFAULT_TRANSPORT;
 
   const services = profile.selfDeclared.services;
-  const primaryEndpoint = services[0]?.endpoint ?? profile.agentUri ?? null;
-  const version = services[0]?.version ?? UNKNOWN_VERSION;
+  // `||` not `??`: sanitizeService always yields a string endpoint ("" when the
+  // service omitted one), and "" is not nullish, so `?? agentUri` would leave the
+  // card url / x402 `resource` empty instead of falling back to the agent's URI.
+  const primaryEndpoint = services[0]?.endpoint || profile.agentUri || null;
+  const version = services[0]?.version || UNKNOWN_VERSION;
 
   const extensions: AgentCardExtension[] = [];
   if (profile.capabilities.x402) {

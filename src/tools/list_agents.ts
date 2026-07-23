@@ -10,7 +10,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { GetAgentsParams } from "../lib/explorer.js";
 import {
-  deriveCapabilities,
+  filterMpp,
   handler,
   rankAndVerify,
   summarizeRanked,
@@ -66,7 +66,7 @@ export function registerListAgents(server: McpServer, deps: ToolDeps): void {
       if (args.minScore !== undefined) params.minScore = args.minScore;
 
       let agents = (await deps.explorer.getAgents(params)).data ?? [];
-      if (args.mpp) agents = agents.filter((a) => deriveCapabilities(a).mpp);
+      if (args.mpp) agents = await filterMpp(deps, agents);
 
       const rows = await rankAndVerify(deps, agents, {
         weights: deps.config.weights,

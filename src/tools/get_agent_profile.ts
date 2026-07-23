@@ -12,7 +12,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ValidationError } from "@trionlabs/stellar8004";
-import { resolveAgentId, STELLAR_ID_RE } from "../lib/identifier.js";
+import { resolveAgentId, STELLAR_ID_RE, validWalletOrNull } from "../lib/identifier.js";
 import { scoreAgent } from "../lib/ranking.js";
 import { toAgentCard } from "../lib/agentcard.js";
 import {
@@ -80,7 +80,16 @@ export function registerGetAgentProfile(server: McpServer, deps: ToolDeps): void
         throw new ValidationError(`Could not resolve agent reference '${String(args.agent)}'.`);
       }
 
-      const detail = (await deps.explorer.getAgent(id)).data;
+      // Fetch detail and feedback concurrently: feedback depends only on `id`, so
+      // firing it up front overlaps it with the slow multi-RPC on-chain verify
+      // instead of serializing behind it.
+      const [detailRes, feedbackRes] = await Promise.all([
+        deps.explorer.getAgent(id),
+        args.feedbackLimit > 0
+          ? deps.explorer.getFeedback(id, { page: 1 })
+          : Promise.resolve(null),
+      ]);
+      const detail = detailRes.data;
       const declared = declaredReputation(detail);
       const verification = await deps.verifier.verifyAgainst(id, declared, { skip: !args.verify });
 
@@ -98,7 +107,7 @@ export function registerGetAgentProfile(server: McpServer, deps: ToolDeps): void
         caip2Id: ids.caip2Id,
         network: deps.config.network,
         owner: sanitizeText(detail.owner, 60),
-        wallet: detail.wallet ?? null,
+        wallet: validWalletOrNull(detail.wallet),
         agentUri: sanitizeNullable(detail.agentUri, CAPS.serviceEndpoint),
         capabilities: caps,
         supportedTrust: caps.supportedTrust,
@@ -120,10 +129,10 @@ export function registerGetAgentProfile(server: McpServer, deps: ToolDeps): void
       };
 
       // Recent feedback: drop revoked, cap to feedbackLimit, sanitize + label.
+      // (Already fetched concurrently above.)
       let recent: ReturnType<typeof toSafeFeedback>[] = [];
-      if (args.feedbackLimit > 0) {
-        const fb = (await deps.explorer.getFeedback(id, { page: 1 })).data ?? [];
-        recent = fb
+      if (feedbackRes) {
+        recent = (feedbackRes.data ?? [])
           .filter((f) => !f.isRevoked)
           .slice(0, args.feedbackLimit)
           .map(toSafeFeedback);
