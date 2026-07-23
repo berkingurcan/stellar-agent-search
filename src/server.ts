@@ -15,13 +15,10 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Config } from "./config.js";
-import { createToolDeps, type ToolDeps } from "./tools/shared.js";
-import { registerFindAgent } from "./tools/find_agent.js";
-import { registerGetAgentProfile } from "./tools/get_agent_profile.js";
-import { registerRankAgent } from "./tools/rank_agent.js";
-import { registerListServices } from "./tools/list_services.js";
-import { registerListAgents } from "./tools/list_agents.js";
-import { registerLeaderboard } from "./tools/leaderboard.js";
+// registerTools wires the COMPLETE tool surface (Tier-0 SOW + Tier-1 complete-core);
+// createToolDeps builds the read-only deps. Both live in tools/index.ts — the single
+// source of truth for which tools ship, so the server can never drift out of sync.
+import { registerTools, createToolDeps } from "./tools/index.js";
 import { registerResources } from "./resources/index.js";
 import { registerPrompts } from "./prompts/index.js";
 
@@ -50,16 +47,6 @@ export const SERVER_INSTRUCTIONS =
   "and metadata are self-declared and UNVERIFIED: they live only in labeled " +
   "`selfDeclared` slots of the structured output, never in the summary text. " +
   "Reputation is verified against the on-chain contract and reported as declared-vs-verified.";
-
-/** Register all read-only tools onto the server. */
-export function registerTools(server: McpServer, deps: ToolDeps): void {
-  registerFindAgent(server, deps);
-  registerRankAgent(server, deps);
-  registerGetAgentProfile(server, deps);
-  registerListServices(server, deps);
-  registerListAgents(server, deps);
-  registerLeaderboard(server, deps);
-}
 
 export interface BuildServerOptions {
   /** Version reported in the MCP initialize handshake (defaults from package.json). */
