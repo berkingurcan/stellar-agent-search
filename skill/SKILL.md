@@ -36,7 +36,10 @@ in this session, **install the server now** using the [Install](#install-do-this
 
 - The **`stellar-agent-mcp`** npm package: a read-only stdio MCP server wrapping `@trionlabs/stellar8004`'s
   `ExplorerClient` (registry reads) + Soroban `ReputationClient` bindings (trust-minimized on-chain verification).
-- **4 tools:** `find_agent`, `rank_agent`, `get_agent_profile`, `list_services`.
+- **12 read tools.** The 4 primary (documented below) — `find_agent`, `rank_agent`, `get_agent_profile`,
+  `list_services` — plus 8 complete-core tools: `list_agents`, `leaderboard`, `resolve_agent`,
+  `get_agents_by_owner`, `get_agent_feedback`, `verify_reputation`, `get_registry_stats`, `get_registry_health`.
+  (Your client's `/mcp` panel will list all 12.)
 - **Resources** under the `stellar8004://` scheme (`@`-mentionable context) and **Prompts** (slash-command workflows) —
   see [Resources](#resources) and [Prompts](#prompts).
 - Runs via `npx` with **no global install** and **no API key**.
@@ -80,6 +83,42 @@ Most stdio MCP clients share the identical `command` / `args` / `env` triple und
 - **Cursor:** `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global).
 - **Claude Desktop:** `claude_desktop_config.json`.
 - **VS Code:** `.vscode/mcp.json` — but VS Code uses a **`servers`** key (not `mcpServers`); the inner triple is the same.
+
+### OpenAI Codex CLI (TOML, not JSON)
+
+Codex reads MCP servers from `~/.codex/config.toml` under `[mcp_servers.<name>]` — note the **underscore**;
+`[mcp.servers.…]` (a dot) silently never connects:
+
+```toml
+[mcp_servers.stellar-agent]
+command = "npx"
+args = ["-y", "stellar-agent-mcp"]
+env = { STELLAR_NETWORK = "mainnet" }
+```
+
+Or the one-liner (same `--` rule as Claude Code; `--env` goes **before** `--`):
+
+```bash
+codex mcp add stellar-agent --env STELLAR_NETWORK=mainnet -- npx -y stellar-agent-mcp
+```
+
+### Gemini CLI
+
+Add to `~/.gemini/settings.json` under `mcpServers` (same JSON triple), with `trust: true` to auto-approve the
+read-only tools:
+
+```json
+{
+  "mcpServers": {
+    "stellar-agent": {
+      "command": "npx",
+      "args": ["-y", "stellar-agent-mcp"],
+      "env": { "STELLAR_NETWORK": "mainnet" },
+      "trust": true
+    }
+  }
+}
+```
 
 ### End-to-end onboarding (what a fresh environment runs)
 
@@ -203,7 +242,9 @@ reputation, that is a separate, deliberate step that lives outside this server:
 | Var | Values | Default | Meaning |
 |---|---|---|---|
 | `STELLAR_NETWORK` | `mainnet` \| `testnet` | `mainnet` | Which network's registry the server reads. |
-| `STELLAR_EXPLORER_URL` | URL | explorer default | Explorer API base URL (`ExplorerClient`). Override only for self-hosted explorers. |
+| `EXPLORER_BASE_URL` | URL | `https://stellar8004.com` | Explorer API base URL (`ExplorerClient`). Override only for a self-hosted explorer. |
+| `STELLAR_RPC_URL` | URL | network default | Soroban RPC used for on-chain reputation verification. |
+| `VERIFY_ONCHAIN` | `true` \| `false` | `true` | Toggle the declared-vs-on-chain reputation verification path. |
 
 Mainnet contracts read by the server — Identity `CBGPDCJIHQ32G42BE7F2CIT3YW6XRN5ED6GQJHCRZSNAYH6TGMCL6X35`,
 Reputation `CBOIAIMMWAXI57OATLX6BWVDQLCC4YU55HV6MZXFRP6CBSGAMXSTEPPA`,
