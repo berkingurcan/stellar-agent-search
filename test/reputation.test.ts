@@ -69,4 +69,14 @@ describe("verifyAgainst: rated agent (rep sanity)", () => {
     const res = await v.verifyAgainst(4, declared);
     expect(res.status).toBe("mismatch");
   });
+
+  it("absorbs integer-vs-fractional average (contract 96 vs indexer 96.75) → 'verified'", async () => {
+    // The real Scrapper case: on-chain get_summary is integer-scaled (96) while
+    // the indexer reports 96.75. Δ0.75 must be within tolerance (=1.0), not a
+    // false mismatch. Verified live on mainnet during the R7 fix.
+    const v = new ReputationVerifier(cfg, { client: fakeClient(C(4), 96) });
+    const declared: DeclaredReputation = { average: 96.75, feedbackCount: 8, uniqueClients: 4 };
+    const res = await v.verifyAgainst(10, declared);
+    expect(res.status).toBe("verified");
+  });
 });
