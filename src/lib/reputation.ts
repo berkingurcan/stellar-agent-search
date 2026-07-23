@@ -36,16 +36,24 @@ import { log, type Logger } from "./logger.js";
 import { TtlCache } from "./explorer.js";
 
 /**
- * Read-only simulation source. Soroban view simulation needs a source account;
- * for pure reads any address works as the origin (no signature is produced).
- * Overridable via RANK_SIM_SOURCE. Defaults to the canonical all-zero account.
+ * Read-only simulation source.
+ *
+ * The SDK's contract client resolves the simulation origin as:
+ *     options.publicKey ? server.getAccount(options.publicKey)
+ *                       : new Account(NULL_ACCOUNT, "0")
+ * (@stellar/stellar-sdk contract/utils.ts). Passing ANY publicKey forces a live
+ * getAccount() lookup, which public Soroban RPCs reject with "account not found"
+ * for any not-fully-resolvable account — the all-zero account, and in practice
+ * even sponsored owner accounts. That silently disabled on-chain verification on
+ * the default mainnet config (it degraded every read to "unavailable").
+ *
+ * So we OMIT publicKey: the SDK then simulates from its built-in fabricated
+ * NULL_ACCOUNT (sequence 0) WITHOUT calling getAccount, and read simulation runs
+ * with no funded account. (Verified live: get_clients_paginated(agent) returns
+ * the real client set against https://mainnet.sorobanrpc.com.) A real funded
+ * account can still be supplied via RANK_SIM_SOURCE to override, but it is not
+ * required. Reads never sign, so the fabricated account is never a problem.
  */
-// The all-zero ed25519 account — a valid 56-char strkey. (The previous literal was
-// 55 chars and failed StrKey validation, so EVERY verify threw before any RPC call.)
-// NOTE: read simulation still needs a source the RPC can resolve; a public Soroban
-// RPC may reject a never-funded source with "account not found", in which case we
-// degrade-closed to declared-only. Override with RANK_SIM_SOURCE = a funded account.
-const DEFAULT_SIM_SOURCE = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
 /** Client-set pagination page size and hard cap (bounds get_summary cost). */
 const CLIENTS_PAGE = 100;
@@ -61,7 +69,12 @@ export interface VerifyTolerance {
   count: number;
   uniqueClients: number;
 }
-export const DEFAULT_TOLERANCE: VerifyTolerance = { average: 0.5, count: 1, uniqueClients: 1 };
+// average tolerance 1.0: the on-chain get_summary average is INTEGER-scaled
+// (summary_value_decimals=0 → e.g. 96) while the indexer reports a FRACTIONAL
+// mean (e.g. 96.75), so a healthy agent differs by up to <1.0 purely from the
+// contract truncating. 0.5 was too tight and false-flagged such agents. Verified
+// live: Scrapper on-chain 96 vs declared 96.75 (Δ0.75) is a match, not a mismatch.
+export const DEFAULT_TOLERANCE: VerifyTolerance = { average: 1.0, count: 1, uniqueClients: 1 };
 
 export interface ReputationVerifierOptions {
   clock?: Clock;
@@ -96,12 +109,15 @@ export class ReputationVerifier {
     } else if (opts.client) {
       this.client = opts.client;
     } else {
-      const simSource = opts.simSource ?? (process.env.RANK_SIM_SOURCE?.trim() || DEFAULT_SIM_SOURCE);
+      // Only pass a publicKey when the operator explicitly provides a funded
+      // source; otherwise omit it so the SDK uses its fabricated NULL_ACCOUNT and
+      // skips the getAccount() lookup that would otherwise fail on public RPCs.
+      const simSource = opts.simSource ?? process.env.RANK_SIM_SOURCE?.trim();
       this.client = new ReputationClient({
         contractId: cfg.stellar.contracts.reputation,
         networkPassphrase: cfg.stellar.networkPassphrase,
         rpcUrl: cfg.rpcUrl,
-        publicKey: simSource,
+        ...(simSource ? { publicKey: simSource } : {}),
         allowHttp: cfg.rpcUrl.startsWith("http://"),
       });
     }
