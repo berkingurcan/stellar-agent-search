@@ -303,6 +303,22 @@ async function discoverScrapper(cfg: DemoConfig): Promise<ResolvedAgent> {
   if (process.env.PATH) childEnv.PATH = process.env.PATH; // let the child resolve `node`
   if (cfg.explorerBaseUrl) childEnv.EXPLORER_BASE_URL = cfg.explorerBaseUrl;
   if (process.env.STELLAR_RPC_URL) childEnv.STELLAR_RPC_URL = process.env.STELLAR_RPC_URL;
+  // Forward NON-SECRET network/proxy/TLS config so the read-only server can still reach
+  // the explorer + Soroban RPC behind a corporate or sandboxed HTTPS proxy. These are not
+  // secrets; the secret assertion below still guarantees STELLAR_PRIVATE_KEY / X402_API_KEY
+  // are NEVER placed in the child env.
+  for (const k of [
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "no_proxy",
+    "NODE_EXTRA_CA_CERTS",
+  ]) {
+    const v = process.env[k];
+    if (v) childEnv[k] = v;
+  }
   // Defense-in-depth assertion: never leak secrets to the read-only server.
   for (const k of ["STELLAR_PRIVATE_KEY", "X402_API_KEY"]) {
     if (k in childEnv) throw new Error(`refusing to spawn MCP server with secret ${k} in its env`);
