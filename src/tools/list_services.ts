@@ -80,10 +80,12 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
       if (args.minScore !== undefined) filters.minScore = args.minScore;
 
       // Discover via the same stem-matching primitive find_agent uses: the
-      // explorer `search=` substring param misses "Scrapper" for "scraper".
+      // explorer `search=` substring param misses "Scrapper" for "scraper". Fetch
+      // enough candidate pages to cover the requested `page` offset below.
+      const neededPages = Math.min(10, Math.ceil((args.page * args.limit) / 50) + 1);
       const pool = await deps.explorer.findAgents(args.search ?? "", {
         filters,
-        pages: 2,
+        pages: neededPages,
         match: "any",
       });
 
@@ -98,13 +100,15 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
         }))
         .sort((x, y) => y.result.score100 - x.result.score100);
 
+      // `page` selects a window of `limit` agents over the score-ranked pool.
       // The explorer LIST endpoint omits services[] AND metadata (both live only
-      // in the per-agent detail), so hydrate the top agents via getAgent(id) —
+      // in the per-agent detail), so hydrate the windowed agents via getAgent(id) —
       // otherwise every row would carry zero callable endpoints. When `mpp` is
-      // requested we hydrate a wider head so we can filter on the detail-only MPP
+      // requested we hydrate a wider window so we can filter on the detail-only MPP
       // signal AFTER hydration (filtering list rows would drop everything).
-      const headCount = args.mpp ? Math.min(scored.length, args.limit * 3) : args.limit;
-      const head = scored.slice(0, headCount);
+      const offset = (args.page - 1) * args.limit;
+      const window = args.mpp ? args.limit * 3 : args.limit;
+      const head = scored.slice(offset, offset + window);
       const hydrated = await Promise.all(
         head.map(({ a }) =>
           deps.explorer
@@ -119,10 +123,13 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
       pairs = pairs.slice(0, args.limit);
 
       const rows = [];
+      let agentsWithServices = 0; // count only agents that actually contribute a row
       for (const { a, result } of pairs) {
+        const services = buildSelfDeclaredFields({ services: a.services ?? null }).services;
+        if (services.length === 0) continue;
+        agentsWithServices++;
         const caps = deriveCapabilities(a);
         const ids = agentIds(deps.config, a.id);
-        const services = buildSelfDeclaredFields({ services: a.services ?? null }).services;
         for (const svc of services) {
           rows.push({
             agentId: a.id,
@@ -141,7 +148,7 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
         }
       }
 
-      const text = serverText`${rows.length} service(s) across ${pairs.length} agent(s) on ${safe(
+      const text = serverText`${rows.length} service(s) across ${agentsWithServices} agent(s) on ${safe(
         deps.config.network,
       )} (page ${args.page}).`;
 

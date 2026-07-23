@@ -419,15 +419,20 @@ async function payForService(cfg: DemoConfig, agent: ResolvedAgent): Promise<Pay
     process.stderr.write(`[pay] note: profile.wallet ${agent.wallet} != challenge payTo ${payTo} (challenge is authoritative)\n`);
   }
 
-  // 3) + 4) Sign + retry. At most one fresh-payload retry (auth-entry expiry ~60s) — never double-spend.
-  let paid = await settleOnce(client, http, url, cfg, required);
-  if (paid.status === 402) {
-    process.stderr.write("[pay] first settle rejected (likely auth expiry) — rebuilding payload once\n");
-    paid = await settleOnce(client, http, url, cfg, required);
-  }
+  // 3) + 4) Sign ONCE and submit — expect HTTP 200 with the result.
+  // We deliberately do NOT auto-resubmit on a post-payment 402: a 402 returned
+  // AFTER submitting a payment can mean the facilitator already settled on-chain
+  // but the HTTP response failed downstream, and minting a second signed payload
+  // would double-spend real USDC. Surface it for a human to inspect the ledger
+  // and re-run manually instead of silently paying twice.
+  const paid = await settleOnce(client, http, url, cfg, required);
   if (paid.status === 402) {
     const retry = http.getPaymentRequiredResponse((name) => paid.headers.get(name));
-    throw new Error(`payment rejected by facilitator: ${JSON.stringify(retry)}`);
+    throw new Error(
+      "payment not accepted (HTTP 402 after submitting payment). NOT retrying, to avoid a " +
+        "double-spend: check whether a payment settled on-chain before re-running. " +
+        `Challenge: ${JSON.stringify(retry)}`,
+    );
   }
   if (!paid.ok) throw new Error(`service error after payment: ${paid.status}`);
 
@@ -475,6 +480,28 @@ async function safeJson(res: Response): Promise<unknown> {
   } catch {
     return { raw: text.slice(0, 2000) };
   }
+}
+
+/**
+ * Did the paid call return a genuinely usable result, or a 200 with an empty /
+ * garbage body? We must NOT write a top on-chain reputation score for a failed
+ * outcome — that would corrupt the very signal this registry is about.
+ */
+function isSuccessfulResult(result: unknown): boolean {
+  if (result == null || typeof result !== "object") return false;
+  const r = result as Record<string, unknown>;
+  if ("error" in r) return false;
+  const keys = Object.keys(r);
+  // safeJson wraps a non-JSON body as { raw: "…" } — not a structured result.
+  if (keys.length === 0 || (keys.length === 1 && keys[0] === "raw")) return false;
+  // Require at least one non-empty field.
+  return keys.some((k) => {
+    const v = r[k];
+    if (v == null) return false;
+    if (typeof v === "string") return v.trim().length > 0;
+    if (Array.isArray(v)) return v.length > 0;
+    return true;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -609,14 +636,22 @@ async function main(): Promise<void> {
   console.log(`[pay] settled. payTo=${payTo} price=${price} paymentTx=${paymentTxHash}`);
   console.log(`[result] ${JSON.stringify(result).slice(0, 240)}...`);
 
-  // [5] Write on-chain reputation. Score derived from the successful outcome.
+  // [5] Write on-chain reputation. The score reflects the ACTUAL outcome — a 200
+  // with a garbage/empty body must not earn a top score.
+  const resultOk = isSuccessfulResult(result);
+  const value = resultOk ? 95 : 40;
+  if (!resultOk) {
+    process.stderr.write(
+      "[feedback] warning: paid result did not look like a valid scrape — recording a below-expectation score, not 95\n",
+    );
+  }
   const evidenceUri = `data:application/json;base64,${Buffer.from(
-    JSON.stringify({ agentId: agent.agentId, endpoint: agent.endpoint, paymentTxHash, resultOk: true, ts: startedAt }),
+    JSON.stringify({ agentId: agent.agentId, endpoint: agent.endpoint, paymentTxHash, resultOk, ts: startedAt }),
   ).toString("base64")}`;
   const feedbackTxHash = await writeFeedback(cfg, {
     agentId: agent.agentId,
-    value: 95,
-    tag1: "starred",
+    value,
+    tag1: resultOk ? "starred" : "belowExpectation",
     tag2: "successRate",
     endpoint: agent.endpoint,
     feedbackUri: evidenceUri,

@@ -26,10 +26,11 @@ import {
 } from "../tools/shared.js";
 import { scoreAgent } from "../lib/ranking.js";
 import type { GetAgentsParams } from "../lib/explorer.js";
-import { resolveAgentId } from "../lib/identifier.js";
-import { buildSelfDeclaredFields } from "../lib/sanitize.js";
+import { resolveAgentId, validWalletOrNull } from "../lib/identifier.js";
+import { buildSelfDeclaredFields, sanitizeText } from "../lib/sanitize.js";
 import { parseQuery } from "../lib/nlparse.js";
 import { classifyError } from "../lib/errors.js";
+import { log, isLogLevel } from "../lib/logger.js";
 import { NotFoundError, type AgentResponse } from "@trionlabs/stellar8004";
 import { buildServer, SERVER_NAME } from "../server.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -148,6 +149,10 @@ export function buildConfig(flags: CliFlags, baseEnv: NodeJS.ProcessEnv = proces
   if (flags.explorerUrl) env.EXPLORER_BASE_URL = flags.explorerUrl;
   if (flags.rpcUrl) env.STELLAR_RPC_URL = flags.rpcUrl;
   if (flags.noVerify) env.VERIFY_ONCHAIN = "false";
+  // Apply --log-level to the process logger before any deps (and their child
+  // loggers) are constructed. The logger reads LOG_LEVEL at import, so the flag
+  // must set the level explicitly here to take effect.
+  if (flags.logLevel && isLogLevel(flags.logLevel)) log.setLevel(flags.logLevel);
   return loadConfig(env);
 }
 
@@ -372,7 +377,7 @@ async function cmdProfile(deps: ToolDeps, flags: CliFlags): Promise<number> {
   if (flags.json) {
     out(
       JSON.stringify(
-        { id, stellarId: ids.stellarId, caip2Id: ids.caip2Id, network: deps.config.network, owner: detail.owner, wallet: detail.wallet ?? null, capabilities: caps, scores, verification, rank: result, selfDeclared: self },
+        { id, stellarId: ids.stellarId, caip2Id: ids.caip2Id, network: deps.config.network, owner: sanitizeText(detail.owner, 60), wallet: validWalletOrNull(detail.wallet), capabilities: caps, scores, verification, rank: result, selfDeclared: self },
         null,
         2,
       ),
@@ -382,8 +387,8 @@ async function cmdProfile(deps: ToolDeps, flags: CliFlags): Promise<number> {
 
   out(`Agent ${id}  (${deps.config.network})`);
   out(`  stellarId : ${ids.stellarId}`);
-  out(`  owner     : ${detail.owner}`);
-  out(`  wallet    : ${detail.wallet ?? "(none — payTo comes from the x402 challenge)"}`);
+  out(`  owner     : ${sanitizeText(detail.owner, 60)}`);
+  out(`  wallet    : ${validWalletOrNull(detail.wallet) ?? "(none — payTo comes from the x402 challenge)"}`);
   out(`  score     : ${result.score100}/100   confidence ${Math.round(result.confidence * 100)}%`);
   out(
     `  reputation: ${verification.status}` +

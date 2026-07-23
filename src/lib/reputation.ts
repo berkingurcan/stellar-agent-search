@@ -65,23 +65,28 @@ const TTL_NEGATIVE = 60_000;
 
 /** Declared-vs-on-chain tolerances (modules/01 §3, DEFAULTS.VERIFY_TOLERANCE). */
 export interface VerifyTolerance {
+  /** Max |declared − on-chain| average delta, AFTER precision-normalization. */
   average: number;
-  count: number;
+  /** Max |declared − on-chain| unique-client delta. */
   uniqueClients: number;
 }
-// average tolerance 1.0: the on-chain get_summary average is INTEGER-scaled
-// (summary_value_decimals=0 → e.g. 96) while the indexer reports a FRACTIONAL
-// mean (e.g. 96.75), so a healthy agent differs by up to <1.0 purely from the
-// contract truncating. 0.5 was too tight and false-flagged such agents. Verified
-// live: Scrapper on-chain 96 vs declared 96.75 (Δ0.75) is a match, not a mismatch.
-export const DEFAULT_TOLERANCE: VerifyTolerance = { average: 1.0, count: 1, uniqueClients: 1 };
+// Tolerances stay TIGHT (0.5): the integer-vs-fractional average representation
+// gap is neutralized precisely at compare time (see verifyAgainst) rather than by
+// globally loosening the mismatch threshold — a loose absolute constant both masks
+// sub-point inflation and scales wrong when RANK_SCORE_MAX is not 100.
+export const DEFAULT_TOLERANCE: VerifyTolerance = { average: 0.5, uniqueClients: 1 };
 
 export interface ReputationVerifierOptions {
   clock?: Clock;
   logger?: Logger;
   /** Inject a pre-built binding (tests). */
   client?: ReputationClient;
-  /** Read-simulation source G-address (else RANK_SIM_SOURCE / default). */
+  /**
+   * Read-simulation source G-address. Falls back to RANK_SIM_SOURCE; if neither
+   * is set, publicKey is omitted so the SDK simulates from its fabricated
+   * NULL_ACCOUNT with no getAccount lookup (the default — no funded account
+   * needed). Only provide this to force a specific funded source.
+   */
   simSource?: string;
   tolerance?: Partial<VerifyTolerance>;
   maxCacheEntries?: number;
@@ -274,7 +279,18 @@ export class ReputationVerifier {
       };
     }
 
-    const dAvg = Math.abs(declared.average - onchain.average);
+    // Precision-normalize before comparing. The on-chain get_summary average is
+    // commonly integer-scaled (the contract truncates the mean, decimals=0 → e.g.
+    // 96) while the indexer reports a fractional mean (96.75). Comparing the raw
+    // values would false-flag a healthy agent by up to <1.0. When the on-chain
+    // value is an integer, compare the declared value floored to that same integer
+    // precision (the fractional part is not independently verifiable against an
+    // integer summary); otherwise compare directly. This keeps the tolerance TIGHT
+    // and scale-independent while still catching a real ≥1-point divergence.
+    const declaredForCmp = Number.isInteger(onchain.average)
+      ? Math.floor(declared.average)
+      : declared.average;
+    const dAvg = Math.abs(declaredForCmp - onchain.average);
 
     // Drive verified/mismatch off the AVERAGE (the reputation signal) and the
     // UNIQUE-CLIENT count (both should agree). The on-chain `get_summary.count` has
