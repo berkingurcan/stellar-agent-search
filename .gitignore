@@ -8,3 +8,6 @@ coverage/
 
 # transient probe/diagnostic scripts created by tooling — never real source (src is *.ts, build is dist/)
 /*.mjs
+
+# x402 demo evidence output (examples/x402-demo.ts writes run-<timestamp>.json)
+examples/run-*.json
