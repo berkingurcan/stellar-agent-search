@@ -243,8 +243,12 @@ export class ExplorerService {
 
     const collected: AgentResponse[] = [];
     for (let page = 1; page <= pages; page++) {
+      // NOTE: we deliberately do NOT forward the free-text query to the explorer's
+      // `search=` param. It substring-matches the raw stored name poorly — e.g.
+      // "scraper" misses the "Scrapper" agent (CONTEXT §7) — and would hand back an
+      // empty server set we could only ever narrow. Fetch by the STRUCTURED filters
+      // (x402/trust/minScore/hasServices) only, then stem-match client-side below.
       const params: GetAgentsParams = { ...filters, page };
-      if (q) params.search = q;
       const res = await this.getAgents(params);
       const batch = res.data ?? [];
       collected.push(...batch);
@@ -262,15 +266,28 @@ export class ExplorerService {
     const tokens = tokenize(q);
     if (tokens.length === 0) return agents;
     const mode = opts.match ?? "all";
+    const stems = tokens.map(stem).filter((s) => s.length >= 3);
+    const qLower = q.toLowerCase();
 
-    return agents.filter((a) => {
-      const haystack = `${a.name ?? ""} ${a.description ?? ""}`.toLowerCase();
-      // Whole-query substring is always a match, regardless of mode.
-      if (haystack.includes(q.toLowerCase())) return true;
-      return mode === "any"
-        ? tokens.some((t) => haystack.includes(t))
-        : tokens.every((t) => haystack.includes(t));
-    });
+    const matchesAgent = (a: AgentResponse, requireAll: boolean): boolean => {
+      const svcText = (a.services ?? [])
+        .map((s) => `${s?.name ?? ""} ${s?.endpoint ?? ""}`)
+        .join(" ");
+      const haystack = `${a.name ?? ""} ${a.description ?? ""} ${svcText}`.toLowerCase();
+      // Whole-query substring is always a match.
+      if (haystack.includes(qLower)) return true;
+      if (stems.length === 0) return false;
+      // Stem-aware token match so "scraper"/"scraping"/"scrapes" (stem "scrap")
+      // all hit the "Scrapper"/"Scrapes" agent, not just the literal spelling.
+      const hit = (s: string) => haystack.includes(s);
+      return requireAll ? stems.every(hit) : stems.some(hit);
+    };
+
+    // Strict (all tokens) first; if that empties the set, relax to any-token so a
+    // multi-word query still surfaces the closest agents rather than nothing.
+    const strict = agents.filter((a) => matchesAgent(a, mode === "all"));
+    if (strict.length > 0 || mode === "any") return strict;
+    return agents.filter((a) => matchesAgent(a, false));
   }
 }
 
@@ -280,4 +297,18 @@ function tokenize(query: string): string[] {
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter((t) => t.length >= 2);
+}
+
+/**
+ * Crude English stem: strip a common trailing suffix down to a root of ≥3 chars.
+ * Used for substring matching against the RAW haystack, so a stemmed query token
+ * ("scrap" from "scraper"/"scraping") still hits an unstemmed on-chain name
+ * ("Scrapper", "Scrapes"). Deliberately loose — discovery ranks results after.
+ */
+export function stem(token: string): string {
+  const t = token.toLowerCase();
+  for (const suf of ["ping", "ning", "ging", "ing", "pers", "per", "ers", "er", "es", "ed", "s"]) {
+    if (t.endsWith(suf) && t.length - suf.length >= 3) return t.slice(0, t.length - suf.length);
+  }
+  return t;
 }

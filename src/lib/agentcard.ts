@@ -140,8 +140,21 @@ const DEFAULT_TRANSPORT = "HTTP+JSON";
 /** Emitted when no service declares a version; explicit placeholder, not real. */
 const UNKNOWN_VERSION = "0.0.0";
 
-const X402_EXTENSION_URI = "https://stellar8004.com/ext/x402";
-const MPP_EXTENSION_URI = "https://stellar8004.com/ext/mpp";
+// Canonical a2a-x402 extension URI so A2A / AP2 / x402-Bazaar clients actually
+// RECOGNIZE this agent's payment method. (Was a placeholder stellar8004.com URI
+// that no cross-ecosystem client could resolve — critique 2, finding #2.)
+const X402_EXTENSION_URI = "https://github.com/google-a2a/a2a-x402/v0.1";
+const MPP_EXTENSION_URI = "https://stellar8004.com/ext/mpp"; // no cross-ecosystem std yet
+/** USDC SEP-41/SAC contract per network — the `asset` in x402 PaymentRequirements. */
+const USDC_SAC: Record<string, string> = {
+  mainnet: "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+  testnet: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+};
+/** Display network → CAIP-2 chain id the x402 layer uses. */
+const CAIP2_BY_NETWORK: Record<string, string> = {
+  mainnet: "stellar:pubnet",
+  testnet: "stellar:testnet",
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -195,10 +208,27 @@ export function toAgentCard(profile: AgentProfile, options: AgentCardOptions = {
 
   const extensions: AgentCardExtension[] = [];
   if (profile.capabilities.x402) {
+    const caip2 = CAIP2_BY_NETWORK[profile.network] ?? profile.network;
     extensions.push({
       uri: X402_EXTENSION_URI,
-      description: "Accepts x402 (USDC pay-per-call) payments.",
+      description: "Accepts x402 (USDC pay-per-call) payments on Stellar.",
       required: false,
+      // a2a-x402 PaymentRequirements so an A2A/AP2 client can pay without a prior
+      // 402 round-trip. NOTE: on Stellar 8004 the agent-level wallet is frequently
+      // empty; the AUTHORITATIVE payTo is the one returned in the live HTTP 402
+      // challenge at call time — this block is a discovery-time hint.
+      params: {
+        accepts: [
+          {
+            scheme: "exact",
+            network: caip2,
+            asset: USDC_SAC[profile.network] ?? null,
+            payTo: profile.wallet,
+            resource: primaryEndpoint,
+            maxTimeoutSeconds: 60,
+          },
+        ],
+      },
     });
   }
   if (profile.capabilities.mpp) {

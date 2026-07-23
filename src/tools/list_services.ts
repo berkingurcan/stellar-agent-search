@@ -96,8 +96,23 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
         }))
         .sort((x, y) => y.result.score100 - x.result.score100);
 
+      // The explorer LIST endpoint omits services[] (endpoints live only in the
+      // per-agent detail), so hydrate the top agents via getAgent(id) — bounded by
+      // `limit` and cached — otherwise every row would carry zero callable endpoints.
+      const top = scored.slice(0, args.limit);
+      const hydrated = await Promise.all(
+        top.map(({ a }) =>
+          deps.explorer
+            .getAgent(a.id)
+            .then((r) => r.data)
+            .catch(() => a),
+        ),
+      );
+
       const rows = [];
-      for (const { a, result } of scored) {
+      for (let i = 0; i < top.length; i++) {
+        const a = hydrated[i] ?? top[i].a;
+        const result = top[i].result;
         const caps = deriveCapabilities(a);
         const ids = agentIds(deps.config, a.id);
         const services = buildSelfDeclaredFields({ services: a.services ?? null }).services;
@@ -119,7 +134,7 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
         }
       }
 
-      const text = serverText`${rows.length} service(s) across ${scored.length} agent(s) on ${safe(
+      const text = serverText`${rows.length} service(s) across ${top.length} agent(s) on ${safe(
         deps.config.network,
       )} (page ${args.page}).`;
 

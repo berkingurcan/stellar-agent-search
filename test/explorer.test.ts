@@ -8,9 +8,10 @@
  *   1. TTL cache        — repeated identical reads hit fetch once, then re-fetch
  *                         after the TTL lapses (driven by a manual clock).
  *   2. single-flight    — concurrent identical reads collapse to ONE fetch.
- *   3. findAgents()     — discovery uses getAgents({search}) (path /api/v1/agents),
- *                         NEVER the weak /api/v1/search, and filters client-side
- *                         over name/description; multi-page fetch honors hasMore.
+ *   3. findAgents()     — discovery fetches getAgents by STRUCTURED filters (path
+ *                         /api/v1/agents; NOT the weak /api/v1/search and NOT the
+ *                         server `search` param) then STEM-matches client-side over
+ *                         name/description/services; multi-page fetch honors hasMore.
  *
  * Runs fully offline in CI.
  */
@@ -169,8 +170,27 @@ describe("findAgents discovery primitive", () => {
 
     expect(mock.paths()).toContain("/api/v1/agents");
     expect(mock.paths().some((p) => p.includes("/search"))).toBe(false);
-    // The query rides along as the `search` param on the agents endpoint.
-    expect(mock.calls[0].searchParams.get("search")).toBe("scraper");
+    // The query is NOT forwarded as the server `search` param (it substring-matches
+    // the stored name poorly); matching happens client-side over the candidates.
+    expect(mock.calls[0].searchParams.get("search")).toBeNull();
+  });
+
+  it("stem-matches so 'scraper'/'scraping' finds the 'Scrapper' agent (flagship gap)", async () => {
+    // The real flagship is literally "Scrapper" / "Scrapes URLs…"; a correct-spelling
+    // query MUST still find it (the R24 don't-embarrass-the-demo gate, at the tool's
+    // own primitive). The prior code forwarded search= and returned [].
+    const mock = new MockFetch(() =>
+      jsonResponse(
+        agentPage([
+          agent(10, "Scrapper Agent", "Scrapes URLs and returns structured data"),
+          agent(2, "Translator", "language translation"),
+        ]),
+      ),
+    );
+    const svc = new ExplorerService(config, { fetch: mock.fn });
+
+    expect((await svc.findAgents("scraper")).map((a) => a.id)).toEqual([10]);
+    expect((await svc.findAgents("web scraping")).map((a) => a.id)).toEqual([10]);
   });
 
   it("filters client-side over name/description (explorer substring match is weak)", async () => {

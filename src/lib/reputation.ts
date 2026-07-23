@@ -40,7 +40,12 @@ import { TtlCache } from "./explorer.js";
  * for pure reads any address works as the origin (no signature is produced).
  * Overridable via RANK_SIM_SOURCE. Defaults to the canonical all-zero account.
  */
-const DEFAULT_SIM_SOURCE = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+// The all-zero ed25519 account — a valid 56-char strkey. (The previous literal was
+// 55 chars and failed StrKey validation, so EVERY verify threw before any RPC call.)
+// NOTE: read simulation still needs a source the RPC can resolve; a public Soroban
+// RPC may reject a never-funded source with "account not found", in which case we
+// degrade-closed to declared-only. Override with RANK_SIM_SOURCE = a funded account.
+const DEFAULT_SIM_SOURCE = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
 /** Client-set pagination page size and hard cap (bounds get_summary cost). */
 const CLIENTS_PAGE = 100;
@@ -232,8 +237,15 @@ export class ReputationVerifier {
     const dCount = Math.abs(declared.feedbackCount - onchain.count);
     const dUnique = Math.abs(declared.uniqueClients - onchain.uniqueClients);
 
+    // Drive verified/mismatch off the AVERAGE (the reputation signal) and the
+    // UNIQUE-CLIENT count (both should agree). The on-chain `get_summary.count` has
+    // ambiguous semantics vs the indexer's per-feedback count (it aggregates over
+    // the CLIENT list), so a feedbackCount-vs-count mismatch is common on a healthy
+    // agent (e.g. Scrapper: 8 feedback / 4 clients). Report it as an informational
+    // delta only — never a mismatch trigger — to avoid false negatives.
     const avgWithin = dAvg == null ? true : dAvg <= this.tolerance.average;
-    const within = avgWithin && dCount <= this.tolerance.count && dUnique <= this.tolerance.uniqueClients;
+    const uniqueWithin = dUnique <= this.tolerance.uniqueClients;
+    const within = avgWithin && uniqueWithin;
 
     return {
       status: within ? "verified" : "mismatch",
