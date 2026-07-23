@@ -1,0 +1,7 @@
+# Never commit demo secrets or run artifacts (may embed endpoint/agent context).
+.env
+.env.local
+run*.json
+*.log
+*.key
+dist/

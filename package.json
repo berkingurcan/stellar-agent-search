@@ -1,0 +1,55 @@
+{
+  "name": "stellar-agent-mcp",
+  "version": "0.1.0",
+  "description": "Read-only MCP server + CLI to discover, rank, and inspect on-chain Stellar (stellar-8004) agents, with on-chain-verified reputation.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "stellar-agent-mcp": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "mcpName": "io.github.berkingurcan/stellar-agent-mcp",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@stellar/stellar-sdk": "^15",
+    "@trionlabs/stellar8004": "0.0.11",
+    "@x402/core": "~2.9.0",
+    "@x402/fetch": "~2.9.0",
+    "@x402/stellar": "~2.9.0",
+    "dotenv": "^16.6.1",
+    "zod": "^3"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "tsup": "^8",
+    "typescript": "^5",
+    "vitest": "^3"
+  }
+}
