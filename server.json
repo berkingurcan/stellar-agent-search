@@ -1,0 +1,48 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.berkingurcan/stellar-agent-mcp",
+  "title": "Stellar Agent MCP",
+  "description": "Read-only, keyless MCP server + CLI to discover, rank, and inspect on-chain Stellar 8004 agents (Identity/Reputation/Validation) on Stellar mainnet, with on-chain-verified reputation.",
+  "version": "0.1.0",
+  "websiteUrl": "https://github.com/berkingurcan/stellar-agent-mcp",
+  "repository": {
+    "url": "https://github.com/berkingurcan/stellar-agent-mcp",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "stellar-agent-mcp",
+      "version": "0.1.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "STELLAR_NETWORK",
+          "description": "Stellar network to target: mainnet | testnet.",
+          "isRequired": false,
+          "default": "mainnet"
+        },
+        {
+          "name": "EXPLORER_BASE_URL",
+          "description": "Override the stellar-8004 explorer API base URL.",
+          "isRequired": false
+        },
+        {
+          "name": "STELLAR_RPC_URL",
+          "description": "Override the Soroban RPC URL used for on-chain reputation verification.",
+          "isRequired": false
+        },
+        {
+          "name": "VERIFY_ONCHAIN",
+          "description": "Set to 'false' to disable on-chain reputation verification (degrade to self-declared explorer data only).",
+          "isRequired": false,
+          "default": "true"
+        }
+      ]
+    }
+  ]
+}

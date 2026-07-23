@@ -1,0 +1,59 @@
+name: Publish
+
+# Fires on a version tag (e.g. v0.1.0). Publishes to npm via Trusted Publishing
+# (OIDC — no long-lived NPM_TOKEN) with automatic Sigstore provenance, then
+# publishes the manifest to the official MCP Registry via mcp-publisher (GitHub OIDC).
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write # required for BOTH npm Trusted Publishing and MCP Registry GitHub OIDC
+
+jobs:
+  publish:
+    name: npm + MCP Registry
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # >=22.14 required for npm Trusted Publishing.
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm (Trusted Publishing needs npm >= 11.5.1)
+        run: npm install -g npm@latest
+
+      - name: Install (clean, from lockfile)
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      # Trusted Publishing: no NODE_AUTH_TOKEN / NPM_TOKEN. npm mints an OIDC
+      # token from id-token:write and auto-attaches provenance. Requires the
+      # package's Trusted Publisher to be configured on npmjs.com to point at
+      # this repo + workflow (.github/workflows/publish.yml).
+      - name: Publish to npm (provenance via OIDC)
+        run: npm publish
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          chmod +x ./mcp-publisher
+
+      - name: Login to MCP Registry (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish

@@ -1,0 +1,41 @@
+# Smithery configuration — https://smithery.ai/docs
+# This is a LOCAL (npx) stdio MCP server: it runs on the user's own machine.
+# Smithery indexes it for discovery but does not host/run it.
+runtime: "typescript"
+target: "local"
+startCommand:
+  type: "stdio"
+  configSchema:
+    type: object
+    properties:
+      STELLAR_NETWORK:
+        type: string
+        enum: ["mainnet", "testnet"]
+        default: "mainnet"
+        description: "Stellar network to target."
+      EXPLORER_BASE_URL:
+        type: string
+        description: "Override the stellar-8004 explorer API base URL."
+      STELLAR_RPC_URL:
+        type: string
+        description: "Override the Soroban RPC URL used for on-chain reputation verification."
+      VERIFY_ONCHAIN:
+        type: string
+        enum: ["true", "false"]
+        default: "true"
+        description: "Set to 'false' to disable on-chain reputation verification."
+    required: []
+  commandFunction: |
+    (config) => ({
+      command: "npx",
+      args: ["-y", "stellar-agent-mcp"],
+      env: {
+        STELLAR_NETWORK: config.STELLAR_NETWORK || "mainnet",
+        ...(config.EXPLORER_BASE_URL ? { EXPLORER_BASE_URL: config.EXPLORER_BASE_URL } : {}),
+        ...(config.STELLAR_RPC_URL ? { STELLAR_RPC_URL: config.STELLAR_RPC_URL } : {}),
+        ...(config.VERIFY_ONCHAIN ? { VERIFY_ONCHAIN: config.VERIFY_ONCHAIN } : {})
+      }
+    })
+  exampleConfig:
+    STELLAR_NETWORK: "mainnet"
+    VERIFY_ONCHAIN: "true"
