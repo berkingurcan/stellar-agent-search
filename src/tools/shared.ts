@@ -24,6 +24,8 @@ import { ExplorerService } from "../lib/explorer.js";
 import { ReputationVerifier } from "../lib/reputation.js";
 import {
   rankAgents,
+  roundRankResult,
+  scoreAgent,
   type RankInput,
   type RankOptions,
   type SortMode,
@@ -36,6 +38,7 @@ import {
 import {
   buildSelfDeclaredFields,
   safe,
+  sanitizeNullable,
   sanitizeText,
   selfDeclared,
   serverText,
@@ -45,6 +48,7 @@ import {
 import type {
   AgentCapabilities,
   AgentFlags,
+  AgentProfile,
   AgentScores,
   DeclaredReputation,
   Network,
@@ -258,9 +262,73 @@ export function toRankedRow(
     flags: result.flags,
     selfDeclared: selfDeclaredSlot(a),
   };
-  if (opts.includeBreakdown) row.breakdown = result;
+  if (opts.includeBreakdown) row.breakdown = roundRankResult(result);
   if (opts.verification) row.verification = opts.verification;
   return row;
+}
+
+// ---------------------------------------------------------------------------
+// Canonical single-agent profile join (shared by get_agent_profile,
+// get_agent_card, and any tool needing the full cross-registry profile)
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the canonical {@link AgentProfile} for one agent: typed identity +
+ * declared reputation + on-chain verification overlay + rounded 3-axis rank,
+ * with all untrusted free text confined to `selfDeclared` and every typed field
+ * (owner/wallet/agentUri/supportedTrust) sanitized or address-validated.
+ *
+ * Pass `opts.detail` when the caller already fetched the agent (e.g. to fetch it
+ * concurrently with feedback) so we don't double-fetch. Degrades closed on
+ * verification (status "unavailable"/"skipped") — never throws for that.
+ */
+export async function buildAgentProfile(
+  deps: ToolDeps,
+  id: number,
+  opts: { verify: boolean; detail?: AgentResponse } = { verify: false },
+): Promise<{
+  profile: AgentProfile;
+  verification: VerificationResult;
+  caps: AgentCapabilities;
+  declared: DeclaredReputation;
+}> {
+  const detail = opts.detail ?? (await deps.explorer.getAgent(id)).data;
+  const declared = declaredReputation(detail);
+  const verification = await deps.verifier.verifyAgainst(id, declared, { skip: !opts.verify });
+  const result = scoreAgent(toRankInput(detail, verification.status), {
+    weights: deps.config.weights,
+    scoreMax: deps.config.scoreMax,
+  });
+  const ids = agentIds(deps.config, id);
+  const caps = deriveCapabilities(detail);
+
+  const profile: AgentProfile = {
+    id,
+    stellarId: ids.stellarId,
+    caip2Id: ids.caip2Id,
+    network: deps.config.network,
+    owner: sanitizeText(detail.owner, 60),
+    wallet: validWalletOrNull(detail.wallet),
+    agentUri: sanitizeNullable(detail.agentUri, CAPS.serviceEndpoint),
+    capabilities: caps,
+    supportedTrust: caps.supportedTrust,
+    scores: agentScores(detail),
+    verification,
+    verified: verification.status === "verified",
+    flags: result.flags,
+    rank: roundRankResult(result),
+    createdAt: detail.createdAt ?? null,
+    txHash: detail.txHash ?? null,
+    resolveStatus: detail.resolveStatus ?? null,
+    selfDeclared: buildSelfDeclaredFields({
+      name: detail.name ?? null,
+      description: detail.description ?? null,
+      image: detail.image ?? null,
+      services: detail.services ?? null,
+      metadata: detail.metadata ?? null,
+    }),
+  };
+  return { profile, verification, caps, declared };
 }
 
 // ---------------------------------------------------------------------------
