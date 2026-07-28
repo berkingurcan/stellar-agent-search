@@ -70,13 +70,29 @@ The SOW asked for ranking by reputation. Reputation numbers on any registry are 
 smart contract** (`get_summary` + `get_clients_paginated`) and reports a declared-vs-verified diff. It works on
 default mainnet with **no funded account and no private key**.
 
-Reviewer check, on agent 10:
+Reviewer check, on agent 10 (confirmed against mainnet on 2026-07-28):
 
 | Source | Average score | Feedback count | Unique clients |
 |---|---|---|---|
 | Explorer (declared) | 96.75 | 8 | 4 |
 | Reputation contract (verified) | 96 | 8 | 4 |
 | Result | **`verified`** | | |
+
+This is independently reproducible without our code. Simulate two read calls against the Reputation contract
+`CBOIAIMMWAXI57OATLX6BWVDQLCC4YU55HV6MZXFRP6CBSGAMXSTEPPA` on `https://mainnet.sorobanrpc.com`:
+
+- `get_clients_paginated(agent_id: 10, start: 0, limit: 20)` → 4 addresses, beginning
+  `GAAIBWG3M3U6PAS3IC5BATPT52XKNYXBRJXQIPHEDQUQIEFQDYH4KZY7`
+- `get_summary(agent_id: 10, client_addresses: <those 4>, tag1: "", tag2: "")` →
+  `summary_value 96`, `summary_value_decimals 0`, `count 8`
+
+Both are read-only simulations: no account, no funds, no signature.
+
+> **Note for anyone running behind an HTTP proxy.** The Stellar SDK's RPC transport uses axios, and versions
+> below 1.16.1 send a plain-HTTP request that some proxies reject with `405`. If `doctor` reports
+> `✗ verify  on-chain read FAILED (rpc-error)`, that is the environment, not the registry — the explorer and
+> RPC health checks above it will still pass. Everything else keeps working; verification reports `unavailable`
+> rather than guessing.
 
 ### How to verify yourself
 
@@ -193,7 +209,7 @@ Cline, VS Code, Claude Desktop, Codex CLI, Gemini CLI**.
 Registry manifests are in place for three directories: [`server.json`](../server.json) (official MCP Registry),
 [`smithery.yaml`](../smithery.yaml), [`glama.json`](../glama.json).
 
-**Quality signals not required by the SOW:** 88 automated tests, clean TypeScript typecheck, two independent
+**Quality signals not required by the SOW:** 93 automated tests, clean TypeScript typecheck, two independent
 adversarial code-review passes plus a security review with all findings resolved.
 
 ---
