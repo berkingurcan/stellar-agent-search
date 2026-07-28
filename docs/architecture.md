@@ -13,7 +13,7 @@ MCP client (Claude Code / Cursor / Windsurf / Cline / VS Code)   +   human termi
   stellar-agent-mcp  (ONE bin: src/index.ts dispatches → mcp server | cli | doctor | serve)
         │
         ├─ buildServer(config)  →  Tools · Resources (stellar8004://…) · Prompts
-        │        capabilities: { tools, resources: { listChanged: true }, prompts }
+        │        capabilities: { tools, resources, prompts }   (no listChanged — stateless)
         │
         ├─ ExplorerService     (stellar-8004 HTTP API)      [PRIMARY DATA]
         │        └─► https://stellar8004.com

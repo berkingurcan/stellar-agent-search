@@ -6,6 +6,9 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AgentResponse } from "@trionlabs/stellar8004";
 import { parseQuery } from "../src/lib/nlparse.js";
 import { sanitizeText } from "../src/lib/sanitize.js";
@@ -135,5 +138,31 @@ describe("toAgentCard: empty endpoint falls back to agentUri (card-#9)", () => {
   it("uses the service endpoint when present", () => {
     const card = toAgentCard(profileWith("https://svc.example.com/task"));
     expect(card.url).toBe("https://svc.example.com/task");
+  });
+});
+
+/**
+ * Declared capabilities must match what the server actually does. Promising
+ * `resources.listChanged` while never sending the notification implies a
+ * session, which a stateless / serverless deployment cannot honour.
+ */
+describe("server capabilities: declare only what we exercise", () => {
+  const SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
+
+  it("does not declare resources.listChanged", () => {
+    const server = readFileSync(join(SRC, "server.ts"), "utf8");
+    // The word appears in an explanatory comment; the declaration must not.
+    expect(server).not.toMatch(/listChanged\s*:\s*true/);
+  });
+
+  it("never emits a list_changed notification anywhere in src/", () => {
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory() ? walk(join(dir, e.name)) : e.name.endsWith(".ts") ? [join(dir, e.name)] : [],
+      );
+    const offenders = walk(SRC).filter((f) =>
+      /sendResourceListChanged|notifications\/resources\/list_changed/.test(readFileSync(f, "utf8")),
+    );
+    expect(offenders).toEqual([]);
   });
 });

@@ -2,7 +2,7 @@
  * server.ts — the MCP server factory.
  *
  * `buildServer(config)` constructs a single {@link McpServer}, declares its
- * capabilities (tools + resources with listChanged + prompts), wires the
+ * capabilities (tools + resources + prompts), wires the
  * read-only dependency graph once, and registers the tool / resource / prompt
  * layers. Both entrypoints (stdio bin, optional HTTP variant) share this one
  * factory so there is a single source of truth for what the server exposes.
@@ -65,7 +65,13 @@ export function buildServer(config: Config, opts: BuildServerOptions = {}): McpS
     {
       capabilities: {
         tools: {},
-        resources: { listChanged: true },
+        // Deliberately NOT listChanged: this server never emits a resource
+        // list-changed notification. The resource set is fixed at construction
+        // (3 static + 5 templates); only the *contents* move as the registry
+        // advances, and a client re-reads for that. Declaring the capability
+        // would promise server-initiated messages we never send, implying a
+        // session that a stateless / serverless deployment cannot honour.
+        resources: {},
         prompts: {},
       },
       instructions: SERVER_INSTRUCTIONS,
