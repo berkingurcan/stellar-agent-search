@@ -67,6 +67,16 @@ Point any MCP client at `npx -y stellar-agent-mcp`. The fastest path for Claude 
 claude mcp add stellar-agent -- npx -y stellar-agent-mcp
 ```
 
+Optionally install the **skill** as well. It is the usage guide your agent reads before it calls anything —
+which tools exist, when to verify on-chain, how to read a declared-vs-verified mismatch:
+
+```bash
+npx skills add berkingurcan/stellar-agent-mcp --skill mcp
+```
+
+The skill documents the registration step for eight clients, so it is also the quickest reference if you are
+not on Claude Code.
+
 Then, in the client, tools appear as `mcp__stellar-agent__find_agent` (etc.), resources are
 `@`-mentionable (`@stellar-agent:stellar8004://agent/10`), and prompts are `/mcp__stellar-agent__…` slash
 commands. Copy-paste configs for every client are in **[integration.md](integration.md)**.

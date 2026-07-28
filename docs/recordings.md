@@ -12,8 +12,21 @@ visible on screen, and what a reviewer needs to hear.
 - Say the numbers out loud as they appear — an Ambassador reviewer is not reading JSON.
 - Upload unlisted to YouTube or Loom and paste the links into [docs/evidence.md](evidence.md).
 
-**Prerequisite for Recordings 1 and 3:** `stellar-agent-mcp` must be published to npm, otherwise `npx -y
-stellar-agent-mcp` fails. Publish first.
+**Prerequisites for Recordings 1 and 3** — both are checked from a machine with no credentials, so both must be
+true before you hit record:
+
+1. **`stellar-agent-mcp` is published to npm**, otherwise `npx -y stellar-agent-mcp` fails.
+2. **The repository is public and its default branch is `main`.** `npx skills add` fetches `skills/mcp/SKILL.md`
+   over GitHub from the *default branch* — a private repo or a default branch still pointing at a working branch
+   makes step 2 of Recording 3 fail on camera.
+
+Verify both from a logged-out shell first:
+
+```bash
+npm view stellar-agent-mcp version                                   # must print a version
+curl -sI https://raw.githubusercontent.com/berkingurcan/stellar-agent-mcp/main/skills/mcp/SKILL.md | head -1
+                                                                     # must be 200, not 404
+```
 
 ---
 
@@ -122,7 +135,7 @@ the point is that nothing is pre-cached.
 
 | # | Action | What must be on screen | Say |
 |---|---|---|---|
-| 1 | Show a clean environment: `node -v`, and that no MCP server is configured | Node ≥ 18, empty MCP list | "Fresh environment. Node 18 or newer is the only prerequisite." |
+| 1 | Show a clean environment: `node -v`, and that no MCP server is configured | Node ≥ 18, empty MCP list | "Fresh environment, nothing cached, no wallet and no API key. Node 18 or newer is all you need installed." |
 | 2 | `npx skills add berkingurcan/stellar-agent-mcp --skill mcp` | The skill installing | "One command pulls the skill straight from the project repository." |
 | 3 | `claude mcp add --scope user stellar-agent -- npx -y stellar-agent-mcp` | The server registering | "One more line registers the MCP server. No API key, no wallet, no config file to edit." |
 | 4 | Restart the client, run `/mcp` | `stellar-agent` connected | "Connected." |
