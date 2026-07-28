@@ -194,7 +194,8 @@ list_services({ "x402": true })
 
 The server exposes registry context under the `stellar8004://` scheme. In Claude Code these are `@`-mentionable
 as `@stellar-agent:stellar8004://…`. Contents are dual-format: an `application/json` profile block plus a rendered
-`text/markdown` card. Availability may depend on the installed server version (declared via `resources.listChanged`).
+`text/markdown` card. The resource set is fixed, so the server never emits list-changed notifications — re-read a
+resource to see updated registry state.
 
 | URI | What it is |
 |---|---|

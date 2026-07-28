@@ -301,8 +301,10 @@ free text appears only inside a clearly labeled, sanitized "self-declared (unver
 | `stellar8004://agent/{id}/reputation` | template | declared-vs-on-chain diff + deltas |
 | `stellar8004://owner/{address}` | template | all agents under an owner G-address |
 
-Capabilities declare `resources.listChanged: true`. The `agent/{id}` template exposes the current top agents
-in the resource picker and supports `{id}` completion.
+The resource set is fixed at construction, so `resources.listChanged` is deliberately **not** declared — this
+server never emits `notifications/resources/list_changed`. Resource *contents* do change as the registry
+advances; a client re-reads to pick that up. The `agent/{id}` template exposes the current top agents in the
+resource picker and supports `{id}` completion.
 
 ---
 
