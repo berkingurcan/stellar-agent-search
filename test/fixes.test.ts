@@ -1,5 +1,5 @@
 /**
- * fixes.test.ts — regression tests for the /code-review max fix pass.
+ * fixes.test.ts — regression tests, one block per fixed defect.
  *
  * Each block pins a specific defect that was found and fixed, so it cannot
  * silently regress. All pure / offline.

@@ -141,8 +141,8 @@ const DEFAULT_TRANSPORT = "HTTP+JSON";
 const UNKNOWN_VERSION = "0.0.0";
 
 // Canonical a2a-x402 extension URI so A2A / AP2 / x402-Bazaar clients actually
-// RECOGNIZE this agent's payment method. (Was a placeholder stellar8004.com URI
-// that no cross-ecosystem client could resolve — critique 2, finding #2.)
+// RECOGNIZE this agent's payment method. A placeholder stellar8004.com URI here
+// would resolve for nothing outside this project.
 const X402_EXTENSION_URI = "https://github.com/google-a2a/a2a-x402/v0.1";
 const MPP_EXTENSION_URI = "https://stellar8004.com/ext/mpp"; // no cross-ecosystem std yet
 /** USDC SEP-41/SAC contract per network — the `asset` in x402 PaymentRequirements. */
