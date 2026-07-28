@@ -5,8 +5,13 @@
  * Two independent checks:
  *   1. Source import graph — no src/**.ts file imports or references any
  *      forbidden signer/write symbol from the SDK or stellar-sdk.
- *   2. Built bundle — the shipped dist/index.js (which bundles the SDK) contains
- *      none of those symbols, proving they were never pulled in / tree-shaken out.
+ *   2. Built bundle — the shipped dist/index.js names none of those symbols.
+ *      NOTE: tsup externalizes runtime dependencies, so the SDK itself is NOT
+ *      inlined here; this check therefore proves our *emitted* code never
+ *      imports or references a signer, not that the dependency tree lacks one.
+ *      (@trionlabs/stellar8004 does ship signers — we simply never reach for
+ *      them.) Check 1 is what constrains the source; this one catches a symbol
+ *      surviving compilation.
  *
  * `examples/x402-demo.ts` is explicitly allowed to sign and is NOT under src/,
  * so it is out of scope here (and not shipped in the bin bundle).
