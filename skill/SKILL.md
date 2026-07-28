@@ -40,7 +40,7 @@ in this session, **install the server now** using the [Install](#install-do-this
   `list_services` — plus 9 complete-core tools: `list_agents`, `leaderboard`, `resolve_agent`,
   `get_agents_by_owner`, `get_agent_feedback`, `verify_reputation`, `get_agent_card` (A2A card),
   `get_registry_stats`, `get_registry_health`.
-  (Your client's `/mcp` panel will list all 12.)
+  (Your client's `/mcp` panel will list all 13.)
 - **Resources** under the `stellar8004://` scheme (`@`-mentionable context) and **Prompts** (slash-command workflows) —
   see [Resources](#resources) and [Prompts](#prompts).
 - Runs via `npx` with **no global install** and **no API key**.
@@ -201,12 +201,14 @@ as `@stellar-agent:stellar8004://…`. Contents are dual-format: an `application
 | `stellar8004://registry` | Registry snapshot: `/stats` + `/health` + mainnet contract addresses. |
 | `stellar8004://leaderboard` | Top agents by the client-side 3-axis rank. |
 | `stellar8004://health` | Indexer / registry liveness and staleness. |
-| `stellar8004://agent/{id}` | Full `AgentProfile` (getAgent + verify + validation join). |
-| `stellar8004://agent/{id}/card` | Portable 8004 agent card resolved from `agentUri`. |
-| `stellar8004://agent/{id}/feedback` | Recent feedback for the agent. |
-| `stellar8004://agent/{id}/reputation` | On-chain-verified reputation. |
-| `stellar8004://owner/{address}` | Agents owned by a Stellar address. |
-| `stellar8004://search/{query}` | Hybrid discovery path (same logic as `find_agent`). |
+| `stellar8004://agent/{id}` | Full `AgentProfile` — identity, capabilities, declared-vs-verified reputation. |
+| `stellar8004://agent/{id}/card` | A2A AgentCard (v0.3) projection, incl. the x402 extension hint. |
+| `stellar8004://agent/{id}/feedback` | Recent feedback for the agent (sanitized, labelled self-declared). |
+| `stellar8004://agent/{id}/reputation` | Declared-vs-on-chain reputation diff. |
+| `stellar8004://owner/{address}` | Agents owned by a Stellar `G…` address. |
+
+Eight resources total: 3 static (`registry`, `leaderboard`, `health`) + 5 templates. Discovery is a **tool**
+(`find_agent`), not a resource — there is no `stellar8004://search/…` URI.
 
 ---
 

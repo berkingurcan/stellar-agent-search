@@ -1,5 +1,11 @@
 # stellar-agent-mcp
 
+[![CI](https://github.com/berkingurcan/stellar-agent-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/berkingurcan/stellar-agent-mcp/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/stellar-agent-mcp.svg)](https://www.npmjs.com/package/stellar-agent-mcp)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen.svg)](https://nodejs.org)
+[![MCP](https://img.shields.io/badge/MCP-1.29.0-6E56CF.svg)](https://modelcontextprotocol.io)
+
 > **The reference ERC-8004 + x402 trust loop that actually runs on mainnet, with on-chain-verified reputation.**
 
 A **read-only, keyless** MCP server (and human CLI) that lets an AI agent — or you — **discover, rank, and
@@ -141,6 +147,17 @@ ranking formula, and the RegistrySource abstraction: **[docs/architecture.md](do
 
 Built on the stable MCP **1.x** SDK (`@modelcontextprotocol/sdk` 1.29.0, spec 2025-11-25),
 `@trionlabs/stellar8004`, TypeScript ESM, Node ≥ 18.
+
+---
+
+## Contributing
+
+Reviewing this against a grant or SOW? Start at **[docs/evidence.md](docs/evidence.md)** — a
+deliverable-to-evidence map with verification steps, written to be checked without a technical background.
+
+Bug reports and PRs welcome. Read **[CONTRIBUTING.md](CONTRIBUTING.md)** first — it covers the project layout and
+the four invariants CI enforces (read-only/keyless, stdout-is-JSON-RPC-only, the trust boundary, and
+degrade-closed verification). Release history lives in **[CHANGELOG.md](CHANGELOG.md)**.
 
 ## License
 
