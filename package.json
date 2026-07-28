@@ -28,6 +28,26 @@
     "access": "public"
   },
   "mcpName": "io.github.berkingurcan/stellar-agent-mcp",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/berkingurcan/stellar-agent-mcp.git"
+  },
+  "homepage": "https://github.com/berkingurcan/stellar-agent-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/berkingurcan/stellar-agent-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "stellar",
+    "soroban",
+    "erc-8004",
+    "stellar-8004",
+    "x402",
+    "agent-discovery",
+    "reputation",
+    "usdc"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
