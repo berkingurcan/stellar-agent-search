@@ -25,7 +25,8 @@ Off-chain agent directories (A2A cards, the MCP Registry, OASF, NANDA) list **se
 exactly where the trust gap lives. A 2026 study of the ERC-8004 ecosystem (arXiv 2606.26028) found that only
 **3–15% of registrations have a live endpoint**, and **59–91% of "reviewers" are Sybils**.
 
-stellar-8004 is the **only live non-EVM ERC-8004 implementation** (66 agents on Stellar mainnet). This server
+stellar-8004 is the **only live non-EVM ERC-8004 implementation** (66 agents on Stellar mainnet as of July 2026;
+`get_registry_stats` returns the current count). This server
 is built around the one thing a directory listing cannot give you: it **re-derives each agent's reputation
 directly from the on-chain Reputation contract** (`get_summary` + `get_clients_paginated`) and reports it as a
 **declared-vs-verified** diff — `verified | mismatch | unavailable | skipped`. Self-declared marketing text

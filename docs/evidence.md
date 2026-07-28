@@ -216,7 +216,7 @@ Cline, VS Code, Claude Desktop, Codex CLI, Gemini CLI**.
 Registry manifests are in place for three directories: [`server.json`](../server.json) (official MCP Registry),
 [`smithery.yaml`](../smithery.yaml), [`glama.json`](../glama.json).
 
-**Quality signals not required by the SOW:** 103 automated tests, clean TypeScript typecheck, two independent
+**Quality signals not required by the SOW:** 106 automated tests, clean TypeScript typecheck, two independent
 adversarial code-review passes plus a security review with all findings resolved.
 
 ---
