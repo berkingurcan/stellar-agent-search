@@ -121,8 +121,8 @@ git push --follow-tags
 ```
 
 Keep `version` in sync across four hand-maintained places: `package.json`, `server.json` (both the top-level
-and `packages[].version`), and `metadata.version` in `skills/mcp/SKILL.md`. `test/skill-sync.test.ts` enforces
-the skill one; the two `server.json` fields are still on you.
+and `packages[].version`), and `metadata.version` in `skills/mcp/SKILL.md`. `test/skill-sync.test.ts` and
+`test/version-sync.test.ts` enforce all four, so a missed bump is a red build rather than a bad release.
 
 ### First release — one-time setup
 
