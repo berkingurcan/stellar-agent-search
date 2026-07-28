@@ -200,3 +200,66 @@ Identifiers carry a CAIP-2 namespace and the data layer is reached only through 
 
 Contract addresses, RPC URL, and the network passphrase are reused from `@trionlabs/stellar8004`'s
 `getConfig()` / `MAINNET_CONFIG` — never re-derived here.
+
+---
+
+## Transport & runtime portability
+
+Recorded from a spike, so the constraints are not re-discovered later.
+
+### The axios coupling
+
+`@trionlabs/stellar8004` imports the default `@stellar/stellar-sdk` build, whose RPC transport is **axios**.
+axios below 1.16.1 issues a plain-HTTP (non-`CONNECT`) request for an `https://` URL when a proxy is configured;
+proxies answer that with **405**. The visible symptom is on-chain verification reporting `unavailable` while the
+explorer and RPC health checks pass — exactly the feature this server exists for, silently degraded.
+
+`doctor` surfaces this rather than hiding it:
+
+```
+✗ verify    on-chain read FAILED (rpc-error): Request failed with status code 405
+```
+
+### `no-axios` — verified working
+
+The Stellar SDK ships a parallel fetch-based build under `@stellar/stellar-sdk/no-axios`, with matching
+`/no-axios/rpc` and `/no-axios/contract` subpaths. Confirmed against mainnet from inside a proxied environment
+where the axios path returns 405: it completes the same two reads and returns agent 10's four real client
+addresses.
+
+Aliasing works too. Bundling `@trionlabs/stellar8004` with
+
+```
+--alias:@stellar/stellar-sdk=@stellar/stellar-sdk/no-axios
+--alias:@stellar/stellar-sdk/contract=@stellar/stellar-sdk/no-axios/contract
+--alias:@stellar/stellar-sdk/rpc=@stellar/stellar-sdk/no-axios/rpc
+```
+
+produces a bundle with 144 `lib/no-axios/` modules and **zero** axios modules, and its `ReputationClient` reads
+succeed through the proxy. Every subpath the SDK imports must be aliased; a missed one quietly restores the
+axios build for that module.
+
+### Why the npm artifact is not fixed by that alias
+
+**tsup externalizes runtime dependencies.** `dist/index.js` (~136 KB) `import`s `@trionlabs/stellar8004` and
+`@modelcontextprotocol/sdk` rather than inlining them, so a build-time alias never reaches the published
+package. Confirmed via the sourcemap: zero `stellar-sdk` modules in the shipped bundle.
+
+Closing it therefore needs a deliberate choice, not a config tweak:
+
+| Option | Effect | Cost |
+|---|---|---|
+| `noExternal` the Stellar deps + alias | One self-contained artifact, fetch-only, no axios | Much larger tarball; dependency tree harder to audit |
+| Call the Reputation contract directly via `no-axios/rpc` | Fixes the one path that matters; no bundling change | ~40 lines of contract-call code we own instead of the SDK's |
+| Upstream `no-axios` support in `@trionlabs/stellar8004` | Cleanest | Not in our control |
+
+### Consequence for edge runtimes
+
+Cloudflare Workers and similar fetch-only runtimes **must** bundle, so the alias applies there and the
+constraint disappears. The stack bundles cleanly under workerd resolution conditions
+(`--platform=browser --conditions=workerd,worker,browser,import`). Node-builtin usage in the SDK is limited —
+`path` plus `Buffer`, both covered by `nodejs_compat`.
+
+The server is otherwise already shaped for a stateless deployment: every tool is a pure read, there is no
+session state, and `resources.listChanged` is deliberately not declared, so nothing promises a server-initiated
+message. Remaining work for a remote deployment is transport wiring, not redesign.
