@@ -85,6 +85,13 @@ server holds no keys.
 claude mcp add stellar-agent -- npx -y stellar-agent-mcp
 ```
 
+**With the skill** (adds the usage guide your agent reads, then registers the server):
+
+```bash
+npx skills add berkingurcan/stellar-agent-mcp --skill mcp
+claude mcp add --scope user stellar-agent -- npx -y stellar-agent-mcp
+```
+
 > The `--` is required — everything after it is passed to the server untouched. Without it, Claude Code tries
 > to parse the server's flags as its own.
 

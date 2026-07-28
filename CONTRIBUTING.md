@@ -38,7 +38,7 @@ node dist/index.js                     # the MCP stdio surface (speaks JSON-RPC;
 | `src/cli/` | Human terminal surface |
 | `examples/` | `x402-demo.ts` — the *only* keyed code in the repo, run manually |
 | `test/` | vitest suites, including the invariant tests below |
-| `skill/` | The `SKILL.md` published to `trionlabs/stellar-8004/skills/mcp/` |
+| `skills/mcp/` | `SKILL.md` — installed by `npx skills add berkingurcan/stellar-agent-mcp --skill mcp` |
 
 ## Non-negotiable invariants
 
@@ -84,7 +84,7 @@ indexer's declared number as if it were verified. Same for an unrated agent: abs
    than re-fetching; they already handle verification, wallet validation, and rounding.
 4. Register it in `src/tools/index.ts`.
 5. Add it to the table in `README.md`, write the full entry in `docs/tools.md`, and update the tool count in
-   `skill/SKILL.md`.
+   `skills/mcp/SKILL.md`.
 6. Add tests. If the tool emits summary text, add an injection case.
 
 Consider whether the same data should also be a `stellar8004://` resource — tools are for actions, resources are

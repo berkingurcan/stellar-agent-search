@@ -150,24 +150,29 @@ cannot silently erode.
 
 ## 3. Deliverable 3 — one-command install + developer docs
 
-> *One-command install for any developer: `npx skills add trionlabs/stellar-8004 --skill mcp` brings the MCP
-> into Claude Code, Cursor, or any MCP-compatible client. Developer docs: README, getting-started guide, MCP
-> tool reference, integration guide, contribution notes.*
+> *One-command install for any developer: `npx skills add trionlabs/stellar-8004 --skill mcp` **(or equivalent)**
+> brings the MCP into Claude Code, Cursor, or any MCP-compatible client. Developer docs: README, getting-started
+> guide, MCP tool reference, integration guide, contribution notes.*
 
 | Evidence required by SOW | Status | Link |
 |---|---|---|
-| Skill package install command | 🟡 | `skills/mcp/SKILL.md` pushed to `trionlabs/stellar-8004`; **needs merge to `main`** before the command resolves |
+| Skill package install command | ✅ | [`skills/mcp/SKILL.md`](../skills/mcp/SKILL.md) — served from this repository |
 | Developer docs URL | ✅ | [Repository docs](https://github.com/berkingurcan/stellar-agent-mcp#readme) |
 | Install + usage screen recording | ⬜ | `‹recording link›` |
 
 ### The one-command install
 
 ```bash
-npx skills add trionlabs/stellar-8004 --skill mcp
+npx skills add berkingurcan/stellar-agent-mcp --skill mcp
 ```
 
-This installs the skill alongside the chapter's existing `8004stellar` and `x402stellar` skills. The skill file
-documents the MCP registration for **eight** clients and carries a copy-paste config for each.
+The SOW's example command names the `trionlabs/stellar-8004` repository and allows *"or equivalent"*. We serve
+the skill from **this** repository instead: the server is an independent MIT package with its own release
+cadence, so the skill belongs beside the code it installs — one source of truth, versioned with the server, and
+no cross-repository merge in the release path. `skills/mcp/SKILL.md` sits next to `src/`, so a change to the
+tool surface and its documentation land in the same commit and the same CI run.
+
+The skill documents MCP registration for **eight** clients and carries a copy-paste config for each.
 
 Then register the server:
 
@@ -202,7 +207,7 @@ Cline, VS Code, Claude Desktop, Codex CLI, Gemini CLI**.
 | Multi-client integration testing | ✅ | [docs/integration.md](integration.md) — per-client config and caveats |
 | CI/CD setup | ✅ | [.github/workflows/ci.yml](../.github/workflows/ci.yml) — Node 18/20/22 × Linux/macOS; typecheck, build, test, pack |
 | npm publishing setup | ✅ | [.github/workflows/publish.yml](../.github/workflows/publish.yml) — tag-triggered, OIDC Trusted Publishing with Sigstore provenance, plus MCP Registry publish |
-| Skill packaging + distribution | 🟡 | `skills/mcp/SKILL.md` in `trionlabs/stellar-8004`, pending merge |
+| Skill packaging + distribution | ✅ | [`skills/mcp/SKILL.md`](../skills/mcp/SKILL.md) — ships with the package |
 | Mainnet gas | ⬜ | Consumed by the Deliverable 2 run |
 | Demo video production | ⬜ | See recordings below |
 
@@ -233,7 +238,7 @@ Everything below requires credentials or funds that only the builder holds.
 |---|---|---|---|
 | 0 | **Make the repository public** (Settings → General → Danger Zone) | Everything reviewer-facing; the SOW requires a public MIT repo. Also required for npm provenance and the MCP Registry publish | Builder |
 | 1 | `npm publish` (or push a `v0.1.0` tag once Trusted Publishing is configured) | D1 npm link; makes `npx -y stellar-agent-mcp` resolve, which Recordings 1 and 3 depend on | Builder |
-| 2 | Merge `skills/mcp/` to `trionlabs/stellar-8004` `main` | D3 install command — `npx skills add` reads the default branch | Builder |
+| 2 | *(none — the skill ships from this repository)* | — | — |
 | 3 | Funded mainnet run of `examples/x402-demo.ts` | D2 both tx hashes | Builder |
 | 4 | Recordings 1–3 | D1, D2, D3 recordings | Builder |
 

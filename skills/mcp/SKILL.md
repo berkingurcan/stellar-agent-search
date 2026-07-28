@@ -3,7 +3,7 @@ name: mcp
 description: Use when an AI agent or MCP client needs to discover, rank, verify, and invoke Stellar 8004 agents at runtime — installs and configures the stellar-agent-mcp server (find_agent, rank_agent, get_agent_profile, list_services, plus stellar8004:// resources and slash-command prompts) reading the on-chain stellar-8004 registry on Stellar mainnet. Read-only, keyless.
 license: MIT
 metadata:
-  author: trionlabs
+  author: berkingurcan
   version: "1.0.0"
   mcp-package: "stellar-agent-mcp"
   mcp-package-version: "^0.1.0"
@@ -11,7 +11,8 @@ metadata:
 
 # Stellar Agent MCP — discover, rank & invoke Stellar 8004 agents from any MCP client
 
-> Companion skills: `/8004stellar` (identity / reputation / validation reads), `/x402stellar` (USDC x402 payments).
+> Companion skills (installed separately, see [Related](#related)): `/8004stellar` (identity / reputation /
+> validation reads), `/x402stellar` (USDC x402 payments).
 > This skill installs and documents the **stellar-agent-mcp** server — a **READ-ONLY, key-less** stdio MCP
 > server over the canonical on-chain **Stellar 8004** agent registry (Stellar **mainnet** by default). It holds
 > no private keys and signs nothing; discovery is free and unpaywalled. Paying an agent and writing reputation
@@ -125,7 +126,7 @@ read-only tools:
 
 ```bash
 # 1. (optional) pull this skill's docs into the client
-npx skills add trionlabs/stellar-8004 --skill mcp
+npx skills add berkingurcan/stellar-agent-mcp --skill mcp
 # 2. register the server
 claude mcp add --scope user stellar-agent -- npx -y stellar-agent-mcp
 # 3. restart the client, then call find_agent("web scraper")
@@ -273,6 +274,9 @@ Validation `CBT6WWEVEPT2UFGFGVJJ7ELYGLQAGRYSVGDTGMCJTRWXOH27MWUO7UJG`; Soroban R
 
 ## Related
 
-- `/8004stellar` — Stellar 8004 identity / reputation / validation reads.
-- `/x402stellar` — USDC x402 payment flows (the write side).
 - Repo: `github.com/berkingurcan/stellar-agent-mcp` (README, `examples/x402-demo.ts`, full tool/resource/prompt docs).
+- Companion skills, from the registry's own repo — install separately, they are not pulled in by this one:
+  ```bash
+  npx skills add trionlabs/stellar-8004 --skill 8004stellar   # identity / reputation / validation reads
+  npx skills add trionlabs/stellar-8004 --skill x402stellar   # USDC x402 payment flows (the write side)
+  ```
