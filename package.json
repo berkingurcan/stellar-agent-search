@@ -57,7 +57,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.29.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@stellar/stellar-sdk": "^15",
     "@trionlabs/stellar8004": "0.0.11",
     "@x402/core": "~2.20.0",
@@ -71,5 +71,9 @@
     "tsup": "^8",
     "typescript": "^5",
     "vitest": "^3"
+  },
+  "overrides": {
+    "axios": "1.18.1",
+    "@hono/node-server": "^2.0.5"
   }
 }
