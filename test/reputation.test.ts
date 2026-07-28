@@ -101,3 +101,58 @@ describe("construction: R7 no-account read path (rep-#11 guard)", () => {
     expect(v.isEnabled).toBe(true);
   });
 });
+
+describe("probe(): a failed read is distinguishable from an unrated agent", () => {
+  it("empty client set → ok, with zeroed value (genuinely unrated)", async () => {
+    const v = new ReputationVerifier(cfg, { client: fakeClient([], 0) });
+    const p = await v.probe(10);
+    expect(p.ok).toBe(true);
+    if (p.ok) expect(p.value).toEqual({ average: 0, count: 0, uniqueClients: 0 });
+  });
+
+  it("rated agent → ok, carrying the on-chain figures", async () => {
+    const v = new ReputationVerifier(cfg, { client: fakeClient(C(4), 96) });
+    const p = await v.probe(10);
+    expect(p.ok).toBe(true);
+    if (p.ok) expect(p.value).toEqual({ average: 96, count: 4, uniqueClients: 4 });
+  });
+
+  it("transport failure → NOT ok, reason 'rpc-error' — never mistaken for 'no data'", async () => {
+    const throwing = {
+      get_clients_paginated: async () => {
+        throw new Error("Request failed with status code 405");
+      },
+      get_summary: async () => {
+        throw new Error("unreachable");
+      },
+    } as unknown as ReputationClient;
+
+    const v = new ReputationVerifier(cfg, { client: throwing });
+    const p = await v.probe(10);
+    expect(p.ok).toBe(false);
+    if (!p.ok) expect(p.reason).toBe("rpc-error");
+
+    // verify() still degrades closed to null — the tool-facing contract is unchanged.
+    expect(await v.verify(10)).toBeNull();
+  });
+
+  it("contract Err → reason 'contract-error', not a silent empty summary", async () => {
+    const erring = {
+      get_clients_paginated: async ({ start }: { start: number }) => ({
+        result: start === 0 ? C(2) : [],
+      }),
+      get_summary: async () => ({ result: { isErr: () => true, unwrap: () => undefined } }),
+    } as unknown as ReputationClient;
+
+    const p = await new ReputationVerifier(cfg, { client: erring }).probe(10);
+    expect(p.ok).toBe(false);
+    if (!p.ok) expect(p.reason).toBe("contract-error");
+  });
+
+  it("verification disabled → reason 'disabled'", async () => {
+    const off = loadConfig({ STELLAR_NETWORK: "mainnet", VERIFY_ONCHAIN: "false" } as NodeJS.ProcessEnv);
+    const p = await new ReputationVerifier(off, { client: fakeClient(C(4), 96) }).probe(10);
+    expect(p.ok).toBe(false);
+    if (!p.ok) expect(p.reason).toBe("disabled");
+  });
+});

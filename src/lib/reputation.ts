@@ -76,6 +76,19 @@ export interface VerifyTolerance {
 // sub-point inflation and scales wrong when RANK_SCORE_MAX is not 100.
 export const DEFAULT_TOLERANCE: VerifyTolerance = { average: 0.5, uniqueClients: 1 };
 
+/** Why an on-chain read produced no trustworthy value — see {@link ReputationVerifier.probe}. */
+export type VerifyFailure =
+  | "disabled" // verification switched off (VERIFY_ONCHAIN=false)
+  | "truncated" // client set exceeded the hard cap; cannot fully account for it
+  | "contract-error" // get_summary returned Err
+  | "out-of-range" // summary unit outside the representable scale
+  | "rpc-error"; // transport/simulation failure
+
+/** Uncached read outcome that keeps failures distinguishable from empty data. */
+export type VerifyProbe =
+  | { ok: true; value: OnchainReputation }
+  | { ok: false; reason: VerifyFailure; detail?: string };
+
 export interface ReputationVerifierOptions {
   clock?: Clock;
   logger?: Logger;
@@ -148,17 +161,27 @@ export class ReputationVerifier {
     );
   }
 
-  private async deriveOnchain(agentId: number): Promise<OnchainReputation | null> {
+  /**
+   * The read path WITHOUT the degrade-closed collapse — it distinguishes "this
+   * agent genuinely has no on-chain feedback" from "the read failed".
+   *
+   * `verify()` deliberately flattens both to null so tools never block, but a
+   * diagnostic (`doctor`) must not report a failed read as an unrated agent:
+   * that turns a broken setup into a green check. Uncached, so a probe always
+   * reflects reality now.
+   */
+  async probe(agentId: number): Promise<VerifyProbe> {
+    if (!this.isEnabled) return { ok: false, reason: "disabled" };
     const client = this.client!;
     try {
       const { clients, truncated } = await this.allClients(agentId);
       if (truncated) {
         // Cannot fully account for the client set → don't risk a false mismatch.
         this.logger.debug("client set truncated; degrading to unavailable", { agentId });
-        return null;
+        return { ok: false, reason: "truncated" };
       }
       if (clients.length === 0) {
-        return { average: 0, count: 0, uniqueClients: 0 };
+        return { ok: true, value: { average: 0, count: 0, uniqueClients: 0 } };
       }
 
       const tx = await client.get_summary({
@@ -170,20 +193,19 @@ export class ReputationVerifier {
       const res = tx.result;
       if (res.isErr()) {
         this.logger.debug("get_summary returned Err", { agentId });
-        return null;
+        return { ok: false, reason: "contract-error" };
       }
       const summary: SummaryResult = res.unwrap();
 
       const average = this.wadToScale(summary.summary_value, Number(summary.summary_value_decimals));
       if (average == null) {
         this.logger.debug("summary average out of range; degrading", { agentId });
-        return null;
+        return { ok: false, reason: "out-of-range" };
       }
 
       return {
-        average,
-        count: Number(summary.count),
-        uniqueClients: clients.length,
+        ok: true,
+        value: { average, count: Number(summary.count), uniqueClients: clients.length },
       };
     } catch (err) {
       const body = classifyError(err);
@@ -191,8 +213,13 @@ export class ReputationVerifier {
         agentId,
         errorCode: body.code,
       });
-      return null;
+      return { ok: false, reason: "rpc-error", detail: body.error };
     }
+  }
+
+  private async deriveOnchain(agentId: number): Promise<OnchainReputation | null> {
+    const probe = await this.probe(agentId);
+    return probe.ok ? probe.value : null;
   }
 
   /** Paginate get_clients_paginated. `truncated` = hit the hard cap without
