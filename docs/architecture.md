@@ -176,7 +176,7 @@ Identifiers carry a CAIP-2 namespace and the data layer is reached only through 
 
 - **Transport:** stdio, primary and default — correct for a keyless, read-only, local server. SSE is
   deprecated and is **not** shipped. A stateless Streamable HTTP variant is a documented stretch.
-- **SDK / spec:** built on the stable `@modelcontextprotocol/sdk` **1.29.0** (spec **2025-11-25**),
+- **SDK / spec:** built on the stable `@modelcontextprotocol/sdk` **1.30.0** (spec **2025-11-25**),
   `McpServer` + `registerTool`/`registerResource`/`registerPrompt` + `StdioServerTransport`, zod v3 input
   schemas. A keyless read-only stdio server needs none of the 2026 RC's heavy machinery (Tasks, Apps,
   stateless-HTTP, OAuth hardening); the RC's logging-to-stderr direction is already how this server behaves.
@@ -219,6 +219,29 @@ explorer and RPC health checks pass — exactly the feature this server exists f
 ```
 ✗ verify    on-chain read FAILED (rpc-error): Request failed with status code 405
 ```
+
+### The `overrides` fix — and exactly how far it reaches
+
+`@stellar/stellar-sdk@15.1.0` pins axios to the **exact** version `1.15.0`, so there is no range to widen. An
+npm `overrides` block forces a patched axios into the tree instead:
+
+```json
+"overrides": { "axios": "1.18.1" }
+```
+
+This is load-bearing twice over. It clears the two **high**-severity axios advisories that `npm audit` reports
+against the 1.15.0 pin, and because 1.18.1 is past the 1.16.1 proxy fix it also makes the on-chain read work
+through a proxy — `doctor` goes from the 405 above to all-green, returning agent 10's real figures.
+
+**It does not reach end users.** npm honours `overrides` only from the *root* project, so a consumer who runs
+`npx -y stellar-agent-mcp` resolves our dependencies fresh and gets `@stellar/stellar-sdk@15.1.0 → axios@1.15.0`
+again. Verified by packing the tarball and installing it into a clean project. So the override protects this
+repository, its CI, and anyone who clones it — not the published artifact.
+
+The root cause is upstream: `@trionlabs/stellar8004@0.0.11` depends on `@stellar/stellar-sdk: ^15.0.0`
+(`webapp/packages/sdk/package.json` in `trionlabs/stellar-8004`), so even bumping our own direct dependency to
+`^16` just installs 15 again underneath it. Widening that range upstream, or one of the three options below, is
+what actually fixes the published package.
 
 ### `no-axios` — verified working
 

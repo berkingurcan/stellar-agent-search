@@ -22,9 +22,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with no release step in between.
 - `repository`, `homepage`, `bugs`, and `keywords` in `package.json`. npm binds provenance attestations to
   `repository.url`, so publishing under Trusted Publishing would have failed without it.
+- `test/version-sync.test.ts` — fails the build when the MCP SDK version advertised in the `doctor` banner, the
+  README badge and prose, `docs/architecture.md`, or the sample output in `docs/getting-started.md` drifts from
+  the pinned dependency, and checks the advertised spec date against the SDK's own `LATEST_PROTOCOL_VERSION`.
 - `test/onchain-constants.test.ts` — asserts the USDC SAC address and CAIP-2 chain id the AgentCard advertises
   match `@x402/stellar`'s published constants. Those two values tell an A2A/AP2 client which asset on which
   chain to pay, so a hand-copied address that drifts sends a real payment to the wrong contract.
+
+### Security
+
+- `overrides: { "axios": "1.18.1" }` — `@stellar/stellar-sdk@15.1.0` pins axios to the exact version `1.15.0`,
+  which carries two **high**-severity advisories. `npm audit` on this repository now reports zero
+  vulnerabilities. The same bump crosses the 1.16.1 proxy fix, so `doctor`'s on-chain verification, which
+  previously failed with `405` behind a proxy, now passes. **Note:** npm applies `overrides` only from the root
+  project, so this protects the repository and its CI, not consumers of the published package — see
+  [docs/architecture.md](docs/architecture.md).
+- `overrides: { "@hono/node-server": "^2.0.5" }` — clears a path-traversal advisory reaching us through
+  `@modelcontextprotocol/sdk`. Unreachable in our usage (this server is stdio-only and serves no static files),
+  overridden so the audit is clean rather than annotated.
+- `@modelcontextprotocol/sdk` `1.29.0` → `1.30.0`, which drops the vulnerable `@hono/node-server` range. The
+  negotiated protocol version is unchanged at `2025-11-25`.
 
 ### Changed
 

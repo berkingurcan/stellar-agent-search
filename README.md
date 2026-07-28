@@ -4,7 +4,7 @@
 [![npm](https://img.shields.io/npm/v/stellar-agent-mcp.svg)](https://www.npmjs.com/package/stellar-agent-mcp)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen.svg)](https://nodejs.org)
-[![MCP](https://img.shields.io/badge/MCP-1.29.0-6E56CF.svg)](https://modelcontextprotocol.io)
+[![MCP](https://img.shields.io/badge/MCP-1.30.0-6E56CF.svg)](https://modelcontextprotocol.io)
 
 > **The reference ERC-8004 + x402 trust loop that actually runs on mainnet, with on-chain-verified reputation.**
 
@@ -153,7 +153,7 @@ MCP client (or terminal) → **one binary** → `ExplorerService` (stellar8004 H
 precedence is always **explorer → on-chain verify → degrade-closed to declared-only**. Architecture,
 ranking formula, and the RegistrySource abstraction: **[docs/architecture.md](docs/architecture.md)**.
 
-Built on the stable MCP **1.x** SDK (`@modelcontextprotocol/sdk` 1.29.0, spec 2025-11-25),
+Built on the stable MCP **1.x** SDK (`@modelcontextprotocol/sdk` 1.30.0, spec 2025-11-25),
 `@trionlabs/stellar8004`, TypeScript ESM, Node ≥ 18.
 
 ---
