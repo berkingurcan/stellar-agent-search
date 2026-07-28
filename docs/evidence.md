@@ -156,7 +156,7 @@ cannot silently erode.
 
 | Evidence required by SOW | Status | Link |
 |---|---|---|
-| Skill package install command | ✅ | [`skills/mcp/SKILL.md`](../skills/mcp/SKILL.md) — served from this repository |
+| Skill package install command | 🟡 | [`skills/mcp/SKILL.md`](../skills/mcp/SKILL.md) — served from this repository; **the command resolves only once the repo is public and `main` is the default branch** (outstanding items 0 and 2) |
 | Developer docs URL | ✅ | [Repository docs](https://github.com/berkingurcan/stellar-agent-mcp#readme) |
 | Install + usage screen recording | ⬜ | `‹recording link›` |
 
@@ -170,7 +170,9 @@ The SOW's example command names the `trionlabs/stellar-8004` repository and allo
 the skill from **this** repository instead: the server is an independent MIT package with its own release
 cadence, so the skill belongs beside the code it installs — one source of truth, versioned with the server, and
 no cross-repository merge in the release path. `skills/mcp/SKILL.md` sits next to `src/`, so a change to the
-tool surface and its documentation land in the same commit and the same CI run.
+tool surface and its documentation land in the same commit — and
+[`test/skill-sync.test.ts`](../test/skill-sync.test.ts) fails CI if the skill's tool/resource/prompt counts or
+its version pin drift from the code, so the coupling is enforced rather than merely intended.
 
 The skill documents MCP registration for **eight** clients and carries a copy-paste config for each.
 
@@ -207,14 +209,14 @@ Cline, VS Code, Claude Desktop, Codex CLI, Gemini CLI**.
 | Multi-client integration testing | ✅ | [docs/integration.md](integration.md) — per-client config and caveats |
 | CI/CD setup | ✅ | [.github/workflows/ci.yml](../.github/workflows/ci.yml) — Node 18/20/22 × Linux/macOS; typecheck, build, test, pack |
 | npm publishing setup | ✅ | [.github/workflows/publish.yml](../.github/workflows/publish.yml) — tag-triggered, OIDC Trusted Publishing with Sigstore provenance, plus MCP Registry publish |
-| Skill packaging + distribution | ✅ | [`skills/mcp/SKILL.md`](../skills/mcp/SKILL.md) — ships with the package |
+| Skill packaging + distribution | ✅ | [`skills/mcp/SKILL.md`](../skills/mcp/SKILL.md) — ships in the repository, where `npx skills add` fetches it; deliberately kept out of the npm tarball (`files` in [package.json](../package.json)) so the published package stays lean |
 | Mainnet gas | ⬜ | Consumed by the Deliverable 2 run |
 | Demo video production | ⬜ | See recordings below |
 
 Registry manifests are in place for three directories: [`server.json`](../server.json) (official MCP Registry),
 [`smithery.yaml`](../smithery.yaml), [`glama.json`](../glama.json).
 
-**Quality signals not required by the SOW:** 93 automated tests, clean TypeScript typecheck, two independent
+**Quality signals not required by the SOW:** 103 automated tests, clean TypeScript typecheck, two independent
 adversarial code-review passes plus a security review with all findings resolved.
 
 ---
@@ -238,11 +240,12 @@ Everything below requires credentials or funds that only the builder holds.
 |---|---|---|---|
 | 0 | **Make the repository public** (Settings → General → Danger Zone) | Everything reviewer-facing; the SOW requires a public MIT repo. Also required for npm provenance and the MCP Registry publish | Builder |
 | 1 | `npm publish` (or push a `v0.1.0` tag once Trusted Publishing is configured) | D1 npm link; makes `npx -y stellar-agent-mcp` resolve, which Recordings 1 and 3 depend on | Builder |
-| 2 | *(none — the skill ships from this repository)* | — | — |
+| 2 | Set the GitHub **default branch to `main`** (Settings → General → Default branch) | D3 install command — `npx skills add` reads the default branch, which is currently the disposable working branch; also makes CI run on the branch reviewers see | Builder |
 | 3 | Funded mainnet run of `examples/x402-demo.ts` | D2 both tx hashes | Builder |
 | 4 | Recordings 1–3 | D1, D2, D3 recordings | Builder |
 
-Item 0 blocks review entirely; item 1 gates the two install recordings. See
+Item 0 blocks review entirely; items 0 and 2 together gate the one-command install; item 1 gates the two
+install recordings. See
 [docs/recordings.md](recordings.md) for shot-by-shot scripts.
 
 ---

@@ -16,13 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/recordings.md` — shot-by-shot scripts for the demo recordings.
 - `ReputationVerifier.probe()` — an uncached read that reports *why* a verification produced no value
   (`disabled` / `truncated` / `contract-error` / `out-of-range` / `rpc-error`).
+- `test/skill-sync.test.ts` — fails the build when `skills/mcp/SKILL.md` drifts from `src/`: tool, resource and
+  prompt counts, unregistered tools/resources/prompts cited by the skill, registered tools it fails to document,
+  and its version pin. The skill is fetched off the default branch by `npx skills add`, so drift reaches users
+  with no release step in between.
+- `repository`, `homepage`, `bugs`, and `keywords` in `package.json`. npm binds provenance attestations to
+  `repository.url`, so publishing under Trusted Publishing would have failed without it.
 
 ### Changed
 
 - The skill now ships from this repository at `skills/mcp/SKILL.md` (was `skill/SKILL.md`, destined for
-  `trionlabs/stellar-8004`). Install with `npx skills add berkingurcan/stellar-agent-mcp --skill mcp`. The
-  server is an independent package, so the skill is versioned with the code it installs and needs no
-  cross-repository merge to release. The SOW allows this — its example command is qualified "or equivalent".
+  `trionlabs/stellar-8004`). Install with `npx skills add berkingurcan/stellar-agent-mcp --skill mcp`.
+  Rationale: [docs/evidence.md §3](docs/evidence.md).
+- The skill's `mcp-package-version` pin is `>=0.1.0`, not `^0.1.0`. A caret range on a 0.x package resolves to
+  `>=0.1.0 <0.2.0`, so the pin would have excluded the next minor release.
+- README and the getting-started guide now show one registration command instead of two at differing scopes, and
+  the getting-started guide documents the skill install it had been missing.
 
 ### Fixed
 
@@ -32,7 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   uses `probe()`, fails the check, prints the underlying cause, and exits non-zero. The degrade-closed contract
   that tools rely on is unchanged.
 - The skill file listed 12 tools (there are 13) and documented a `stellar8004://search/{query}` resource that
-  does not exist, plus two inaccurate resource descriptions.
+  does not exist, plus two inaccurate resource descriptions. `test/skill-sync.test.ts` now makes this class of
+  drift a red build.
+- The skill declared `version: 1.0.0` against a `0.1.0` package.
+- `docs/evidence.md` overstated three things a reviewer would have checked: that the skill ships inside the npm
+  tarball (it does not — `files` excludes `skills/`, deliberately), that the one-command install was already
+  verifiable (it needs the repo public and `main` as the default branch), and the automated test count.
 
 ## [0.1.0] — unreleased
 

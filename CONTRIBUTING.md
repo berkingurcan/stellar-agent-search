@@ -83,8 +83,9 @@ indexer's declared number as if it were verified. Same for an unrated agent: abs
 3. Reuse the shared adapters in `src/tools/shared.ts` (`buildAgentProfile`, `toRankedRow`, `filterMpp`) rather
    than re-fetching; they already handle verification, wallet validation, and rounding.
 4. Register it in `src/tools/index.ts`.
-5. Add it to the table in `README.md`, write the full entry in `docs/tools.md`, and update the tool count in
-   `skills/mcp/SKILL.md`.
+5. Add it to the table in `README.md`, write the full entry in `docs/tools.md`, and document it in
+   `skills/mcp/SKILL.md` (both places that spell the tool count out loud). You do not have to remember this:
+   `test/skill-sync.test.ts` fails if the skill and `src/` disagree, and names what is missing.
 6. Add tests. If the tool emits summary text, add an injection case.
 
 Consider whether the same data should also be a `stellar8004://` resource — tools are for actions, resources are
@@ -119,7 +120,9 @@ npm version patch    # or minor / major — updates package.json and tags
 git push --follow-tags
 ```
 
-Keep `version` in `package.json` and `server.json` (both the top-level and `packages[].version`) in sync.
+Keep `version` in sync across four hand-maintained places: `package.json`, `server.json` (both the top-level
+and `packages[].version`), and `metadata.version` in `skills/mcp/SKILL.md`. `test/skill-sync.test.ts` enforces
+the skill one; the two `server.json` fields are still on you.
 
 ### First release — one-time setup
 
