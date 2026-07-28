@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with no release step in between.
 - `repository`, `homepage`, `bugs`, and `keywords` in `package.json`. npm binds provenance attestations to
   `repository.url`, so publishing under Trusted Publishing would have failed without it.
+- `test/onchain-constants.test.ts` — asserts the USDC SAC address and CAIP-2 chain id the AgentCard advertises
+  match `@x402/stellar`'s published constants. Those two values tell an A2A/AP2 client which asset on which
+  chain to pay, so a hand-copied address that drifts sends a real payment to the wrong contract.
 
 ### Changed
 
