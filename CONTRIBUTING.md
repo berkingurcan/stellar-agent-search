@@ -121,6 +121,24 @@ git push --follow-tags
 
 Keep `version` in `package.json` and `server.json` (both the top-level and `packages[].version`) in sync.
 
+### First release — one-time setup
+
+The tag-driven path needs two things that only exist after a first publish:
+
+1. **The repository must be public.** npm provenance is generated from a public source, and the MCP Registry's
+   GitHub OIDC login expects a public repository.
+2. **A Trusted Publisher must be configured on npmjs.com** for the `stellar-agent-mcp` package, pointing at this
+   repository and `.github/workflows/publish.yml`. That configuration requires the package name to exist, so the
+   very first publish is manual:
+
+   ```bash
+   npm login
+   npm publish --access public
+   ```
+
+   Then add the Trusted Publisher in the package settings on npmjs.com. Every release after that is just a tag
+   push — no token, provenance attached automatically.
+
 ## Reporting security issues
 
 Do **not** open a public issue for a vulnerability. See [SECURITY.md](SECURITY.md) for the disclosure process and

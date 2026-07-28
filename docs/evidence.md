@@ -13,6 +13,12 @@ checked in a browser in about five minutes.
 > Items marked `‹fill in›` are links that only exist after a publish or recording step. They are listed here so
 > the reviewer can see exactly what is outstanding rather than having to infer it.
 
+> [!IMPORTANT]
+> **The repository is currently private.** Every link on this page returns 404 to anyone who is not a
+> collaborator, and the SOW requires a *public* MIT repository. Flip it before sending this to a reviewer:
+> **Settings → General → Danger Zone → Change visibility → Make public**. This also unblocks npm provenance and
+> the MCP Registry publish, both of which require a public repository.
+
 ---
 
 ## 0. Five-minute verification (no install)
@@ -36,7 +42,7 @@ Anything deeper — installing the server, running the demo — is covered below
 
 | Evidence required by SOW | Status | Link |
 |---|---|---|
-| Public GitHub repository | ✅ | [github.com/berkingurcan/stellar-agent-mcp](https://github.com/berkingurcan/stellar-agent-mcp) |
+| Public GitHub repository | 🟡 | [github.com/berkingurcan/stellar-agent-mcp](https://github.com/berkingurcan/stellar-agent-mcp) — code complete and MIT-licensed, but **visibility is still private**; see the note at the top |
 | npm package | ⬜ | `‹npmjs.com/package/stellar-agent-mcp — after publish›` |
 | Screen recording of the 4 tools in Claude Code | ⬜ | `‹recording link›` |
 | Tool reference docs | ✅ | [docs/tools.md](tools.md) |
@@ -209,12 +215,14 @@ Everything below requires credentials or funds that only the builder holds.
 
 | # | Item | Unblocks | Owner |
 |---|---|---|---|
+| 0 | **Make the repository public** (Settings → General → Danger Zone) | Everything reviewer-facing; the SOW requires a public MIT repo. Also required for npm provenance and the MCP Registry publish | Builder |
 | 1 | `npm publish` (or push a `v0.1.0` tag once Trusted Publishing is configured) | D1 npm link; makes `npx -y stellar-agent-mcp` resolve, which Recordings 1 and 3 depend on | Builder |
-| 2 | Merge `skills/mcp/` to `trionlabs/stellar-8004` `main` | D3 install command | Builder |
+| 2 | Merge `skills/mcp/` to `trionlabs/stellar-8004` `main` | D3 install command — `npx skills add` reads the default branch | Builder |
 | 3 | Funded mainnet run of `examples/x402-demo.ts` | D2 both tx hashes | Builder |
 | 4 | Recordings 1–3 | D1, D2, D3 recordings | Builder |
 
-Item 1 gates the most. See [docs/recordings.md](recordings.md) for shot-by-shot scripts.
+Item 0 blocks review entirely; item 1 gates the two install recordings. See
+[docs/recordings.md](recordings.md) for shot-by-shot scripts.
 
 ---
 
