@@ -31,6 +31,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **On-chain reads no longer use axios.** `ReputationVerifier` now talks to the Reputation contract through
+  `@stellar/stellar-sdk/no-axios/contract` (fetch-based), reusing the generated bindings' `Spec` so argument
+  encoding and result decoding are unchanged — see `src/lib/soroban.ts`. Unlike the `overrides` below, this
+  **does** reach consumers of the published package: verified by uninstalling the override, leaving the
+  vulnerable `axios@1.15.0` in the tree, and watching `doctor`'s on-chain verification pass through a proxy
+  that previously answered `405`.
 - `overrides: { "axios": "1.18.1" }` — `@stellar/stellar-sdk@15.1.0` pins axios to the exact version `1.15.0`,
   which carries two **high**-severity advisories. `npm audit` on this repository now reports zero
   vulnerabilities. The same bump crosses the 1.16.1 proxy fix, so `doctor`'s on-chain verification, which
