@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - This changelog.
 - CI / npm / license badges in the README.
 - `docs/evidence.md` — deliverable-to-evidence map for reviewers.
+- `docs/recordings.md` — shot-by-shot scripts for the demo recordings.
+- `ReputationVerifier.probe()` — an uncached read that reports *why* a verification produced no value
+  (`disabled` / `truncated` / `contract-error` / `out-of-range` / `rpc-error`).
+
+### Fixed
+
+- `doctor` reported a **failed** on-chain read as a passing check with the message "sampled agent #10 has no
+  on-chain summary yet". It called `verify()`, which degrades closed to `null`, making a broken RPC path
+  indistinguishable from an unrated agent — so a misconfigured environment showed green and exited 0. It now
+  uses `probe()`, fails the check, prints the underlying cause, and exits non-zero. The degrade-closed contract
+  that tools rely on is unchanged.
+- `skill/SKILL.md` listed 12 tools (there are 13) and documented a `stellar8004://search/{query}` resource that
+  does not exist, plus two inaccurate resource descriptions.
 
 ## [0.1.0] — unreleased
 

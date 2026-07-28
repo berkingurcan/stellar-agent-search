@@ -541,17 +541,27 @@ async function cmdDoctor(deps: ToolDeps, flags: CliFlags): Promise<number> {
   // 5. on-chain verify sample (agent #10 exists on mainnet)
   if (cfg.verifyOnchain) {
     try {
-      // The read path completing (even with an empty summary) proves the
-      // reputation-contract simulation works; RPC liveness is checked above.
-      const onchain = await deps.verifier.verify(10);
-      checks.push({
-        name: "verify",
-        ok: true,
-        detail:
-          onchain != null
-            ? `on-chain reputation read OK (sampled agent #10: avg ${onchain.average}, ${onchain.count} feedback)`
-            : `on-chain read path OK (sampled agent #10 has no on-chain summary yet)`,
-      });
+      // probe(), not verify(): verify() degrades a failed read to null, which
+      // is indistinguishable from an unrated agent. A self-check that reports a
+      // broken read as "no data yet" is worse than no check at all.
+      const probe = await deps.verifier.probe(10);
+      if (probe.ok) {
+        const v = probe.value;
+        checks.push({
+          name: "verify",
+          ok: true,
+          detail:
+            v.count > 0
+              ? `on-chain reputation read OK (sampled agent #10: avg ${v.average}, ${v.count} feedback, ${v.uniqueClients} clients)`
+              : `on-chain read path OK (sampled agent #10 has no on-chain feedback yet)`,
+        });
+      } else {
+        checks.push({
+          name: "verify",
+          ok: false,
+          detail: `on-chain read FAILED (${probe.reason})${probe.detail ? `: ${probe.detail}` : ""}`,
+        });
+      }
     } catch (e) {
       checks.push({ name: "verify", ok: false, detail: `sample read failed: ${classifyError(e).error}` });
     }
