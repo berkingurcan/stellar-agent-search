@@ -55,6 +55,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `STELLAR_NETWORK=testnet` silently mixed two chains. The default explorer indexes mainnet only, but
+  `STELLAR_NETWORK` also selects the Soroban contracts and RPC, so testnet gave mainnet registry rows with
+  testnet on-chain reads and said nothing. It now warns on stderr naming both sides, and the combination is
+  documented in the README and in the recording rehearsal step. (The x402 demo was never at risk — it compares
+  the 402 challenge's network to the configured CAIP-2 id and aborts on a mismatch.)
 - `doctor` reported a **failed** on-chain read as a passing check with the message "sampled agent #10 has no
   on-chain summary yet". It called `verify()`, which degrades closed to `null`, making a broken RPC path
   indistinguishable from an unrated agent — so a misconfigured environment showed green and exited 0. It now

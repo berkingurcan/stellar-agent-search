@@ -71,6 +71,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const network = parseNetwork(env.STELLAR_NETWORK);
   const stellar = getConfig(network); // mainnet ⇒ MAINNET_CONFIG
 
+  const explorerBaseUrl = env.EXPLORER_BASE_URL?.trim() || DEFAULT_EXPLORER_BASE;
+  if (network === "testnet" && explorerBaseUrl === DEFAULT_EXPLORER_BASE) {
+    // The default explorer indexes MAINNET only (its own responses report
+    // network=mainnet). Soroban reads would follow the testnet contracts while
+    // the registry rows came from mainnet, so discovery and verification would
+    // silently describe two different chains. Warn rather than fake agreement —
+    // same contract as verification degrading to `unavailable`.
+    log.warn(
+      `STELLAR_NETWORK=testnet but EXPLORER_BASE_URL is the mainnet default (${DEFAULT_EXPLORER_BASE}) — ` +
+        "registry data will be MAINNET while on-chain reads use testnet. " +
+        "Set EXPLORER_BASE_URL to a testnet indexer, or use mainnet.",
+    );
+  }
+
   const weights: RankWeights = {
     quality: parseNum(env.RANK_W_QUALITY, DEFAULT_WEIGHTS.quality),
     volume: parseNum(env.RANK_W_VOLUME, DEFAULT_WEIGHTS.volume),
@@ -81,7 +95,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     network,
     stellar,
     rpcUrl: env.STELLAR_RPC_URL?.trim() || stellar.rpcUrl,
-    explorerBaseUrl: env.EXPLORER_BASE_URL?.trim() || DEFAULT_EXPLORER_BASE,
+    explorerBaseUrl,
     verifyOnchain: parseBool(env.VERIFY_ONCHAIN, true),
     scoreMax: parseNum(env.RANK_SCORE_MAX, RANK_SCORE_MAX),
     weights,

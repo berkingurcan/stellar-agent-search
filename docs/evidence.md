@@ -216,7 +216,10 @@ Cline, VS Code, Claude Desktop, Codex CLI, Gemini CLI**.
 Registry manifests are in place for three directories: [`server.json`](../server.json) (official MCP Registry),
 [`smithery.yaml`](../smithery.yaml), [`glama.json`](../glama.json).
 
-**Quality signals not required by the SOW:** 106 automated tests, clean TypeScript typecheck, two independent
+**Quality signals not required by the SOW:** a full automated suite green on every push across Node 18/20/22 ×
+Linux/macOS (count and result in the [Actions tab](https://github.com/berkingurcan/stellar-agent-mcp/actions) —
+deliberately not restated here, so it cannot go stale), clean TypeScript typecheck, `npm audit` clean, two
+independent
 adversarial code-review passes plus a security review with all findings resolved.
 
 ---

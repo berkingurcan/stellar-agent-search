@@ -5,7 +5,7 @@
  * silently regress. All pure / offline.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,8 @@ import { validWalletOrNull, resolveAgentId } from "../src/lib/identifier.js";
 import { deriveCapabilities } from "../src/tools/shared.js";
 import { toAgentCard } from "../src/lib/agentcard.js";
 import type { AgentProfile } from "../src/types.js";
+import { loadConfig } from "../src/config.js";
+import { log } from "../src/lib/logger.js";
 
 // A real mainnet-shaped G-address (owner of the Scrapper agent, CONTEXT §7).
 const G_ADDR = "GDDTQFQZK734EXIJE5LWU4G4YC5A6P5AHJ4UWVMV6WBFWT6BAAQQHV2V";
@@ -164,5 +166,37 @@ describe("server capabilities: declare only what we exercise", () => {
       /sendResourceListChanged|notifications\/resources\/list_changed/.test(readFileSync(f, "utf8")),
     );
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("testnet + mainnet-only explorer is warned, not silently mixed (config)", () => {
+  // The default explorer indexes mainnet only. Pairing it with STELLAR_NETWORK=testnet
+  // would serve mainnet registry rows alongside testnet on-chain reads — two chains
+  // described as one. The repo's degrade-closed rule says surface it, never fake it.
+  it("warns when testnet is paired with the default (mainnet) explorer", () => {
+    const warnings: string[] = [];
+    const spy = vi.spyOn(log, "warn").mockImplementation((m: string) => void warnings.push(m));
+    try {
+      loadConfig({ STELLAR_NETWORK: "testnet" } as NodeJS.ProcessEnv);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(warnings.join("\n")).toMatch(/testnet.*mainnet default|mainnet default.*testnet/is);
+  });
+
+  it("does not warn on mainnet, nor when an explicit explorer is supplied", () => {
+    for (const env of [
+      { STELLAR_NETWORK: "mainnet" },
+      { STELLAR_NETWORK: "testnet", EXPLORER_BASE_URL: "https://testnet.example.com" },
+    ]) {
+      const warnings: string[] = [];
+      const spy = vi.spyOn(log, "warn").mockImplementation((m: string) => void warnings.push(m));
+      try {
+        loadConfig(env as NodeJS.ProcessEnv);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(warnings.join("\n"), JSON.stringify(env)).not.toMatch(/mainnet default/i);
+    }
   });
 });
