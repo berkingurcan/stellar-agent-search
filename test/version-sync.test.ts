@@ -69,6 +69,21 @@ describe("advertised MCP SDK version matches the shipped dependency", () => {
     expect(stale, `stale SDK versions: ${stale.join(", ")}`).toEqual([]);
   });
 
+  it("server.json's two version fields match package.json", () => {
+    // CONTRIBUTING lists these as hand-maintained. publish.yml fires on a `v*`
+    // tag and pushes both npm and the MCP Registry, so a bump that misses either
+    // field advertises a version to the registry that npm never published.
+    const pkg = JSON.parse(read("package.json")) as { version: string };
+    const server = JSON.parse(read("server.json")) as {
+      version: string;
+      packages: Array<{ version: string; identifier?: string }>;
+    };
+    expect(server.version, "server.json top-level version").toBe(pkg.version);
+    for (const [i, p] of server.packages.entries()) {
+      expect(p.version, `server.json packages[${i}].version`).toBe(pkg.version);
+    }
+  });
+
   it("the advertised spec date is the SDK's own latest protocol version", () => {
     for (const path of [
       ["src", "cli", "index.ts"],
