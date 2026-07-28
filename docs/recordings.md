@@ -123,7 +123,7 @@ the point is that nothing is pre-cached.
 | # | Action | What must be on screen | Say |
 |---|---|---|---|
 | 1 | Show a clean environment: `node -v`, and that no MCP server is configured | Node ≥ 18, empty MCP list | "Fresh environment. Node 18 or newer is the only prerequisite." |
-| 2 | `npx skills add trionlabs/stellar-8004 --skill mcp` | The skill installing | "One command pulls the skill from the Stellar 8004 repository." |
+| 2 | `npx skills add berkingurcan/stellar-agent-mcp --skill mcp` | The skill installing | "One command pulls the skill straight from the project repository." |
 | 3 | `claude mcp add --scope user stellar-agent -- npx -y stellar-agent-mcp` | The server registering | "One more line registers the MCP server. No API key, no wallet, no config file to edit." |
 | 4 | Restart the client, run `/mcp` | `stellar-agent` connected | "Connected." |
 | 5 | Call `find_agent({ "query": "web scraper" })` | Live ranked results | "And from a standing start, we're querying the on-chain registry. Under two minutes." |

@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ReputationVerifier.probe()` — an uncached read that reports *why* a verification produced no value
   (`disabled` / `truncated` / `contract-error` / `out-of-range` / `rpc-error`).
 
+### Changed
+
+- The skill now ships from this repository at `skills/mcp/SKILL.md` (was `skill/SKILL.md`, destined for
+  `trionlabs/stellar-8004`). Install with `npx skills add berkingurcan/stellar-agent-mcp --skill mcp`. The
+  server is an independent package, so the skill is versioned with the code it installs and needs no
+  cross-repository merge to release. The SOW allows this — its example command is qualified "or equivalent".
+
 ### Fixed
 
 - `doctor` reported a **failed** on-chain read as a passing check with the message "sampled agent #10 has no
@@ -24,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   indistinguishable from an unrated agent — so a misconfigured environment showed green and exited 0. It now
   uses `probe()`, fails the check, prints the underlying cause, and exits non-zero. The degrade-closed contract
   that tools rely on is unchanged.
-- `skill/SKILL.md` listed 12 tools (there are 13) and documented a `stellar8004://search/{query}` resource that
+- The skill file listed 12 tools (there are 13) and documented a `stellar8004://search/{query}` resource that
   does not exist, plus two inaccurate resource descriptions.
 
 ## [0.1.0] — unreleased
@@ -71,8 +78,8 @@ a2a-x402 extension URI.
 **Reference x402 loop** — `examples/x402-demo.ts` discovers an agent, pays its endpoint in USDC over x402, and
 writes on-chain reputation feedback. The only keyed code in the repo; run manually.
 
-**Distribution** — `server.json` (MCP Registry), `smithery.yaml`, `glama.json`, and a `SKILL.md` published to
-`trionlabs/stellar-8004/skills/mcp/` for `npx skills add trionlabs/stellar-8004 --skill mcp`.
+**Distribution** — `server.json` (MCP Registry), `smithery.yaml`, `glama.json`, and `skills/mcp/SKILL.md` for
+`npx skills add berkingurcan/stellar-agent-mcp --skill mcp`.
 
 **Docs** — README, getting-started, architecture, full tool reference, and integration guides for 8 clients
 (Claude Code, Cursor, Windsurf, Cline, VS Code, Claude Desktop, Codex CLI, Gemini CLI).
