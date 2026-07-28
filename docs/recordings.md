@@ -86,7 +86,7 @@ one take.
 ### Rehearsal — do this off-camera, twice
 
 ```bash
-# 1. testnet dry run
+# 1. testnet dry run — exercises the wiring, NOT a testnet rehearsal (see note)
 STELLAR_NETWORK=testnet DRY_RUN=1 npx tsx examples/x402-demo.ts
 
 # 2. mainnet dry run — preflight + discovery only, no spend
@@ -94,6 +94,12 @@ DRY_RUN=1 npx tsx examples/x402-demo.ts
 ```
 
 Both must reach discovery cleanly and report the preflight balances you expect. Only then record.
+
+> **What the testnet run does and does not prove.** The default explorer indexes **mainnet only**, so run 1
+> discovers *mainnet* agents while pointing the Soroban reads at testnet — the server prints a warning saying
+> exactly that. It is a useful smoke test of the script's wiring, but it is not a testnet rehearsal of a real
+> payment. The demo will refuse to pay across that seam: it compares the 402 challenge's network against the
+> configured CAIP-2 id and aborts on `network mismatch`. Run 2 is the one that rehearses the real thing.
 
 ### Shot list
 

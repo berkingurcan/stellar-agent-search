@@ -117,8 +117,8 @@ All configuration is via environment variables (canonical for MCP mode); CLI fla
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `STELLAR_NETWORK` | `mainnet` | `mainnet` or `testnet` |
-| `EXPLORER_BASE_URL` | `https://stellar8004.com` | Explorer HTTP API base |
+| `STELLAR_NETWORK` | `mainnet` | `mainnet` or `testnet` — see the note below before using `testnet` |
+| `EXPLORER_BASE_URL` | `https://stellar8004.com` | Explorer HTTP API base. **Indexes mainnet only** |
 | `STELLAR_RPC_URL` | `https://mainnet.sorobanrpc.com` | Soroban RPC for on-chain verification |
 | `VERIFY_ONCHAIN` | `true` | Set `false` to skip Soroban reads (declared-only) |
 | `RANK_SCORE_MAX` | `100` | Feedback score scale (values are 0..100 ints) |
@@ -126,6 +126,11 @@ All configuration is via environment variables (canonical for MCP mode); CLI fla
 
 `STELLAR_PRIVATE_KEY` is **intentionally ignored** if present (and warned about on stderr) — this server is
 keyless by construction.
+
+> **`testnet` needs its own explorer.** The default explorer indexes **mainnet only**, while `STELLAR_NETWORK`
+> also selects the Soroban contracts and RPC. Setting `testnet` without also setting `EXPLORER_BASE_URL` gives
+> you mainnet registry rows alongside testnet on-chain reads — two chains described as one. The server warns
+> loudly on stderr when it sees that combination rather than pretending the pair agrees.
 
 ---
 
