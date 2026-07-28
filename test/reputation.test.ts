@@ -5,6 +5,9 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ReputationClient } from "@trionlabs/stellar8004";
 import { loadConfig } from "../src/config.js";
 import { ReputationVerifier } from "../src/lib/reputation.js";
@@ -190,5 +193,27 @@ describe("on-chain reads never fall back to the axios transport (soroban.ts)", (
       (v) => typeof v === "function" && "defaults" in (v as object) && "interceptors" in (v as object),
     );
     expect(looksAxios, "reader is using the axios transport").toBe(false);
+  });
+});
+
+describe("the no-axios subpath this build depends on still exists", () => {
+  // stellar-sdk INVERTED this layout in v16: the default build became
+  // fetch-based and axios moved behind an explicit `./axios` subpath, so
+  // `./no-axios/*` — which src/lib/soroban.ts imports — does not exist there.
+  //   v15: .  ./contract  ./rpc  ./no-axios  ./no-axios/contract  ./no-axios/rpc
+  //   v16: .  ./contract  ./rpc  ./axios     ./axios/contract     ./axios/rpc
+  // We pin ^15, so this is fine today. Bumping to ^16 must switch soroban.ts to
+  // the plain `./contract` subpath (already fetch-based there) — and this test
+  // is what turns that into a red build instead of a runtime resolution error.
+  it("resolves @stellar/stellar-sdk/no-axios/contract under the pinned major", async () => {
+    const pkg = JSON.parse(
+      readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8"),
+    ) as { dependencies: Record<string, string> };
+    expect(
+      pkg.dependencies["@stellar/stellar-sdk"],
+      "soroban.ts imports ./no-axios/*, which v16 removed — see the comment above",
+    ).toMatch(/\^?15/);
+
+    await expect(import("@stellar/stellar-sdk/no-axios/contract")).resolves.toBeDefined();
   });
 });
