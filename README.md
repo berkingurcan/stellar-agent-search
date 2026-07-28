@@ -168,6 +168,9 @@ Built on the stable MCP **1.x** SDK (`@modelcontextprotocol/sdk` 1.30.0, spec 20
 Reviewing this against a grant or SOW? Start at **[docs/evidence.md](docs/evidence.md)** — a
 deliverable-to-evidence map with verification steps, written to be checked without a technical background.
 
+Known open work — including one defect that reaches users of the published package — is tracked in
+**[issues/](issues/README.md)**, one file per issue.
+
 Bug reports and PRs welcome. Read **[CONTRIBUTING.md](CONTRIBUTING.md)** first — it covers the project layout and
 the four invariants CI enforces (read-only/keyless, stdout-is-JSON-RPC-only, the trust boundary, and
 degrade-closed verification). Release history lives in **[CHANGELOG.md](CHANGELOG.md)**.

@@ -39,6 +39,7 @@ node dist/index.js                     # the MCP stdio surface (speaks JSON-RPC;
 | `examples/` | `x402-demo.ts` — the *only* keyed code in the repo, run manually |
 | `test/` | vitest suites, including the invariant tests below |
 | `skills/mcp/` | `SKILL.md` — installed by `npx skills add berkingurcan/stellar-agent-mcp --skill mcp` |
+| `issues/` | Open work, one file per issue — see [issues/README.md](issues/README.md) |
 
 ## Non-negotiable invariants
 

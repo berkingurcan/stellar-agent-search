@@ -237,19 +237,25 @@ for the follow-on SCF scope.
 
 ## 6. Outstanding items and their order
 
-Everything below requires credentials or funds that only the builder holds.
+These are the items that block **delivery**, in the order they should be done. Each needs credentials, funds, or
+a GitHub setting only the builder holds. Full detail — verification steps and acceptance criteria — lives in one
+file per item under [`issues/`](../issues/); this table is the ordering, not a second copy of it.
 
-| # | Item | Unblocks | Owner |
-|---|---|---|---|
-| 0 | **Make the repository public** (Settings → General → Danger Zone) | Everything reviewer-facing; the SOW requires a public MIT repo. Also required for npm provenance and the MCP Registry publish | Builder |
-| 1 | `npm publish` (or push a `v0.1.0` tag once Trusted Publishing is configured) | D1 npm link; makes `npx -y stellar-agent-mcp` resolve, which Recordings 1 and 3 depend on | Builder |
-| 2 | Set the GitHub **default branch to `main`** (Settings → General → Default branch) | D3 install command — `npx skills add` reads the default branch, which is currently the disposable working branch; also makes CI run on the branch reviewers see | Builder |
-| 3 | Funded mainnet run of `examples/x402-demo.ts` | D2 both tx hashes | Builder |
-| 4 | Recordings 1–3 | D1, D2, D3 recordings | Builder |
+| # | Item | Unblocks |
+|---|---|---|
+| [01](../issues/P0-01-make-repository-public.md) | **Make the repository public** | Everything reviewer-facing; also npm provenance and the MCP Registry publish |
+| [02](../issues/P0-02-set-default-branch-to-main.md) | **Set the default branch to `main`** | D3's one-command install — `npx skills add` reads the default branch, which is currently the disposable working branch |
+| [03](../issues/P0-03-first-npm-publish.md) | First `npm publish` + Trusted Publisher | D1's npm link; makes `npx -y stellar-agent-mcp` resolve |
+| [04](../issues/P0-04-funded-mainnet-x402-run.md) | Funded mainnet run of `examples/x402-demo.ts` | D2's two transaction hashes |
+| [05](../issues/P0-05-record-three-demos.md) | Recordings 1–3 | The D1, D2 and D3 recordings |
 
-Item 0 blocks review entirely; items 0 and 2 together gate the one-command install; item 1 gates the two
-install recordings. See
-[docs/recordings.md](recordings.md) for shot-by-shot scripts.
+Item 01 blocks review entirely. Items 01 and 02 together gate the one-command install; 03 gates the two install
+recordings; 04 gates the payment recording. [docs/recordings.md](recordings.md) has the shot-by-shot scripts.
+
+Known engineering work that does **not** block SOW delivery — including one defect that reaches users of the
+published package — is tracked in the same place: see [`issues/README.md`](../issues/README.md). It is listed
+openly rather than omitted, on the same principle as the declared-vs-verified reporting this server is built
+around.
 
 ---
 
