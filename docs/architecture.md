@@ -220,6 +220,28 @@ explorer and RPC health checks pass — exactly the feature this server exists f
 ✗ verify    on-chain read FAILED (rpc-error): Request failed with status code 405
 ```
 
+### The fix: reads run on the fetch-based build
+
+`src/lib/soroban.ts` builds the Reputation reader from `@stellar/stellar-sdk/no-axios/contract`, whose
+`Client` internally requires `../rpc` — so the whole chain is fetch. It does not re-implement the contract ABI:
+it borrows the generated bindings' `Spec` and hands it to the no-axios `Client`, so encoding and decoding stay
+byte-identical and there is no second copy of the ABI to go stale.
+
+One trap, found the hard way and now pinned by a test. The bindings' `Client` constructor **mutates the options
+object it is given**, writing back an axios-backed `rpc.Server` under `options.server`; the no-axios `Client`
+then honours a pre-set `options.server`. Sharing one options object between the spec donor and the real client
+silently reinstates axios for every read — it typechecks, it passes offline tests, and it fails only against a
+live proxy. Each client gets its own freshly built options.
+
+Verified end to end: with the `overrides` block removed and the vulnerable `axios@1.15.0` restored, `doctor`'s
+on-chain verification passes through the same proxy that produced the `405` above.
+
+**What this does not do.** `@trionlabs/stellar8004` is a barrel — importing anything from it (including
+`getConfig` in `src/config.ts`) loads the default SDK build and therefore axios into the process, even though
+nothing on the read path uses it. The package also still appears in a consumer's `npm audit`, which is static.
+Closing that needs either the upstream range widened or every barrel import moved to a subpath
+(`@trionlabs/stellar8004/api/explorer` is axios-free; `/bindings` is not).
+
 ### The `overrides` fix — and exactly how far it reaches
 
 `@stellar/stellar-sdk@15.1.0` pins axios to the **exact** version `1.15.0`, so there is no range to widen. An

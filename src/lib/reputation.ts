@@ -2,7 +2,8 @@
  * reputation.ts — ReputationVerifier: trust-minimized, on-chain re-derivation
  * of an agent's reputation and a declared-vs-verified diff (the headline edge).
  *
- * This is READ-ONLY. It uses the SDK's `ReputationClient` bindings which
+ * This is READ-ONLY. It uses the generated contract spec on a fetch-only SDK
+ * build (see `soroban.ts` for why), which
  * auto-simulate: the read result lives on the returned
  * `AssembledTransaction.result`. There is NO signing, NO keypair, NO write —
  * the client is constructed with a source public key used only as the
@@ -23,7 +24,8 @@
  * bounded (top-K agents, decided by the caller; ~10-min cache).
  */
 
-import { ReputationClient, type SummaryResult } from "@trionlabs/stellar8004";
+import { type SummaryResult } from "@trionlabs/stellar8004";
+import { createReputationReadClient, type ReputationReadClient } from "./soroban.js";
 import type { Config } from "../config.js";
 import type {
   DeclaredReputation,
@@ -93,7 +95,7 @@ export interface ReputationVerifierOptions {
   clock?: Clock;
   logger?: Logger;
   /** Inject a pre-built binding (tests). */
-  client?: ReputationClient;
+  client?: ReputationReadClient;
   /**
    * Read-simulation source G-address. Falls back to RANK_SIM_SOURCE; if neither
    * is set, publicKey is omitted so the SDK simulates from its fabricated
@@ -106,7 +108,7 @@ export interface ReputationVerifierOptions {
 }
 
 export class ReputationVerifier {
-  private readonly client: ReputationClient | null;
+  private readonly client: ReputationReadClient | null;
   private readonly cache: TtlCache;
   private readonly clock: Clock;
   private readonly logger: Logger;
@@ -131,13 +133,7 @@ export class ReputationVerifier {
       // source; otherwise omit it so the SDK uses its fabricated NULL_ACCOUNT and
       // skips the getAccount() lookup that would otherwise fail on public RPCs.
       const simSource = opts.simSource ?? process.env.RANK_SIM_SOURCE?.trim();
-      this.client = new ReputationClient({
-        contractId: cfg.stellar.contracts.reputation,
-        networkPassphrase: cfg.stellar.networkPassphrase,
-        rpcUrl: cfg.rpcUrl,
-        ...(simSource ? { publicKey: simSource } : {}),
-        allowHttp: cfg.rpcUrl.startsWith("http://"),
-      });
+      this.client = createReputationReadClient(cfg, { ...(simSource ? { simSource } : {}) });
     }
   }
 

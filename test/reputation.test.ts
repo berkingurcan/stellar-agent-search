@@ -156,3 +156,39 @@ describe("probe(): a failed read is distinguishable from an unrated agent", () =
     if (!p.ok) expect(p.reason).toBe("disabled");
   });
 });
+
+describe("on-chain reads never fall back to the axios transport (soroban.ts)", () => {
+  // The generated bindings' Client constructor MUTATES the options object it is
+  // given, writing back an axios-backed rpc.Server under `options.server`. The
+  // no-axios Client honours a pre-set `options.server`, so sharing one object
+  // between the spec donor and the real client silently reinstates axios for
+  // every read. It typechecks, it passes offline tests, and it fails only
+  // against a live proxy with a 405 — so it has to be pinned here.
+  it("gives the reader its own options object, not the donor's", async () => {
+    const { createReputationReadClient } = await import("../src/lib/soroban.js");
+    const cfg = {
+      network: "mainnet",
+      stellar: {
+        contracts: { reputation: "CBOIAIMMWAXI57OATLX6BWVDQLCC4YU55HV6MZXFRP6CBSGAMXSTEPPA" },
+        networkPassphrase: "Public Global Stellar Network ; September 2015",
+      },
+      rpcUrl: "https://mainnet.sorobanrpc.com",
+    } as unknown as Parameters<typeof createReputationReadClient>[0];
+
+    const client = createReputationReadClient(cfg) as unknown as {
+      options: { server: unknown };
+    };
+
+    const server = client.options.server as { constructor: { name: string } } | undefined;
+    expect(server, "reader should have built its own rpc server").toBeTruthy();
+
+    // The fetch-based build's Server carries no axios instance. The axios build's
+    // Server exposes one; asserting its absence is what catches the shared-options
+    // regression, whichever way the SDK names its internals.
+    const asRecord = server as unknown as Record<string, unknown>;
+    const looksAxios = Object.values(asRecord).some(
+      (v) => typeof v === "function" && "defaults" in (v as object) && "interceptors" in (v as object),
+    );
+    expect(looksAxios, "reader is using the axios transport").toBe(false);
+  });
+});
