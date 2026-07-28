@@ -4,9 +4,9 @@ description: Use when an AI agent or MCP client needs to discover, rank, verify,
 license: MIT
 metadata:
   author: berkingurcan
-  version: "1.0.0"
+  version: "0.1.0"
   mcp-package: "stellar-agent-mcp"
-  mcp-package-version: "^0.1.0"
+  mcp-package-version: ">=0.1.0"
 ---
 
 # Stellar Agent MCP — discover, rank & invoke Stellar 8004 agents from any MCP client
@@ -209,7 +209,7 @@ resource to see updated registry state.
 | `stellar8004://agent/{id}/reputation` | Declared-vs-on-chain reputation diff. |
 | `stellar8004://owner/{address}` | Agents owned by a Stellar `G…` address. |
 
-Eight resources total: 3 static (`registry`, `leaderboard`, `health`) + 5 templates. Discovery is a **tool**
+**8 resources** total: 3 static (`registry`, `leaderboard`, `health`) + 5 templates. Discovery is a **tool**
 (`find_agent`), not a resource — there is no `stellar8004://search/…` URI.
 
 ---
