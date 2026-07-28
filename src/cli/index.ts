@@ -582,7 +582,7 @@ async function cmdDoctor(deps: ToolDeps, flags: CliFlags): Promise<number> {
     for (const c of checks) {
       out(`${c.ok ? CHECK : CROSS} ${c.name.padEnd(9)} ${c.detail}`);
     }
-    out(`${INFO} server    ${SERVER_NAME}  ·  @modelcontextprotocol/sdk 1.29.0  ·  spec 2025-11-25`);
+    out(`${INFO} server    ${SERVER_NAME}  ·  @modelcontextprotocol/sdk 1.30.0  ·  spec 2025-11-25`);
   }
   return checks.every((c) => c.ok) ? 0 : 1;
 }

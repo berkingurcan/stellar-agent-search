@@ -50,11 +50,11 @@ does not work:
 ✔ node      v20.11.0 (>=18 required)
 ✔ network   mainnet
 ✔ read-only keyless (no signer, no writes)
-✔ explorer  https://stellar8004.com  status=ok  identity ledger 63,607,729 (fresh)
+✔ explorer  https://stellar8004.com  status=healthy  identity ledger 63,699,173 (fresh)
 ✔ soroban   https://mainnet.sorobanrpc.com  healthy
-✔ verify    on-chain reputation read OK (sampled agent #10: avg 96.75, 4 feedback)
+✔ verify    on-chain reputation read OK (sampled agent #10: avg 96, 8 feedback, 4 clients)
 ✔ tools     find_agent, rank_agent, get_agent_profile, list_services (+ list_agents, leaderboard)
-ℹ server    stellar-agent-mcp  ·  @modelcontextprotocol/sdk 1.29.0  ·  spec 2025-11-25
+ℹ server    stellar-agent-mcp  ·  @modelcontextprotocol/sdk 1.30.0  ·  spec 2025-11-25
 ```
 
 Add `--json` for CI.
