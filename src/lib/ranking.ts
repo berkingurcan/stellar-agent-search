@@ -1,17 +1,18 @@
 /**
- * ranking.ts — the deterministic 3-axis, on-chain-verifiable ranking engine.
+ * ranking.ts — the deterministic 3-axis ranking heuristic.
  *
  * Formula frozen by modules/01 §3 + INFRA-BLUEPRINT:
  *
  *   quality = clamp(avg / scoreMax, 0, 1)            (null / 0 when unrated)
  *   volume  = clamp(ln1p(fc) / ln1p(VOL_SAT), 0, 1)  (log-saturating)
- *   breadth = clamp(ln1p(uc) / ln1p(BREADTH_SAT),0,1)(sybil-resistant)
+ *   breadth = clamp(ln1p(uc) / ln1p(BREADTH_SAT),0,1)(declared Sybil-cost proxy)
  *
  *   base  = wQ*quality + wV*volume + wB*breadth      (weights sum to 1 ⇒ [0,1])
  *   score = clamp(base + paymentBonus + endpointBonus, 0, 1)
  *
  * Default weights 0.5 / 0.2 / 0.3 put breadth (unique clients — hard to fake)
- * above volume (raw count — cheap to fake) for sybil-resistance.
+ * above volume (raw count — cheap to fake) as a Sybil-cost hedge. Neither
+ * field proves personhood or makes the result Sybil-resistant.
  *
  * Two separated scores:
  *   - `score`     — honest displayed score (unrated ⇒ quality contributes 0).
@@ -88,7 +89,7 @@ export function volumeNorm(feedbackCount: number): number {
   return clamp(Math.log1p(fc) / Math.log1p(RANKING.VOL_SAT), 0, 1);
 }
 
-/** Breadth / sybil-resistance axis, [0,1]. Log-saturating on unique clients. */
+/** Breadth / declared Sybil-cost proxy, [0,1]. Log-saturating on unique clients. */
 export function breadthNorm(uniqueClients: number): number {
   const uc = uniqueClients > 0 ? uniqueClients : 0;
   return clamp(Math.log1p(uc) / Math.log1p(RANKING.BREADTH_SAT), 0, 1);
@@ -119,8 +120,8 @@ export interface RankInput {
   mpp: boolean;
   hasServices: boolean;
   /**
-   * Verification outcome. Only "verified" earns the bonus; "mismatch" is a
-   * flag with no penalty (modules/01 §3.4). Omitted ⇒ treated as not verified.
+   * Bounded comparison outcome. It affects evidence flags only; it never adds
+   * to or subtracts from the ranking score. Omitted means not checked.
    */
   verificationStatus?: VerificationStatus;
   /** ISO string or epoch ms; used only for the `newAgent` flag. */

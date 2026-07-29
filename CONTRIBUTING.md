@@ -122,17 +122,17 @@ registry record as ours.
 
 ```bash
 npm version patch --no-git-tag-version  # or minor / major; do not tag yet
-# Update server.json (top-level + packages[0]) and skills/mcp/SKILL.md metadata.version.
+# Update server.json, skill metadata, Smithery, pinned docs/web examples, and CHANGELOG.md.
 npm ci && npm run validate:release && npm run typecheck && npm test && npm run build
-git commit -am "chore: release vX.Y.Z"
+# Review and commit only the complete release diff, then wait for green main CI.
 git tag vX.Y.Z
-git push origin main
 git push origin vX.Y.Z
 ```
 
-Keep `version` in sync across four hand-maintained places: `package.json`, `server.json` (both the top-level
-and `packages[].version`), and `metadata.version` in `skills/mcp/SKILL.md`. `test/skill-sync.test.ts` and
-`test/version-sync.test.ts` enforce all four, so a missed bump is a red build rather than a bad release.
+Keep `version` in sync across `package.json`, `server.json` (both the top-level and `packages[].version`), and
+`metadata.version` in `skills/mcp/SKILL.md`. Also update `smithery.yaml` and every persistent onboarding example
+to the same exact `stellar-agent-mcp@X.Y.Z` pin. `test/skill-sync.test.ts`, `test/version-sync.test.ts`, and the
+release validator enforce the machine-readable surfaces; review the complete pinned-command search before tagging.
 
 ### First release — one-time setup
 

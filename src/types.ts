@@ -39,7 +39,7 @@ export type VerificationStatus = "verified" | "partial" | "mismatch" | "unavaila
 // Services & capabilities
 // ---------------------------------------------------------------------------
 
-/** A single invokable service endpoint declared by an agent (self-declared). */
+/** A self-declared service endpoint candidate; no liveness or ownership proof. */
 export interface ServiceEntry {
   name: string;
   endpoint: string;

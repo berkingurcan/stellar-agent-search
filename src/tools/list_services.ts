@@ -193,7 +193,7 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
 
       const text = serverText`${rows.length} self-declared service candidate(s) across ${agentsWithServices} agent(s) on ${safe(
         deps.config.network,
-      )} (page ${args.page}).`;
+      )} (page ${args.page}). Liveness, ownership, protocol conformance, and payment behavior were not verified.`;
 
       // The list response and each detail hydration are independent v1 reads
       // with no shared revision/cursor. Even a one-page list cannot make the

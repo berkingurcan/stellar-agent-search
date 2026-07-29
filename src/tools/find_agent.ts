@@ -44,7 +44,10 @@ const inputShape = {
   limit: zLimit(10),
   x402: z.literal(true).optional().describe("When present, require x402 (USDC pay-per-call) support."),
   mpp: z.literal(true).optional().describe("When present, require MPP micropayment support."),
-  hasServices: z.literal(true).optional().describe("When present, require invokable service endpoints."),
+  hasServices: z
+    .literal(true)
+    .optional()
+    .describe("When present, require owner-declared service endpoint candidates."),
   trust: zTrust.optional().describe("Require a trust model."),
   minScore: zMinScore.optional().describe("Minimum declared reputation score (0..100)."),
   sortBy: zSort.default("relevance"),

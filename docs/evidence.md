@@ -63,20 +63,21 @@ Additional: `list_agents`, `leaderboard`, `resolve_agent`, `get_agents_by_owner`
 `verify_reputation`, `get_agent_card`, `get_registry_stats`, `get_registry_health`. Plus 8 MCP **resources**
 (`stellar8004://…`) and 5 **prompts** (slash-command workflows), neither of which the SOW required.
 
-### Beyond scope: reputation is verified, not reported
+### Beyond scope: bounded reputation evidence, not blind reporting
 
-The SOW asked for ranking by reputation. Reputation numbers on any registry are normally taken from an indexer
-— that is, taken on faith. This server instead re-derives each agent's reputation **directly from the Reputation
-smart contract** (`get_summary` + `get_clients_paginated`) and reports a declared-vs-verified diff. It works on
-default mainnet with **no funded account and no private key**.
+The SOW asked for ranking by reputation. This server does not blindly relabel the indexer's values as proof: it
+reads the Reputation contract (`get_summary` + `get_clients_paginated`) and performs a bounded, field-scoped
+comparison. It works on default mainnet with **no funded account and no private key**. Current healthy results
+are `partial`, because active unique clients cannot be derived from the append-only client list and the
+explorer/RPC reads do not share a ledger-bound snapshot.
 
 Reviewer check, on agent 10 (confirmed against mainnet on 2026-07-28):
 
 | Source | Average score | Feedback count | Unique clients |
 |---|---|---|---|
 | Explorer (declared) | 96.75 | 8 | 4 |
-| Reputation contract (verified) | 96 | 8 | 4 |
-| Result | **`verified`** | | |
+| Reputation contract (bounded read) | 96 | 8 | not derivable |
+| Result | **`partial`** | average + count compared | unique clients unverified |
 
 This is independently reproducible without our code. Simulate two read calls against the Reputation contract
 `CBOIAIMMWAXI57OATLX6BWVDQLCC4YU55HV6MZXFRP6CBSGAMXSTEPPA` on `https://mainnet.sorobanrpc.com`:
@@ -86,7 +87,8 @@ This is independently reproducible without our code. Simulate two read calls aga
 - `get_summary(agent_id: 10, client_addresses: <those 4>, tag1: "", tag2: "")` →
   `summary_value 96`, `summary_value_decimals 0`, `count 8`
 
-Both are read-only simulations: no account, no funds, no signature.
+Both are read-only simulations: no account, no funds, no signature. Matching values are useful evidence, not
+proof of a synchronized snapshot or Sybil resistance.
 
 > **Note for anyone running behind an HTTP proxy.** The reputation read deliberately uses Stellar SDK's
 > fetch-based `no-axios` transport, so the historical axios/proxy `405` failure is not an accepted explanation
@@ -268,12 +270,13 @@ file per item under [`issues/`](../issues/); this table is the ordering, not a s
 | # | Item | Unblocks |
 |---|---|---|
 | [01](../issues/P0-01-make-repository-public.md) | **Make the repository public** | Everything reviewer-facing; also npm provenance and the MCP Registry publish |
-| ~~[02](../issues/P0-02-set-default-branch-to-main.md)~~ | ~~**Set the default branch to `main`**~~ — **done 2026-07-29**; the disposable working branch is deleted | D3's optional skill acquisition — `npx skills add` reads the default branch |
+| [02](../issues/P0-02-set-default-branch-to-main.md) | Default branch is `main`; delete the still-present stale working branch | Repository hygiene; no longer blocks default-branch installs |
 | [03](../issues/P0-03-first-npm-publish.md) | First npm bootstrap + Trusted Publisher | D1's npm link; makes the pinned `npx -y stellar-agent-mcp@0.1.0` resolve |
 | [04](../issues/P0-04-funded-mainnet-x402-run.md) | Funded mainnet run of `examples/x402-demo.ts` | D2's two transaction hashes |
 | [05](../issues/P0-05-record-three-demos.md) | Recordings 1–3 | The D1, D2 and D3 recordings |
 
-Item 01 blocks public review and the optional skill acquisition (02 is done); 03 gates the actual `setup`
+Item 01 blocks public review and the optional skill acquisition; 02's default-branch blocker is resolved but
+its stale branch still needs deletion; 03 gates the actual `setup`
 bootstrap and the two install recordings; 04 gates the payment recording. [docs/recordings.md](recordings.md)
 has the shot-by-shot scripts.
 

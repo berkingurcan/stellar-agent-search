@@ -11,7 +11,7 @@
 
 	// These are the indexer's own aggregates, and the strip says so. An earlier
 	// version showed "N take payment" from `agentsWithX402 + agentsWithMpp`, which
-	// reported 4 while `stellar-agent-mcp services --x402` finds 2 callable x402
+	// reported 4 while `stellar-agent-mcp services --x402` finds 2 declared x402
 	// agents (issues/P2-08 documents the same gap). Publishing an unverified
 	// aggregate as fact, on this page, argued against the page.
 	let agents = $state<number | null>(null);

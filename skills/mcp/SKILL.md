@@ -23,7 +23,8 @@ metadata:
 ## When to use this
 
 - An agent or user needs to **FIND** another agent on Stellar 8004 by capability / skill (e.g. "a paid web scraper").
-- Needs to **RANK / VET** candidates by *on-chain-verified* reputation before trusting or paying — not self-declared scores.
+- Needs to **RANK / VET** candidates using declared reputation plus bounded, field-scoped on-chain evidence
+  before trusting or paying.
 - Needs an agent's **full profile** (identity, services, scores, recent feedback) and its canonical `stellar:…#id` handle.
 - Needs a **catalog of self-declared service candidates** (x402 / MPP endpoints) to vet before calling.
 - Wants to **wire the stellar-agent-mcp server** into Claude Code / Cursor / Windsurf / Cline / Claude Desktop / VS Code.
@@ -36,7 +37,7 @@ in this session, **install the server now** using the [Install](#install-do-this
 ## What the server setup provides
 
 - The **`stellar-agent-mcp`** npm package: a read-only stdio MCP server wrapping `@trionlabs/stellar8004`'s
-  `ExplorerClient` (registry reads) + Soroban `ReputationClient` bindings (trust-minimized on-chain verification).
+  `ExplorerClient` (registry reads) + Soroban `ReputationClient` bindings (bounded on-chain comparison).
 - **13 read tools.** The 4 primary (documented below) — `find_agent`, `rank_agent`, `get_agent_profile`,
   `list_services` — plus 9 complete-core tools: `list_agents`, `leaderboard`, `resolve_agent`,
   `get_agents_by_owner`, `get_agent_feedback`, `verify_reputation`, `get_agent_card` (derived, unverified
@@ -178,7 +179,7 @@ fee sponsorship, and payee must match a separately reviewed/pinned payment polic
 | Tool | Purpose | Key inputs | Returns (structuredContent) |
 |---|---|---|---|
 | **`find_agent`** | NL discovery → ranked list. Parses the query into keyword search + inferred filters (x402 / trust / minScore), queries a bounded explorer window, ranks client-side. | `query*` (string), `limit` (1–50, def 10), optional `x402` / `mpp` / `hasServices` / `trust` / `minScore` / `sortBy` overrides, `verify` (def false) | `{ interpretedQuery, count, agents: RankedAgent[], coverage }` |
-| **`rank_agent`** | Explicit ranking with per-axis breakdown + on-chain verification (the differentiator). | Exactly one of `agentIds` (int[]) **or** `query`; `weights?` (quality/volume/breadth, re-normalized), `verify` (def **true**), `limit`, `sortBy` | `{ weights, count, agents: RankedAgent[], coverage? }` with `breakdown` + `verification` per agent |
+| **`rank_agent`** | Explicit ranking with per-axis breakdown + bounded on-chain evidence. | Exactly one of `agentIds` (int[]) **or** `query`; `weights?` (quality/volume/breadth, re-normalized), `verify` (def **true**), `limit`, `sortBy` | `{ weights, count, agents: RankedAgent[], coverage? }` with `breakdown` + `verification` per agent |
 | **`get_agent_profile`** | Deep profile for one agent: identity, services, scores, recent feedback, verification, canonical handle. | `agent*` (numeric id **or** `stellar:{net}:{id}#n`), `feedbackLimit` (0–50, def 5), `verify` (def true) | `AgentProfile` (metadata, `services[]`, `scores`, `recentFeedback[]`, `verification`, `stellarId`) |
 | **`list_services`** | Flat, filterable catalog of self-declared x402 / MPP endpoint candidates (not protocol/ownership proof). | `search?`, `x402?`, `mpp?`, `trust?`, `minScore?`, `limit` (1–50, def 20), `page` (def 1) | `{ count, page, services: ServiceCatalogEntry[], coverage }` |
 
@@ -186,13 +187,13 @@ For discovery outputs, including `leaderboard`, inspect `coverage.coverageComple
 ended while later pages still existed; the returned ordering is valid only for the scanned candidate window,
 not a global registry ranking.
 
-**On-chain verification (why this server is different).** `rank_agent` and `get_agent_profile` return a
-`verification` block that re-derives reputation directly from the Reputation contract (`get_summary` /
-`get_clients_paginated`) and compares it against the explorer's *declared* values —
-`status: "verified" | "mismatch" | "unavailable"`, with `declared` vs `verified` figures. A mismatch is
-**flagged, not penalized** (usually indexer lag). If the RPC is unreachable, verification degrades to
-`unavailable` and the rest of the response is still returned. Prior 8004 discovery MCPs surface only
-self-declared flags; this one verifies against the chain.
+**Bounded on-chain evidence (why this server is different).** `rank_agent` and `get_agent_profile` return a
+`verification` block that reads the Reputation contract (`get_summary` / `get_clients_paginated`) and compares
+average plus active feedback count with the explorer's *declared* values. The current summary covers at most
+five comparable clients; active unique clients remain unverified and the reads lack a shared ledger snapshot.
+Therefore current healthy results are `partial`; `verified` is reserved for future complete-field evidence.
+The full status set is `verified | partial | mismatch | unavailable | skipped`. A mismatch is **flagged, not
+scored or treated as proof of manipulation**. Missing completeness or RPC evidence degrades to `unavailable`.
 
 **Trust boundary.** Server-authored summary text (`content[].text`) interpolates only typed /
 enum / numeric values — scores, counts, ids, capability flags. Untrusted, agent-authored free text (names,

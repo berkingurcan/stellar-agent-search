@@ -32,11 +32,11 @@ substring-matches poorly and has no score sort.
 | `limit` | int 1–50 | `10` | Max rows returned |
 | `x402` | boolean | — | Require x402 (USDC pay-per-call) support |
 | `mpp` | boolean | — | Require MPP micropayments (filtered by the explorer) |
-| `hasServices` | boolean | — | Require invokable service endpoints |
-| `trust` | `reputation`\|`validation`\|`tee` | — | Require a trust model |
+| `hasServices` | boolean | — | Require at least one self-declared service entry |
+| `trust` | `reputation`\|`validation`\|`crypto-economic`\|`tee-attestation` | — | Require a declared trust model |
 | `minScore` | number 0–100 | — | Minimum declared reputation |
 | `sortBy` | `relevance`\|`score`\|`confidence`\|`newest` | `relevance` | Ordering |
-| `verify` | boolean | `false` | On-chain-verify the top results (slower; off for discovery) |
+| `verify` | boolean | `false` | Run bounded on-chain field checks for the top results (slower) |
 
 **Output:** `{ interpretedQuery: { keywords, filters, matched }, count, agents: RankedAgent[], coverage }`.
 `coverage` is `{ coverageComplete, pagesScanned, recordsScanned, hasMore? }`; callers must not interpret a
@@ -44,8 +44,8 @@ ranked window as a global result when `coverageComplete` is false.
 
 ### `rank_agent`
 
-Rank an explicit agent set **or** a query's candidates with the full 3-axis breakdown + on-chain
-verification. This is where declared-vs-verified is most visible. Provide **exactly one** of `agentIds` or
+Rank an explicit agent set **or** a query's candidates with the full 3-axis breakdown + bounded on-chain
+comparison. This is where the declared-vs-chain scope is most visible. Provide **exactly one** of `agentIds` or
 `query`.
 
 | Input | Type | Default | Notes |
@@ -63,7 +63,7 @@ the full per-axis `breakdown`. `coverage` is present for query-based ranking and
 ### `get_agent_profile`
 
 Deep profile for one agent: typed identity, capabilities, declared scores, 3-axis rank breakdown,
-declared-vs-on-chain-verified reputation, recent feedback, the canonical `stellar:…#id` handle, and an A2A
+declared-vs-chain reputation evidence, recent feedback, the canonical `stellar:…#id` handle, and an A2A
 AgentCard projection.
 
 | Input | Type | Default | Notes |
@@ -78,8 +78,9 @@ The `agentCard` and `recentFeedback` carry untrusted text and are therefore emit
 
 ### `list_services`
 
-Flat, filterable catalog of invokable service endpoints. Each row is one callable endpoint with its owning
-agent's typed capability, trust model, and ranked score. `hasServices: true` is always forced.
+Flat, filterable catalog of **self-declared endpoint candidates**. It does not prove liveness, ownership,
+protocol conformance, or payment behavior. Each row carries explicit verification flags, its owning agent's
+typed capability/trust claims, and ranked score. `hasServices: true` is always forced.
 
 | Input | Type | Default | Notes |
 |---|---|---|---|
@@ -175,17 +176,19 @@ Typed on-chain facts (`value`, `valueDecimals`, `clientAddress`, `isRevoked`) ar
 
 ### `verify_reputation`
 
-The headline differentiator, isolated. Re-derives one agent's reputation directly from the on-chain
-Reputation contract (`get_clients_paginated` + `get_summary`) and diffs it against the explorer's declared
-numbers.
+Runs the bounded reputation comparison in isolation. It reads the on-chain Reputation contract
+(`get_clients_paginated` + `get_summary`) and compares average and active feedback count with the explorer.
+The current contract summary accepts at most five comparable clients, active unique clients are not
+derivable from its append-only client list, and the two reads do not share a ledger-bound snapshot.
 
 | Input | Type | Notes |
 |---|---|---|
 | `agent` | id \| numeric string \| stellar handle | **Required** |
 
 **Output:** `{ agentId, stellarId, verified: boolean, verification }`. Status is
-`verified | mismatch | unavailable | skipped`. Degrades to `unavailable` if the RPC is down and `skipped`
-if on-chain verification is disabled.
+`verified | partial | mismatch | unavailable | skipped`; current healthy comparisons are `partial`, while
+`verified` is reserved for future complete-field evidence. It degrades to `unavailable` when completeness or
+RPC evidence is missing and to `skipped` when checking is disabled.
 
 ### `get_agent_card`
 
@@ -247,9 +250,9 @@ is `{ lastLedger, stale }`. A stale reputation indexer explains a temporary `una
   "capabilities": { "x402": true, "mpp": false, "hasServices": true, "supportedTrust": ["reputation"] },
   "supportedTrust": ["reputation"],
   "scores": { "average": 96.75, "total": null, "feedbackCount": 4, "uniqueClients": 4 },
-  "flags": { "unrated": false, "newAgent": false, "lowConfidence": false, "verified": true, "verificationMismatch": false },
+  "flags": { "unrated": false, "newAgent": false, "lowConfidence": false, "verified": false, "verificationMismatch": false },
   "breakdown": { /* full RankResult — present when includeBreakdown (rank_agent, leaderboard) */ },
-  "verification": { /* VerificationResult — present for verified rows */ },
+  "verification": { /* VerificationResult — present for checked rows */ },
   "selfDeclared": {                // UNTRUSTED, labeled
     "provenance": "self-declared",
     "verified": false,
@@ -263,10 +266,13 @@ is `{ lastLedger, stale }`. A stale reputation indexer explains a temporary `una
 
 ```jsonc
 {
-  "status": "verified",            // verified | mismatch | unavailable | skipped
+  "status": "partial",             // verified (reserved) | partial | mismatch | unavailable | skipped
   "declared": { "average": 96.75, "feedbackCount": 4, "uniqueClients": 4 },
-  "verified": { "average": 96.75, "count": 4, "uniqueClients": 4 },   // present when reachable
-  "deltas":   { "average": 0, "count": 0, "uniqueClients": 0 },       // present when both sides known
+  "verified": { "average": 96, "count": 4, "uniqueClients": null },   // bounded chain result
+  "deltas":   { "average": 0, "count": 0, "uniqueClients": null },
+  "verifiedFields": ["average", "feedbackCount"],
+  "unverifiedFields": ["uniqueClients"],
+  "snapshotComparable": false,
   "checkedAt": "2026-07-23T00:00:00.000Z"
 }
 ```

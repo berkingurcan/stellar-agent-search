@@ -560,10 +560,24 @@ async function cmdServices(deps: ToolDeps, flags: CliFlags): Promise<number> {
   const pairs = head
     .map((s, i) => (hydrated[i] ? { a: hydrated[i]!, result: s.result } : null))
     .filter((pair): pair is NonNullable<typeof pair> => pair !== null);
+  const hydrationUnversioned = head.length > 0;
+  const coverageLimitations = [
+    ...(discovery.coverage.limitations ?? []),
+    ...(hydrationUnversioned ? ["detail-hydration-unversioned"] : []),
+  ];
   const coverage = {
     ...discovery.coverage,
-    coverageComplete: discovery.coverage.coverageComplete && hydrationMissing === 0,
+    coverageComplete:
+      discovery.coverage.coverageComplete &&
+      hydrationMissing === 0 &&
+      !hydrationUnversioned,
+    snapshotConsistent:
+      discovery.coverage.snapshotConsistent && !hydrationUnversioned,
     hydrationMissing,
+    detailsHydrated: head.length,
+    ...(coverageLimitations.length > 0
+      ? { limitations: [...new Set(coverageLimitations)] }
+      : {}),
   };
 
   const rows: string[][] = [];
@@ -584,7 +598,18 @@ async function cmdServices(deps: ToolDeps, flags: CliFlags): Promise<number> {
         truncate(svc.name, 24),
         truncate(svc.endpoint, 44),
       ]);
-      jsonRows.push({ agentId: a.id, stellarId: ids.stellarId, caip2Id: ids.caip2Id, capabilities: { x402: caps.x402, mpp: caps.mpp }, score: result.score100, service: svc });
+      jsonRows.push({
+        agentId: a.id,
+        stellarId: ids.stellarId,
+        caip2Id: ids.caip2Id,
+        capabilities: { x402: caps.x402, mpp: caps.mpp },
+        score: result.score100,
+        endpointVerified: false,
+        livenessVerified: false,
+        protocolConformanceVerified: false,
+        paymentVerified: false,
+        service: svc,
+      });
     }
   }
 
@@ -602,9 +627,10 @@ async function cmdServices(deps: ToolDeps, flags: CliFlags): Promise<number> {
     if (notice) out(notice);
     return 0;
   }
-  out(`${rows.length} service(s) across ${agentsWithServices} agent(s) on ${deps.config.network}:`);
+  out(`${rows.length} self-declared service candidate(s) across ${agentsWithServices} agent(s) on ${deps.config.network}:`);
   out();
   out(table(["AGENT", "SCORE", "X402", "MPP", "SERVICE (self-declared)", "ENDPOINT (self-declared)"], rows));
+  out(`${INFO} Endpoint liveness, ownership, protocol conformance, and payment behavior were not verified.`);
   const notice = coverageNotice(coverage);
   if (notice) out(notice);
   if (hydrationMissing > 0) {
@@ -790,7 +816,7 @@ COMMANDS
   find <query>            Natural-language discovery → ranked candidates
   rank <query | id...>    Rank a query's candidates or an explicit id set (3-axis + verify)
   profile <id>            Full profile: identity, capabilities, declared-vs-verified reputation
-  services [search]       Catalog of callable x402/MPP service endpoints
+  services [search]       Catalog of self-declared x402/MPP endpoint candidates
   doctor                  Self-check: env, explorer health, RPC reachability, read-only posture
   setup --client <name>   Idempotently register with Claude Code, Cursor, or Codex
   serve                   Explicitly start the MCP stdio server
@@ -815,7 +841,8 @@ FLAGS
   --handshake                    Initialize this package and list its MCP tools
   (precedence: flag → env → default)
 
-Agent names/descriptions/services are self-declared & UNVERIFIED; reputation is verified on-chain.`);
+Agent names/descriptions/services are self-declared & UNVERIFIED; reputation checks are bounded, field-scoped,
+and usually partial (average + active count only).`);
 }
 
 // ---------------------------------------------------------------------------
