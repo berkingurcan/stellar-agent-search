@@ -113,7 +113,9 @@ body {
 	}
 }
 .reveal {
-	animation: reveal-up 0.5s var(--ease-out-expo) both;
+	/* Only fill backwards so the finished transform does not keep creating a
+	 * containing block for viewport-fixed mobile tooltips. */
+	animation: reveal-up 0.5s var(--ease-out-expo) backwards;
 }
 .reveal-d1 {
 	animation-delay: 60ms;
@@ -142,7 +144,6 @@ body {
 
 /* ── Nav link ── */
 .nav-link {
-	display: inline-flex;
 	align-items: center;
 	gap: 4px;
 	padding: 5px 10px;
@@ -252,7 +253,21 @@ details.expand > div {
 }
 @media (max-width: 480px) {
 	.tip::before {
-		max-width: 72vw;
+		/* A centered, element-anchored bubble can extend the document when the
+		 * trigger is close to either viewport edge. Present it as a bounded
+		 * bottom sheet on touch-sized viewports instead. */
+		position: fixed;
+		top: auto;
+		right: 24px;
+		bottom: 24px;
+		left: 24px;
+		width: auto;
+		max-width: none;
+		transform: translateY(4px);
+	}
+	.tip:hover::before,
+	.tip:focus::before {
+		transform: none;
 	}
 }
 @media (prefers-reduced-motion: reduce) {

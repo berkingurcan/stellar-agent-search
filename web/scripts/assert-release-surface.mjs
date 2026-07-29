@@ -75,6 +75,17 @@ for (const path of files) {
 		);
 		const csp = cspMatch?.[1];
 		if (!csp) throw new Error(`generated HTML is missing its CSP meta policy in ${path}`);
+		const scriptSources =
+			csp.match(/(?:^|;)\s*script-src\s+([^;]+)/i)?.[1]?.trim().split(/\s+/) ?? [];
+		if (!scriptSources.includes('https://static.cloudflareinsights.com')) {
+			throw new Error(
+				`generated CSP does not permit the zone-injected Cloudflare RUM beacon in ${path}`
+			);
+		}
+		const connectSources = csp.match(/(?:^|;)\s*connect-src\s+([^;]+)/i)?.[1]?.trim();
+		if (connectSources !== "'self'") {
+			throw new Error(`generated CSP must keep beacon reporting same-origin only in ${path}`);
+		}
 		const firstGovernedResource = contents.search(/<(?:script|link)\b/i);
 		if (
 			firstGovernedResource !== -1 &&

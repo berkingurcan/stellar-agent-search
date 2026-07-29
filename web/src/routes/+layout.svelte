@@ -42,7 +42,7 @@
 						href={GITHUB}
 						target="_blank"
 						rel="noopener noreferrer"
-						class="nav-link"
+						class="nav-link inline-flex"
 						aria-label="GitHub repository"
 					>
 						<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -52,7 +52,7 @@
 						</svg>
 					</a>
 				{:else}
-					<a href={SDK_DOCS} target="_blank" rel="noopener noreferrer" class="nav-link">SDK</a>
+					<a href={SDK_DOCS} target="_blank" rel="noopener noreferrer" class="nav-link inline-flex">SDK</a>
 				{/if}
 				<ThemeToggle />
 			</div>

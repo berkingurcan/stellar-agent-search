@@ -1,9 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 
-	const browser = typeof window !== 'undefined';
-
-	let svg: SVGSVGElement = $state() as SVGSVGElement;
+	let svg = $state<SVGSVGElement>();
+	let ready = $state(false);
 	let raf = 0;
 	let mouse = { x: -9999, y: -9999 };
 	let smooth = { x: -9999, y: -9999 };
@@ -17,11 +16,20 @@
 	const ISO_X = 0.866;
 	const ISO_Y = 0.5;
 
-	type Node = { id: number; ix: number; iy: number; sx: number; sy: number; r: number; el: SVGCircleElement | null; baseOpacity: number };
+	type Node = {
+		id: number;
+		ix: number;
+		iy: number;
+		sx: number;
+		sy: number;
+		r: number;
+		el: SVGCircleElement | null;
+		baseOpacity: number;
+	};
 	type Edge = { a: Node; b: Node; el: SVGLineElement | null };
 
-	let nodes: Node[] = [];
-	let edges: Edge[] = [];
+	let nodes = $state<Node[]>([]);
+	let edges = $state<Edge[]>([]);
 
 	function isoX(col: number, row: number) {
 		return (col - row) * TILE * ISO_X;
@@ -59,16 +67,22 @@
 	}
 
 	function tick() {
+		if (!svg) {
+			raf = 0;
+			return;
+		}
+
 		const dx = mouse.x - smooth.x;
 		const dy = mouse.y - smooth.y;
-		if (dx * dx + dy * dy > 0.5) {
+		const moving = dx * dx + dy * dy > 0.5;
+		if (moving) {
 			smooth.x += dx * LERP;
 			smooth.y += dy * LERP;
 		}
+		const rect = svg.getBoundingClientRect();
 
 		for (const node of nodes) {
 			if (!node.el) continue;
-			const rect = svg.getBoundingClientRect();
 			const cx = rect.left + rect.width / 2 + node.sx;
 			const cy = rect.top + rect.height / 2 + node.sy;
 			const ddx = cx - smooth.x;
@@ -94,7 +108,6 @@
 			const by = edge.b.sy;
 			const mx = (ax + bx) / 2;
 			const my = (ay + by) / 2;
-			const rect = svg.getBoundingClientRect();
 			const cx = rect.left + rect.width / 2 + mx;
 			const cy = rect.top + rect.height / 2 + my;
 			const ddx = cx - smooth.x;
@@ -111,33 +124,39 @@
 			}
 		}
 
-		raf = requestAnimationFrame(tick);
+		// Stay completely idle when the cursor is stationary. A decorative
+		// background must not consume a permanent 60 fps loop.
+		raf = moving ? requestAnimationFrame(tick) : 0;
 	}
 
 	function onMove(e: MouseEvent) {
 		mouse.x = e.clientX;
 		mouse.y = e.clientY;
+		if (raf === 0) raf = requestAnimationFrame(tick);
 	}
 
 	onMount(() => {
 		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 		build();
-		// Assign element refs after render
-		nodes = nodes.map((n, i) => ({ ...n, el: svg.querySelector(`[data-node="${i}"]`) }));
-		edges = edges.map((e, i) => ({ ...e, el: svg.querySelector(`[data-edge="${i}"]`) }));
-		window.addEventListener('mousemove', onMove, { passive: true });
-		raf = requestAnimationFrame(tick);
+		ready = true;
+
+		// Wait one frame for the client-only SVG to render before capturing refs.
+		const setupRaf = requestAnimationFrame(() => {
+			if (!svg) return;
+			nodes = nodes.map((n, i) => ({ ...n, el: svg?.querySelector(`[data-node="${i}"]`) ?? null }));
+			edges = edges.map((e, i) => ({ ...e, el: svg?.querySelector(`[data-edge="${i}"]`) ?? null }));
+			window.addEventListener('mousemove', onMove, { passive: true });
+		});
+
 		return () => {
+			cancelAnimationFrame(setupRaf);
 			window.removeEventListener('mousemove', onMove);
 			cancelAnimationFrame(raf);
 		};
 	});
-
-	// Pre-build for SSR
-	build();
 </script>
 
-{#if browser}
+{#if ready}
 	<svg
 		bind:this={svg}
 		class="pointer-events-none absolute inset-0 h-full w-full"

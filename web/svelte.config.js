@@ -39,7 +39,11 @@ const config = {
 			directives: {
 				'default-src': ['none'],
 				// No 'unsafe-inline' — the hydration bootstrap is covered by a build-time hash.
-				'script-src': ['self'],
+				// The zone owner has Cloudflare Web Analytics automatic injection enabled. Its
+				// versioned beacon carries SRI and reports to this same origin's /cdn-cgi/rum;
+				// allow only Cloudflare's dedicated script origin so production does not emit a
+				// CSP violation while keeping connect-src restricted to self.
+				'script-src': ['self', 'https://static.cloudflareinsights.com'],
 				// 'unsafe-inline' IS needed here: CSP hashes do not apply to inline `style=`
 				// attributes, including app.html's `display: contents` wrapper and the ranking
 				// progress widths. It stays effective only because the build emits zero
