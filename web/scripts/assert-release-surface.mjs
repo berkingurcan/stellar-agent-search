@@ -10,6 +10,13 @@ const packageSpec = `${rootPackage.name}@${rootPackage.version}`;
 const repositoryUrl = rootPackage.repository.url.replace(/^git\+/, '').replace(/\.git$/, '');
 const npmUrl = `https://www.npmjs.com/package/${rootPackage.name}`;
 const selector = await readFile(join(WEB_ROOT, 'src/lib/install.ts'), 'utf8');
+const publishedInstallSource = await readFile(
+	join(WEB_ROOT, 'src/lib/install-published.ts'),
+	'utf8'
+);
+const expectedInstallConfigs = [
+	...publishedInstallSource.matchAll(/\bid:\s*['"]([^'"]+)['"]/g)
+].map((match) => match[1]);
 const pending = selector.includes("export * from './install-pending.js'");
 const published = selector.includes("export * from './install-published.js'");
 
@@ -30,9 +37,17 @@ await walk(BUILD);
 
 const command = /npx\s+(?:(?:--yes|-y)\s+)?stellar-agent-mcp(?:@[^\s"'`]+)?(?:\s|["'`])/i;
 let exactPinnedCommandFound = false;
+let installSectionCount = 0;
+const installConfigsFound = new Set();
 for (const path of files) {
 	const contents = await readFile(path, 'utf8');
 	if (contents.includes(`npx -y ${packageSpec}`)) exactPinnedCommandFound = true;
+	if (extname(path) === '.html') {
+		installSectionCount += [...contents.matchAll(/\bid=["']install["']/gi)].length;
+	}
+	for (const match of contents.matchAll(/data-install-config=["']([^"']+)["']/gi)) {
+		installConfigsFound.add(match[1]);
+	}
 	for (const match of contents.matchAll(/stellar-agent-mcp@([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)/g)) {
 		if (match[0] !== packageSpec) {
 			throw new Error(`built landing contains stale package pin ${match[0]} (expected ${packageSpec}) in ${path}`);
@@ -41,12 +56,17 @@ for (const path of files) {
 	if (pending && command.test(contents)) {
 		throw new Error(`pre-release build leaks an executable unclaimed-package command in ${path}`);
 	}
-	if (
-		pending &&
-		extname(path) === '.html' &&
-		(contents.includes(`href="${repositoryUrl}`) || contents.includes(`href="${npmUrl}`))
-	) {
-		throw new Error(`pre-release HTML links to a private repository or unclaimed npm package in ${path}`);
+	if (published) {
+		for (const match of contents.matchAll(
+			/npx\s+(?:(?:--yes|-y)\s+)?(stellar-agent-mcp(?:@[^\s"'`<>]+)?)(?=\s|["'`<])/gi
+		)) {
+			if (match[1] !== packageSpec) {
+				throw new Error(`published build contains an unpinned or mismatched command for ${match[1]} in ${path}`);
+			}
+		}
+	}
+	if (pending && (contents.includes(repositoryUrl) || contents.includes(npmUrl))) {
+		throw new Error(`pre-release build exposes a private repository or unclaimed npm package in ${path}`);
 	}
 
 	if (extname(path) === '.html') {
@@ -77,6 +97,19 @@ for (const path of files) {
 
 if (published && !exactPinnedCommandFound) {
 	throw new Error(`published build does not contain the exact version-pinned install command for ${packageSpec}`);
+}
+if (pending && installSectionCount !== 0) {
+	throw new Error('pre-release build exposes an install anchor before package ownership is verified');
+}
+if (published && installSectionCount !== 1) {
+	throw new Error(`published build must contain exactly one #install section (found ${installSectionCount})`);
+}
+if (
+	published &&
+	(expectedInstallConfigs.length === 0 ||
+		expectedInstallConfigs.some((config) => !installConfigsFound.has(config)))
+) {
+	throw new Error('published build does not prerender every declared install configuration');
 }
 
 process.stdout.write(

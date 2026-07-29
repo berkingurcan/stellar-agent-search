@@ -1,13 +1,15 @@
 <script lang="ts">
 	import CtaButton from '$lib/components/CtaButton.svelte';
+	import CodeBlock from '$lib/components/CodeBlock.svelte';
+	import CopyCommand from '$lib/components/CopyCommand.svelte';
 	import AgentRank from '$lib/components/AgentRank.svelte';
 	import HealthCheck from '$lib/components/HealthCheck.svelte';
 	import VerdictCard from '$lib/components/VerdictCard.svelte';
 	import { reveal } from '$lib/actions/reveal.js';
-	import { PACKAGE_PUBLISHED } from '$lib/install.js';
+	import { CONFIGS, HERO_CMD, PACKAGE_PUBLISHED } from '$lib/install.js';
 	import { INVARIANTS, PROMPTS, RESOURCES, TOOL_COUNT } from '$lib/surface.js';
 	import { CAPTURED_ON } from '$lib/transcripts.js';
-	import { EXPLORER, GITHUB, PAPER, SDK_DOCS, SITE } from '$lib/links.js';
+	import { EXPLORER, GITHUB, MCP_SPEC, PAPER, SDK_DOCS, SITE } from '$lib/links.js';
 
 	const DESCRIPTION =
 		'A read-only MCP server for discovering and ranking x402 payment agents on Stellar mainnet.';
@@ -69,7 +71,15 @@
 			</h1>
 
 			<p class="max-w-lg text-[16px] leading-[1.6] text-text-muted">
-				Discover, rank, and vet
+				Plug an
+				<a
+					href={MCP_SPEC}
+					target="_blank"
+					rel="noopener noreferrer"
+					class="text-text underline decoration-border underline-offset-4 transition hover:decoration-accent"
+					>MCP</a
+				>
+				server into Claude Code or Cursor to discover and rank
 				<span
 					class="tip"
 					role="button"
@@ -77,15 +87,15 @@
 					data-tooltip="A registry of payment agents on Stellar mainnet (stellar8004.com). Agents self-publish their name, capabilities, reputation, and x402 endpoint — none of it is pre-verified."
 					aria-label="stellar-8004 — a registry of payment agents on Stellar mainnet.">stellar-8004</span
 				>
-				agents that accept x402 micropayments.
+				agents that accept
 				<span
 					class="tip"
 					role="button"
 					tabindex="0"
-					data-tooltip="Data the agent's owner published about their own agent. Unverified by default — labeled as such, never treated as fact."
-					aria-label="Self-declared — data published by the agent's owner; unverified by default.">Self-declared</span
+					data-tooltip="An HTTP-native micropayment protocol. Agents charge per request in stablecoins like USDC via a challenge-response."
+					aria-label="x402 — an HTTP-native micropayment protocol.">x402</span
 				>
-				reputation, checked against the chain.
+				micropayments, with explicit evidence limits. No key, no account.
 			</p>
 		</div>
 
@@ -114,17 +124,24 @@
 				<CtaButton href={EXPLORER} variant="secondary" size="md" external>Explore registry</CtaButton>
 			</div>
 
+			<div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-text-dim">
+				<span>Works with</span>
+				<span class="text-text-muted">Claude Code</span>
+				<span class="text-border">·</span>
+				<span class="text-text-muted">Cursor</span>
+				<span class="text-border">·</span>
+				<span class="text-text-muted">Windsurf</span>
+				<span class="text-border">·</span>
+				<span class="text-text-muted">Cline</span>
+				<span class="text-border">·</span>
+				<span class="text-text-muted">VS Code</span>
+			</div>
+
 			<p class="text-[11px] text-text-dim">
 				{#if !PACKAGE_PUBLISHED}
-					Pre-release · install at 0.1.0 ·
-					<a
-						href={GITHUB}
-						target="_blank"
-						rel="noopener noreferrer"
-						class="underline hover:text-text-muted">watch repo →</a
-					>
+					Pre-release · install commands stay withheld until public package ownership is verified.
 				{:else}
-					Runs in Claude Code · Cursor · Windsurf · Cline · VS Code
+					Node 22+ · no key, no account
 				{/if}
 			</p>
 		</div>
@@ -463,6 +480,63 @@
 				{/if}
 			</p>
 		</div>
+	</section>
+
+	<!-- ── Release / install ────────────────────────────────────────── -->
+	<section
+		id={PACKAGE_PUBLISHED ? 'install' : 'release-status'}
+		use:reveal
+		class="mt-40 scroll-mt-24 border-t border-border pt-32 space-y-16"
+	>
+		<div class="space-y-6">
+			<span class="text-[11px] tracking-[0.2em] text-text-dim uppercase">
+				{PACKAGE_PUBLISHED ? 'Quick start' : 'Release status'}
+			</span>
+			<h2
+				class="max-w-2xl text-[2rem] leading-[1.1] font-light tracking-[-0.03em] text-text sm:text-[2.75rem]"
+			>
+				{PACKAGE_PUBLISHED ? 'One command. Any MCP client.' : 'Source first. Install after ownership.'}
+			</h2>
+			<p class="max-w-xl text-[16px] leading-[1.6] text-text-muted">
+				{#if PACKAGE_PUBLISHED}
+					Speaks
+					<a
+						href={MCP_SPEC}
+						target="_blank"
+						rel="noopener noreferrer"
+						class="text-text underline decoration-border underline-offset-4 hover:decoration-accent"
+						>MCP</a
+					>
+					over stdio. Node 22 or newer. No Stellar key, no wallet, no account.
+				{:else}
+					Install commands remain withheld until the canonical repository owner and npm package
+					ownership are independently verified. The Explorer and canonical SDK remain available now.
+				{/if}
+			</p>
+		</div>
+
+		{#if PACKAGE_PUBLISHED}
+			<div class="space-y-6">
+				<CopyCommand command={HERO_CMD} />
+
+				<div class="grid gap-8">
+					{#each CONFIGS as config (config.id)}
+						{#if config.code}
+							<article class="space-y-3" data-install-config={config.id}>
+								<div class="flex items-baseline justify-between gap-4">
+									<h3 class="text-[14px] font-medium text-text">{config.label}</h3>
+									<span class="text-[10px] tracking-[0.12em] text-text-dim uppercase">
+										version pinned
+									</span>
+								</div>
+								<CodeBlock code={config.code} lang={config.lang} />
+								<p class="max-w-2xl text-[12px] leading-relaxed text-text-dim">{config.note}</p>
+							</article>
+						{/if}
+					{/each}
+				</div>
+			</div>
+		{/if}
 	</section>
 
 	<!-- ── Closing ─────────────────────────────────────────────────── -->

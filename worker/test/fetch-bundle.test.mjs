@@ -10,11 +10,17 @@ describe("Worker fetch-only bundle gate", () => {
     ).not.toThrow();
   });
 
+  it("accepts feaxios, Stellar's fetch-backed compatibility shim", () => {
+    expect(() =>
+      assertFetchOnlyBundleText(
+        '// ../node_modules/feaxios/dist/index.mjs\nclass AxiosError extends Error {}\naxios.create({});',
+      ),
+    ).not.toThrow();
+  });
+
   it.each([
     'import axios from "node_modules/axios/index.js";',
     'import { Client } from "@stellar/stellar-sdk/axios/contract";',
-    "class AxiosError extends Error {}",
-    "const client = axios.create({});",
   ])("rejects axios implementation code", (source) => {
     expect(() => assertFetchOnlyBundleText(source)).toThrow(/axios implementation marker/i);
   });

@@ -14,9 +14,9 @@ const config = {
 	kit: {
 		// adapter-static, NOT adapter-cloudflare (which stellar8004.com uses). That site has
 		// server routes, Supabase service-role secrets and form actions, so it needs a Worker.
-		// This one is a single prerendered page whose only live data is one client-side fetch to
-		// the public explorer API — so it compiles to plain files and Cloudflare serves them with
-		// no Worker isolate at all. Static asset requests are unbilled; Worker invocations are not.
+		// This one is a single prerendered page with captured, date-stamped examples and no live
+		// data fetch, so it compiles to plain files and Cloudflare serves it without a Worker
+		// isolate. Static asset requests are unbilled; Worker invocations are not.
 		// See wrangler.toml for the matching assets-only config.
 		adapter: adapter({
 			pages: 'build',
@@ -41,16 +41,16 @@ const config = {
 				// No 'unsafe-inline' — the hydration bootstrap is covered by a build-time hash.
 				'script-src': ['self'],
 				// 'unsafe-inline' IS needed here: CSP hashes do not apply to inline `style=`
-				// attributes, and two exist (app.html's `display: contents` wrapper and the
-				// star canvas's z-index). It stays effective only because the build emits zero
+				// attributes, including app.html's `display: contents` wrapper and the ranking
+				// progress widths. It stays effective only because the build emits zero
 				// inline <style> blocks — if one ever appears, SvelteKit appends a style hash
-				// and the browser then ignores 'unsafe-inline', so the canvas would jump to the
-				// foreground. Keep component styles in .css files.
+				// and the browser then ignores 'unsafe-inline', so those attributes would stop
+				// applying. Keep component styles in .css files.
 				'style-src': ['self', 'unsafe-inline', 'https://fonts.googleapis.com'],
 				'font-src': ['https://fonts.gstatic.com'],
 				'img-src': ['self', 'data:'],
-				// The page's one live read: LiveStats → stellar8004.com/api/v1/stats.
-				'connect-src': ['self', 'https://stellar8004.com'],
+				// No cross-origin API calls: evidence shown on the page is a captured transcript.
+				'connect-src': ['self'],
 				'base-uri': ['none'],
 				'form-action': ['none']
 				// frame-ancestors is deliberately absent: SvelteKit delivers this policy as a

@@ -2009,6 +2009,45 @@ interface FeedbackInput {
   feedbackUri: string;
 }
 
+interface FeedbackEvidenceFacts {
+  agentId: number;
+  owner: string | null;
+  endpoint: string;
+  challengeNetwork: string;
+  asset: string;
+  payTo: string;
+  price: string;
+  paymentTxHash: string;
+  paymentAuthorizationHash: string;
+  settlementLedger: number;
+  settlementConfirmedAt: string;
+  resultHash: string;
+  resultOk: boolean;
+  startedAt: string;
+}
+
+/** Canonical public evidence URI committed by the on-chain feedback write. */
+export function buildFeedbackEvidenceUri(facts: FeedbackEvidenceFacts): string {
+  return `data:application/json;base64,${Buffer.from(
+    JSON.stringify({
+      agentId: facts.agentId,
+      owner: facts.owner,
+      endpoint: facts.endpoint,
+      challengeNetwork: facts.challengeNetwork,
+      asset: facts.asset,
+      payTo: facts.payTo,
+      price: facts.price,
+      paymentTxHash: facts.paymentTxHash,
+      paymentAuthorizationHash: facts.paymentAuthorizationHash,
+      settlementLedger: facts.settlementLedger,
+      settlementConfirmedAt: facts.settlementConfirmedAt,
+      resultHash: facts.resultHash,
+      resultOk: facts.resultOk,
+      ts: facts.startedAt,
+    }),
+  ).toString("base64")}`;
+}
+
 export interface FeedbackOnchainExpectation {
   contractId: string;
   caller: string;
@@ -2538,15 +2577,59 @@ export function assertCompleteEvidenceRecord(rec: RunRecord): void {
     throw new Error("evidence receipt feedback confirmation time is invalid");
   }
   try {
-    if (
-      transactionEnvelopeHash(rec.feedbackTransactionXdr, MAINNET_CONFIG.networkPassphrase) !==
-      feedbackTxHash
-    ) {
-      throw new Error("hash mismatch");
+    const feedbackEnvelope = xdr.TransactionEnvelope.fromXDR(rec.feedbackTransactionXdr, "base64");
+    const feedbackEvent = xdr.ContractEvent.fromXDR(rec.feedbackEventXdr, "base64");
+    const feedbackUri = buildFeedbackEvidenceUri({
+      agentId: rec.agentId,
+      owner: rec.owner,
+      endpoint: rec.endpoint,
+      challengeNetwork: rec.challengeNetwork,
+      asset: rec.asset,
+      payTo: rec.payTo,
+      price: rec.price,
+      paymentTxHash: rec.paymentTxHash,
+      paymentAuthorizationHash: rec.paymentAuthorizationHash,
+      settlementLedger: rec.settlementLedger,
+      settlementConfirmedAt: rec.settlementConfirmedAt,
+      resultHash: rec.resultHash,
+      resultOk: rec.resultOk,
+      startedAt: rec.startedAt,
+    });
+    const proof = assertOnchainFeedback(
+      {
+        status: "SUCCESS",
+        txHash: feedbackTxHash,
+        ledger: rec.feedbackLedger,
+        createdAt: Math.floor(Date.parse(rec.feedbackConfirmedAt) / 1_000),
+        envelopeXdr: feedbackEnvelope,
+        events: { contractEventsXdr: [[feedbackEvent]] },
+      },
+      feedbackTxHash,
+      rec.feedbackTransactionXdr,
+      {
+        contractId: REPUTATION_CONTRACT_MAINNET,
+        caller: payer,
+        agentId: rec.agentId,
+        value: 95n,
+        valueDecimals: 0,
+        tag1: "starred",
+        tag2: "successRate",
+        endpoint: rec.endpoint,
+        feedbackUri,
+        feedbackHash: sha256Hex(feedbackUri),
+        submittedAtMs: Date.parse(rec.startedAt),
+        networkPassphrase: MAINNET_CONFIG.networkPassphrase,
+      },
+    );
+    if (proof.feedbackIndex !== rec.feedbackIndex) {
+      throw new Error("feedback index mismatch");
     }
-    xdr.ContractEvent.fromXDR(rec.feedbackEventXdr, "base64");
-  } catch {
-    throw new Error("evidence receipt feedback envelope/event XDR binding is invalid");
+  } catch (error) {
+    throw new Error(
+      `evidence receipt feedback envelope/event/source binding is invalid: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 }
 
@@ -2894,24 +2977,22 @@ async function main(): Promise<void> {
   }
   console.log(`[evidence] provisional payment journal: ${journalPath}`);
 
-  const evidenceUri = `data:application/json;base64,${Buffer.from(
-    JSON.stringify({
-      agentId: agent.agentId,
-      owner: agent.owner,
-      endpoint: agent.endpoint,
-      challengeNetwork,
-      asset,
-      payTo,
-      price,
-      paymentTxHash,
-      paymentAuthorizationHash,
-      settlementLedger,
-      settlementConfirmedAt,
-      resultHash,
-      resultOk,
-      ts: startedAt,
-    }),
-  ).toString("base64")}`;
+  const evidenceUri = buildFeedbackEvidenceUri({
+    agentId: agent.agentId,
+    owner: agent.owner,
+    endpoint: agent.endpoint,
+    challengeNetwork,
+    asset,
+    payTo,
+    price,
+    paymentTxHash,
+    paymentAuthorizationHash,
+    settlementLedger,
+    settlementConfirmedAt,
+    resultHash,
+    resultOk,
+    startedAt,
+  });
   let feedbackSubmission: FeedbackSubmission;
   try {
     feedbackSubmission = await writeFeedback(

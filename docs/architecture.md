@@ -339,110 +339,36 @@ Contract addresses, RPC URL, and the network passphrase are reused from `@trionl
 
 ## Transport & runtime portability
 
-Recorded from a spike, so the constraints are not re-discovered later.
+### One canonical ABI, one consumer SDK major
 
-### The axios coupling
+The npm artifact vendors the exact-pinned `@trionlabs/stellar8004@0.0.11` implementation with tsup
+`noExternal`. This keeps its generated contract `Spec`, Explorer client, configuration, and normalization
+code as the canonical ABI/API implementation without making consumers install the upstream package's
+Stellar SDK v15 dependency. `THIRD_PARTY_NOTICES.md` ships in the tarball with its MIT notice.
 
-`@trionlabs/stellar8004` imports the default `@stellar/stellar-sdk` build, whose RPC transport is **axios**.
-axios below 1.16.1 issues a plain-HTTP (non-`CONNECT`) request for an `https://` URL when a proxy is configured;
-proxies answer that with **405**. The visible symptom is the contract probe reporting an RPC failure while the
-explorer and shallow RPC health checks pass.
+The artifact keeps `@stellar/stellar-sdk@16.2.0` as its only Stellar runtime dependency. A root override
+forces the development-only upstream SDK and x402 demo onto that same physical v16 instance, so the workspace
+lock contains one SDK install rather than parallel v15/v16 trees. A clean packed-consumer install independently
+proves the released graph: one v16.2.0 SDK, no `@trionlabs/stellar8004` or x402 runtime package, and zero
+production vulnerabilities at the high audit threshold.
 
-`doctor` surfaces this rather than hiding it:
+Stellar SDK v16's default `/contract` and `/rpc` exports are fetch-based; axios is opt-in under
+`/axios/*`. `src/lib/soroban.ts` therefore constructs the reader from
+`@stellar/stellar-sdk/contract`. It borrows the exact generated Reputation `Spec` from the vendored
+binding, so this repo does not reimplement the contract ABI. Donor and reader receive separate options
+objects because generated binding construction mutates its options.
 
-```
-✗ contract  read path FAILED (rpc-error): Request failed with status code 405
-```
+The SDK package still declares axios as a dependency, so a clean consumer installs its non-vulnerable
+transitive version even though neither the shipped bundle nor the read path imports axios implementation
+code. This is dependency metadata overhead, not a claim that axios is absent from `node_modules`.
+The release proof is deliberately narrower and testable: no vulnerable v15 branch, one SDK major, fetch-based
+reads, zero high/critical production audit findings.
 
-### The fix: reads run on the fetch-based build
+### Edge runtime
 
-`src/lib/soroban.ts` builds the Reputation reader from `@stellar/stellar-sdk/no-axios/contract`, whose
-`Client` internally requires `../rpc` — so the whole chain is fetch. It does not re-implement the contract ABI:
-it borrows the generated bindings' `Spec` and hands it to the no-axios `Client`, so encoding and decoding stay
-byte-identical and there is no second copy of the ABI to go stale.
+The Worker uses the same root graph. Stellar SDK v16 needs no `no-axios` aliases, and the deploy validator
+rejects unreviewed aliases. Wrangler's dry-run bundle gate scans emitted JavaScript and rejects axios
+implementation markers plus concrete signer/key wiring.
 
-One trap, found the hard way and now pinned by a test. The bindings' `Client` constructor **mutates the options
-object it is given**, writing back an axios-backed `rpc.Server` under `options.server`; the no-axios `Client`
-then honours a pre-set `options.server`. Sharing one options object between the spec donor and the real client
-silently reinstates axios for every read — it typechecks, it passes offline tests, and it fails only against a
-live proxy. Each client gets its own freshly built options.
-
-Verified end to end: with the `overrides` block removed and the vulnerable `axios@1.15.0` restored, `doctor`'s
-bounded contract reachability read passes through the same proxy that produced the `405` above. That proves
-transport compatibility, not reputation comparability.
-
-**What this does not do.** `@trionlabs/stellar8004` is a barrel — importing anything from it (including
-`getConfig` in `src/config.ts`) loads the default SDK build and therefore axios into the process, even though
-nothing on the read path uses it. The package also still appears in a consumer's `npm audit`, which is static.
-Closing that needs a coordinated upstream range widening **and** a direct v16 bump here, or every barrel import moved to a subpath
-(`@trionlabs/stellar8004/api/explorer` is axios-free; `/bindings` is not).
-
-### The `overrides` fix — and exactly how far it reaches
-
-`@stellar/stellar-sdk@15.1.0` pins axios to the **exact** version `1.15.0`, so there is no range to widen. An
-npm `overrides` block forces a patched axios into the tree instead:
-
-```json
-"overrides": { "axios": "1.18.1" }
-```
-
-This is load-bearing twice over. It clears the two **high**-severity axios advisories that `npm audit` reports
-against the 1.15.0 pin, and because 1.18.1 is past the 1.16.1 proxy fix it also makes the bounded contract read
-work through a proxy — `doctor` goes from the 405 above to a healthy reachability check. That check returns a
-bounded address window, not verified reputation figures.
-
-**It does not reach end users.** npm honours `overrides` only from the *root* project, so a consumer who runs
-`npx -y stellar-agent-mcp` resolves our dependencies fresh and gets `@stellar/stellar-sdk@15.1.0 → axios@1.15.0`
-again. Verified by packing the tarball and installing it into a clean project. So the override protects this
-repository, its CI, and anyone who clones it — not the published artifact.
-
-The root cause crosses both packages: `@trionlabs/stellar8004@0.0.11` depends on
-`@stellar/stellar-sdk: ^15.0.0`, while this package also declares direct `@stellar/stellar-sdk: ^15`. Bumping
-only this repo installs v15 again underneath upstream; widening only upstream still lets npm hoist v15 to
-satisfy our direct range. The clean migration is upstream `^15 || ^16` plus an explicit v16 compatibility job
-and release, followed by a direct v16 bump and exact upstream pin here. A packed-consumer install must then
-prove one Stellar SDK major and no vulnerable axios before the override is removed.
-
-### `no-axios` — verified working
-
-The Stellar SDK ships a parallel fetch-based build under `@stellar/stellar-sdk/no-axios`, with matching
-`/no-axios/rpc` and `/no-axios/contract` subpaths. Confirmed against mainnet from inside a proxied environment
-where the axios path returns 405: it completes the same two reads and returns agent 10's four real client
-addresses.
-
-Aliasing works too. Bundling `@trionlabs/stellar8004` with
-
-```
---alias:@stellar/stellar-sdk=@stellar/stellar-sdk/no-axios
---alias:@stellar/stellar-sdk/contract=@stellar/stellar-sdk/no-axios/contract
---alias:@stellar/stellar-sdk/rpc=@stellar/stellar-sdk/no-axios/rpc
-```
-
-produces a bundle with 144 `lib/no-axios/` modules and **zero** axios modules, and its `ReputationClient` reads
-succeed through the proxy. Every subpath the SDK imports must be aliased; a missed one quietly restores the
-axios build for that module.
-
-### Why the npm artifact is not fixed by that alias
-
-**tsup externalizes runtime dependencies.** `dist/index.js` imports `@trionlabs/stellar8004` and the split MCP
-v2 server package rather than inlining them, so a build-time alias never reaches the published Node package.
-The sourcemap contains no bundled `stellar-sdk` modules.
-
-Closing it therefore needs a deliberate choice, not a config tweak:
-
-| Option | Effect | Cost |
-|---|---|---|
-| `noExternal` the Stellar deps + alias | One self-contained artifact, fetch-only, no axios | Much larger tarball; dependency tree harder to audit |
-| Call the Reputation contract directly via `no-axios/rpc` | Fixes the one path that matters; no bundling change | ~40 lines of contract-call code we own instead of the SDK's |
-| Upstream `no-axios` support in `@trionlabs/stellar8004` | Cleanest | Not in our control |
-
-### Consequence for edge runtimes
-
-Cloudflare Workers must bundle, so `worker/wrangler.jsonc` aliases the default Stellar SDK plus its
-`/contract` and `/rpc` subpaths to the `no-axios` build. Missing any one alias can silently restore axios for
-that module. The Worker uses `nodejs_compat` for the small remaining Node-compatible surface.
-
-Transport wiring is now implemented in `worker/src/index.ts`; the remaining work is operational proof, not a
-service-layer redesign. The dry-run bundle and offline tests cannot prove zone routing, the real Service
-Binding's caller identity, PoP-local rate-limit behavior, cache behavior, or interoperability with production
-clients. Those are precisely the deployment canary gates described above.
+These build-time checks do not prove zone routing, Service Binding caller identity, PoP-local rate limiting,
+cache behavior, or production-client interoperability. Those remain deployment canary and rollback gates.

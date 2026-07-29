@@ -112,6 +112,10 @@ describe("read-only invariant: shipped bundle", () => {
   it("the read clients ARE bundled (proves the scan is meaningful)", () => {
     const bundle = readFileSync(BIN, "utf8");
     expect(bundle).toMatch(/ExplorerClient/);
-    expect(bundle).toMatch(/ReputationClient/);
+    // The generated ReputationClient class is emitted as an anonymous/renamed
+    // class by esbuild. Its read ABI method is the stable positive control;
+    // checking the source-only export name made this assertion depend on
+    // minifier naming rather than on the shipped capability.
+    expect(bundle).toMatch(/get_clients_paginated/);
   });
 });
