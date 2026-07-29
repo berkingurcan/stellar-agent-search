@@ -77,6 +77,31 @@ describe("npm bootstrap name reservation", () => {
 });
 
 describe("real release fail-closed gates", () => {
+  it("pins every machine-readable release identity to the selected Berkin repository", () => {
+    const repositoryUrl = "https://github.com/berkingurcan/stellar-agent-mcp";
+    const mcpName = "io.github.berkingurcan/stellar-agent-mcp";
+    const pkg = JSON.parse(read("package.json")) as {
+      repository: { url: string };
+      mcpName: string;
+    };
+    const server = JSON.parse(read("server.json")) as {
+      name: string;
+      repository: { url: string };
+    };
+
+    expect(pkg.repository.url).toBe(`git+${repositoryUrl}.git`);
+    expect(pkg.mcpName).toBe(mcpName);
+    expect(server.repository.url).toBe(repositoryUrl);
+    expect(server.name).toBe(mcpName);
+    expect(read(".github", "workflows", "publish.yml")).toContain(
+      `EXPECTED_REPOSITORY_URL: ${repositoryUrl}`,
+    );
+    expect((JSON.parse(read("glama.json")) as { maintainers: string[] }).maintainers).toEqual([
+      "berkingurcan",
+    ]);
+    expect(read("skills", "mcp", "SKILL.md")).toContain("  author: berkingurcan");
+  });
+
   it("locks every first-release runbook to owner -> private bootstrap -> public -> protected OIDC", () => {
     const canonicalOrder =
       "private move to selected owner `berkingurcan` → inert `0.0.0` reservation under the non-default `bootstrap` tag while private → public repository → protected OIDC real release";

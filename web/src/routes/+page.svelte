@@ -82,13 +82,7 @@
 
 			<p class="text-[11px] text-text-dim">
 				{#if !PACKAGE_PUBLISHED}
-					Pre-release ·
-					<a
-						href={GITHUB}
-						target="_blank"
-						rel="noopener noreferrer"
-						class="underline hover:text-text-muted">watch repo →</a
-					>
+					Pre-release · install commands stay withheld until public package ownership is verified
 				{:else}
 					Claude Code · Cursor · Windsurf · Cline · VS Code
 				{/if}
