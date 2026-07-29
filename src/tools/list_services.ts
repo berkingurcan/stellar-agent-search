@@ -1,10 +1,13 @@
 /**
- * list_services — flat, filterable catalog of invokable x402/MPP services.
+ * list_services — flat, filterable catalog of self-declared x402/MPP service
+ * endpoint candidates.
  *
- * Each row is one callable endpoint with its owning agent's typed capability +
- * trust + ranked-score context. `hasServices:true` is forced. Untrusted service
- * text (name/endpoint/version/description) is confined to a labeled
- * `selfDeclared` slot per row. This is the menu the x402 loop picks from.
+ * Each row is one owner-declared endpoint candidate with its owning agent's
+ * typed capability + trust + ranked-score context. `hasServices:true` is
+ * forced. The server does not probe liveness, endpoint ownership, protocol
+ * conformance, or payment behavior. Untrusted service text
+ * (name/endpoint/version/description) is confined to a labeled `selfDeclared`
+ * slot per row.
  */
 
 import { z } from "zod";
@@ -53,6 +56,10 @@ const zServiceRow = z
     supportedTrust: z.array(z.string()),
     score: z.number(),
     flags: z.record(z.string(), z.any()),
+    endpointVerified: z.literal(false),
+    livenessVerified: z.literal(false),
+    protocolConformanceVerified: z.literal(false),
+    paymentVerified: z.literal(false),
     service: zSelfDeclaredSlot,
   })
   .passthrough();
@@ -77,10 +84,10 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
     {
       title: "List Services",
       description:
-        "Catalog of invokable services (callable endpoints), each with its owning agent's typed " +
+        "Catalog of self-declared service endpoint candidates, each with its owning agent's typed " +
         "capability, trust model, and ranked score. Filter by x402/mpp/trust/minScore/search. " +
-        "Service labels/endpoints are self-declared (unverified) and live in each row's labeled " +
-        "`selfDeclared` slot.",
+        "No endpoint is probed for liveness, ownership, protocol conformance, or payment behavior. " +
+        "Service labels/endpoints are unverified and live in each row's labeled `selfDeclared` slot.",
       inputSchema: z.object(runtimeInputShape),
       outputSchema: z.object(outputShape),
       annotations: { title: "List Services", ...READ_ANNOTATIONS },
@@ -124,7 +131,7 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
       // `page` selects a window of `limit` agents over the score-ranked pool.
       // The explorer LIST endpoint omits services[] AND metadata (both live only
       // in the per-agent detail), so hydrate the windowed agents via getAgent(id) —
-      // otherwise every row would carry zero callable endpoints. MPP is already
+      // otherwise every row would carry zero endpoint candidates. MPP is already
       // filtered by the list endpoint, so only the requested agent window needs
       // hydration rather than a wider client-side MPP probe window.
       const offset = (args.page - 1) * args.limit;
@@ -175,14 +182,27 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
               newAgent: result.flags.newAgent,
               lowConfidence: result.flags.lowConfidence,
             },
+            endpointVerified: false as const,
+            livenessVerified: false as const,
+            protocolConformanceVerified: false as const,
+            paymentVerified: false as const,
             service: selfDeclared(svc),
           });
         }
       }
 
-      const text = serverText`${rows.length} service(s) across ${agentsWithServices} agent(s) on ${safe(
+      const text = serverText`${rows.length} self-declared service candidate(s) across ${agentsWithServices} agent(s) on ${safe(
         deps.config.network,
       )} (page ${args.page}).`;
+
+      // The list response and each detail hydration are independent v1 reads
+      // with no shared revision/cursor. Even a one-page list cannot make the
+      // resulting join snapshot-complete after detail hydration.
+      const hydrationUnversioned = head.length > 0;
+      const limitations = [
+        ...(discovery.coverage.limitations ?? []),
+        ...(hydrationUnversioned ? ["detail-hydration-unversioned"] : []),
+      ];
 
       return toolResult(text, {
         count: rows.length,
@@ -190,8 +210,15 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
         services: rows,
         coverage: {
           ...discovery.coverage,
-          coverageComplete: discovery.coverage.coverageComplete && hydrationMissing === 0,
+          coverageComplete:
+            discovery.coverage.coverageComplete &&
+            hydrationMissing === 0 &&
+            !hydrationUnversioned,
+          snapshotConsistent:
+            discovery.coverage.snapshotConsistent && !hydrationUnversioned,
           hydrationMissing,
+          detailsHydrated: head.length,
+          ...(limitations.length > 0 ? { limitations: [...new Set(limitations)] } : {}),
         },
       });
     }),

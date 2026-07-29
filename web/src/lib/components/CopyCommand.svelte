@@ -32,8 +32,8 @@
 <button
 	type="button"
 	onclick={copy}
-	class="group/cmd flex w-full items-center gap-2.5 rounded-lg border border-border/60 bg-surface/50 {pad}
-	       transition-colors hover:border-accent/20 hover:bg-surface-raised/50
+	class="group/cmd flex w-full items-center gap-2.5 rounded-lg border border-border bg-surface {pad}
+	       transition-colors hover:border-accent/20 hover:bg-surface-raised
 	       focus-visible:ring-1 focus-visible:ring-accent/40 focus-visible:outline-none"
 	aria-label="Copy command: {command}"
 >

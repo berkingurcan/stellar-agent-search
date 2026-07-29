@@ -69,8 +69,8 @@ const SUMMARY_CLIENT_CAP = 5;
 // clients can still mean five comparable clients after removing the owner.
 const CLIENT_SCAN_PAGE = SUMMARY_CLIENT_CAP + 1;
 
-/** Cache TTLs (ms): verified values live ~10 min; degraded results retry sooner. */
-const TTL_OK = 600_000;
+/** Cache TTLs (ms): both successful and degraded reads refresh within one minute. */
+const TTL_OK = 60_000;
 const TTL_NEGATIVE = 60_000;
 
 /** Declared-vs-on-chain tolerances (modules/01 §3, DEFAULTS.VERIFY_TOLERANCE). */
@@ -86,8 +86,30 @@ export interface VerifyTolerance {
 // sub-point inflation and scales wrong when RANK_SCORE_MAX is not 100.
 export const DEFAULT_TOLERANCE: VerifyTolerance = {
   average: 0.5,
-  feedbackCount: 1,
+  // Counts are exact integers. A one-row difference can be ordinary index lag,
+  // but it is still a difference; the unversioned-snapshot limitation below
+  // explains why that difference is not evidence of manipulation.
+  feedbackCount: 0,
 };
+
+const UNVERSIONED_SNAPSHOT_LIMITATION =
+  "Explorer and Soroban reads do not share a common revision or ledger-bound snapshot; " +
+  "matching or differing values are observational and are not proof of synchronized parity or manipulation.";
+
+type SnapshotAwareVerificationResult = VerificationResult & {
+  snapshotComparable: false;
+  limitations: string[];
+};
+
+function snapshotContext(): Pick<
+  SnapshotAwareVerificationResult,
+  "snapshotComparable" | "limitations"
+> {
+  return {
+    snapshotComparable: false,
+    limitations: [UNVERSIONED_SNAPSHOT_LIMITATION],
+  };
+}
 
 /** Why an on-chain read produced no trustworthy value — see {@link ReputationVerifier.probe}. */
 export type VerifyFailure =
@@ -275,17 +297,16 @@ export class ReputationVerifier {
     const first = firstTx.result ?? [];
     const raw = first.slice(0, CLIENT_SCAN_PAGE);
 
-    // A full first page needs one boundary probe. More than six raw clients can
-    // never fit the five-client summary after excluding at most one owner.
-    if (first.length >= CLIENT_SCAN_PAGE) {
-      const boundaryTx = await client.get_clients_paginated({
-        agent_id: agentId,
-        start: CLIENT_SCAN_PAGE,
-        limit: 1,
-      });
-      if ((boundaryTx.result ?? []).length > 0) {
-        return { clients: [], truncated: true };
-      }
+    // Always probe the next storage index. The contract compacts its returned
+    // vector by skipping missing/expired ClientAtIndex keys, so a short first
+    // vector does NOT prove that later indices are absent.
+    const boundaryTx = await client.get_clients_paginated({
+      agent_id: agentId,
+      start: CLIENT_SCAN_PAGE,
+      limit: 1,
+    });
+    if ((boundaryTx.result ?? []).length > 0) {
+      return { clients: [], truncated: true };
     }
 
     const excluded = excludeClient?.trim();
@@ -327,9 +348,10 @@ export class ReputationVerifier {
     agentId: number,
     declared: DeclaredReputation,
     opts: { skip?: boolean; excludeClient?: string } = {},
-  ): Promise<VerificationResult> {
+  ): Promise<SnapshotAwareVerificationResult> {
     if (!this.isEnabled || opts.skip) {
       return {
+        ...snapshotContext(),
         status: "skipped",
         declared,
         reason: !this.isEnabled ? "disabled" : "not-requested",
@@ -343,6 +365,7 @@ export class ReputationVerifier {
     const { value: onchain, checkedAt } = snapshot;
     if (onchain == null) {
       return {
+        ...snapshotContext(),
         status: "unavailable",
         declared,
         reason: snapshot.failure ?? "rpc-error",
@@ -365,11 +388,14 @@ export class ReputationVerifier {
       const chainEmpty =
         onchain.average === 0 && onchain.count === 0;
       return {
+        ...snapshotContext(),
         status: chainEmpty ? "unavailable" : "mismatch",
         declared,
         verified: onchain,
         deltas: { average: 0, count: dCount, uniqueClients: dUnique },
-        reason: chainEmpty ? "no-reputation-signal" : "declared-onchain-diff",
+        reason: chainEmpty
+          ? "no-reputation-signal"
+          : "declared-onchain-diff-unversioned-snapshots",
         verifiedFields: ["average", "feedbackCount"],
         unverifiedFields: ["uniqueClients"],
         checkedAt,
@@ -398,11 +424,14 @@ export class ReputationVerifier {
     const within = avgWithin && countWithin;
 
     return {
+      ...snapshotContext(),
       status: within ? "partial" : "mismatch",
       declared,
       verified: onchain,
       deltas: { average: dAvg, count: dCount, uniqueClients: dUnique },
-      reason: within ? "unique-clients-not-contract-verifiable" : "declared-onchain-diff",
+      reason: within
+        ? "unique-clients-not-contract-verifiable"
+        : "declared-onchain-diff-unversioned-snapshots",
       verifiedFields: ["average", "feedbackCount"],
       unverifiedFields: ["uniqueClients"],
       checkedAt,
@@ -410,8 +439,9 @@ export class ReputationVerifier {
   }
 
   /** Build a "skipped" result without any RPC (caller decided out of top-K). */
-  skipped(declared: DeclaredReputation): VerificationResult {
+  skipped(declared: DeclaredReputation): SnapshotAwareVerificationResult {
     return {
+      ...snapshotContext(),
       status: "skipped",
       declared,
       reason: "not-requested",
