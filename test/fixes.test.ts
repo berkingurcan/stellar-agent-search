@@ -115,7 +115,12 @@ describe("parseId: hex/exponent/oversized rejection (resource-#10 variant)", () 
 describe("loadConfig rejects mistyped or retired safety overrides", () => {
   it("fails closed for invalid booleans, score scale, and any legacy weight", () => {
     expect(() => loadConfig({ VERIFY_ONCHAIN: "flase" })).toThrow(/VERIFY_ONCHAIN/);
-    expect(() => loadConfig({ RANK_SCORE_MAX: "0" })).toThrow(/greater than zero/);
+    for (const scoreMax of ["0", "99", "101", "NaN", "Infinity"]) {
+      expect(() => loadConfig({ RANK_SCORE_MAX: scoreMax })).toThrow(
+        /cannot change.*declared-evidence-v1.*only accepted value is 100/i,
+      );
+    }
+    expect(loadConfig({ RANK_SCORE_MAX: "100.0" }).scoreMax).toBe(100);
     expect(() => loadConfig({ RANK_W_QUALITY: "NaN" })).toThrow(/RANK_W_QUALITY/);
     expect(() =>
       loadConfig({ RANK_W_QUALITY: "0", RANK_W_VOLUME: "0", RANK_W_BREADTH: "0" }),
@@ -137,6 +142,12 @@ describe("deriveCapabilities.mpp: whole-key + value (mpp-#8)", () => {
   it("flags MPP only when a real key is truthy", () => {
     expect(deriveCapabilities(base({ mpp: "true" })).mpp).toBe(true);
     expect(deriveCapabilities(base({ mppEnabled: "1" })).mpp).toBe(true);
+  });
+
+  it("does not coerce a malformed string boolean into x402=true", () => {
+    expect(
+      deriveCapabilities({ ...base({}), x402Enabled: "false" } as unknown as AgentResponse).x402,
+    ).toBe(false);
   });
 });
 

@@ -10,11 +10,19 @@ Service Binding path preserves distinct caller identities.
    an HTTP Service Binding only; it never receives Supabase credentials.
 2. Replace `namespace_id: "0"` with an account-unique positive integer. The
    fail-closed predeploy check rejects the sentinel, duplicate bindings, broad
-   routes, public previews, or an axios-capable Stellar SDK alias.
-3. Record the currently active Worker version and a rollback target before any
+   routes, public previews, or any module alias. Stellar SDK v16's default
+   `./contract` and `./rpc` exports are fetch-based; the dry-run command also
+   scans the emitted Worker and rejects axios implementation code.
+3. Keep `deploy-secret-allowlist.json` empty unless a specific non-credential
+   secret binding has been separately reviewed. Predeploy runs Wrangler's
+   remote `secret list --format json` because normal deploys preserve secrets
+   previously added through the dashboard/API even when they are absent from
+   `wrangler.jsonc`. Any auth, network, command, output-schema, or unexpected
+   secret result blocks deployment.
+4. Record the currently active Worker version and a rollback target before any
    route change. Cloudflare rollbacks immediately replace the active version;
    they do not roll back bound resources.
-4. Prefer a candidate version at 0% plus a version-override canary whenever an
+5. Prefer a candidate version at 0% plus a version-override canary whenever an
    existing safe version is available. The override is accepted only when
    `/healthz` returns the candidate UUID in `x-worker-version`.
 
@@ -26,6 +34,15 @@ npm --prefix worker run typecheck
 npm --prefix worker test
 npm --prefix worker run dry-run
 ```
+
+`npm --prefix worker run deploy` re-runs both the static config gate and the
+remote persisted-secret gate automatically. Wrangler returns a non-zero
+"Worker not found" result instead of `[]` before the first deployment; the
+normal deploy command therefore stops. Only for a reviewed first deployment,
+use `npm --prefix worker run deploy:first`. That separate command accepts the
+exact missing-Worker result, but still rejects auth/network failures and runs
+the same empty/allowlisted-secret policy. Do not use `deploy:first` after a
+Worker exists, and do not bypass these scripts with a direct Wrangler deploy.
 
 ## Canary
 
@@ -75,6 +92,11 @@ If this is the first runtime deployment and no stable runtime version exists,
 the two exact routes must be removed/restored to the landing Worker rather than
 pretending a code rollback can recover routing. Confirm that `/mcp` again
 returns the landing response before closing the incident.
+
+After a first deployment, immediately run the normal predeploy command and
+record that the remote secret list is empty. If any secret was ever added,
+delete it deliberately and verify the empty list; uploading code alone does
+not prove removal because Wrangler preserves persisted secrets.
 
 References: [Cloudflare rollbacks](https://developers.cloudflare.com/workers/versions-and-deployments/rollbacks/),
 [version overrides](https://developers.cloudflare.com/workers/versions-and-deployments/version-overrides/),

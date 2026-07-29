@@ -8,6 +8,21 @@ const EXPECTED_ROUTES = new Set([
 ]);
 const EXPECTED_RATE_LIMIT = 30;
 const EXPECTED_RATE_PERIOD = 60;
+const APPROVED_TOP_LEVEL_KEYS = new Set([
+  "$schema",
+  "compatibility_date",
+  "compatibility_flags",
+  "main",
+  "name",
+  "observability",
+  "preview_urls",
+  "ratelimits",
+  "routes",
+  "services",
+  "vars",
+  "version_metadata",
+  "workers_dev",
+]);
 
 // Optional text vars may only restate the immutable production defaults. The
 // Worker does not need overrides in production, but accepting these exact
@@ -20,12 +35,6 @@ const APPROVED_VARS = Object.freeze({
   VERIFY_ONCHAIN: "true",
   RANK_SCORE_MAX: "100",
 });
-
-const REQUIRED_ALIASES = {
-  "@stellar/stellar-sdk": "@stellar/stellar-sdk/no-axios",
-  "@stellar/stellar-sdk/contract": "@stellar/stellar-sdk/no-axios/contract",
-  "@stellar/stellar-sdk/rpc": "@stellar/stellar-sdk/no-axios/rpc",
-};
 
 function deployError(message) {
   throw new Error(message);
@@ -127,10 +136,18 @@ export function parseDeployConfig(source) {
 /**
  * Validate the security-sensitive deployment topology. This is intentionally
  * stricter than Wrangler's schema: a missing/renamed limiter, accidental broad
- * route, public workers.dev endpoint, or axios-capable SDK bundle blocks deploy.
+ * route, public workers.dev endpoint, or unreviewed module alias blocks deploy.
+ * Stellar SDK v16's default exports are fetch-based; the dry-run bundle gate
+ * separately rejects axios implementation code in the emitted Worker.
  */
 export function validateDeployConfig(rawConfig) {
   const config = objectValue(rawConfig, "wrangler config");
+
+  for (const key of Object.keys(config)) {
+    if (!APPROVED_TOP_LEVEL_KEYS.has(key)) {
+      deployError(`top-level ${key} is not an approved production Worker setting`);
+    }
+  }
 
   if (config.name !== "stellar-agent-mcp") deployError("worker name must be stellar-agent-mcp");
   if (config.main !== "src/index.ts") deployError("worker main must be src/index.ts");
@@ -168,7 +185,9 @@ export function validateDeployConfig(rawConfig) {
     seenRoutes.add(route.pattern);
   }
 
-  if (!Array.isArray(config.services)) deployError("services must be an array");
+  if (!Array.isArray(config.services) || config.services.length !== 1) {
+    deployError("services must contain only the canonical Explorer binding");
+  }
   const apiBindings = config.services.filter(
     (entry) =>
       typeof entry === "object" &&
@@ -180,7 +199,9 @@ export function validateDeployConfig(rawConfig) {
     deployError("STELLAR8004_API must bind exactly once to stellar8004-web");
   }
 
-  if (!Array.isArray(config.ratelimits)) deployError("ratelimits must be an array");
+  if (!Array.isArray(config.ratelimits) || config.ratelimits.length !== 1) {
+    deployError("MCP_RATE_LIMITER must be configured exactly once with no other ratelimit binding");
+  }
   const limiterBindings = config.ratelimits.filter(
     (entry) =>
       typeof entry === "object" &&
@@ -207,11 +228,6 @@ export function validateDeployConfig(rawConfig) {
     deployError(
       `MCP_RATE_LIMITER.simple must remain ${EXPECTED_RATE_LIMIT} requests per ${EXPECTED_RATE_PERIOD} seconds`,
     );
-  }
-
-  const aliases = objectValue(config.alias, "alias");
-  for (const [name, target] of Object.entries(REQUIRED_ALIASES)) {
-    if (aliases[name] !== target) deployError(`alias ${name} must resolve to ${target}`);
   }
 
   return {

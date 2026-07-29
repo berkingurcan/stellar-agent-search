@@ -781,7 +781,7 @@ export function buildFeedbackJson(
       clientAddress: f.clientAddress,
       value: feedbackValueOrNull(f.value),
       valueDecimals: f.valueDecimals ?? 0,
-      isRevoked: Boolean(f.isRevoked),
+      isRevoked: f.isRevoked === true,
       createdAt: f.createdAt,
       responseCount: f.responses?.length ?? 0,
       selfDeclared: {
@@ -806,7 +806,7 @@ export function renderFeedbackMarkdown(
 
   const rows = items.map((f) => {
     const val = feedbackValueOrNull(f.value);
-    const line = serverText`- #${f.feedbackIndex} · value=${safe(val == null ? "null" : String(val))} · client \`${safe(f.clientAddress)}\` · revoked=${Boolean(f.isRevoked)} · responses=${f.responses?.length ?? 0} · ${safe(f.createdAt)}`;
+    const line = serverText`- #${f.feedbackIndex} · value=${safe(val == null ? "null" : String(val))} · client \`${safe(f.clientAddress)}\` · revoked=${f.isRevoked === true} · responses=${f.responses?.length ?? 0} · ${safe(f.createdAt)}`;
     const tags = selfDeclaredBlock([
       ["tag1", f.tag1 ?? null],
       ["tag2", f.tag2 ?? null],

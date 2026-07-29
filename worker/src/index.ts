@@ -106,6 +106,29 @@ export interface WorkerEnv {
   CF_VERSION_METADATA?: { id: string; tag?: string; timestamp?: string };
 }
 
+const KNOWN_SENSITIVE_BINDING_NAMES = new Set([
+  "DATABASE_URL",
+  "DIRECT_URL",
+  "POSTGRES_URL",
+  "SUPABASE_URL",
+  "SUPABASE_ANON_KEY",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "STELLAR_PRIVATE_KEY",
+  "STELLAR_SECRET_KEY",
+]);
+const SENSITIVE_BINDING_NAME_PART = /(?:^|_)(?:API_KEY|AUTH_TOKEN|BEARER_TOKEN|CLIENT_SECRET|CREDENTIALS?|KEY|MNEMONIC|PASSWORD|PRIVATE_KEY|REFRESH_TOKEN|SECRET|SEED|TOKEN)(?:_|$)/;
+
+export function hasKnownSensitiveRuntimeBinding(env: WorkerEnv): boolean {
+  return Reflect.ownKeys(env).some(
+    (key) =>
+      typeof key === "string" &&
+      (KNOWN_SENSITIVE_BINDING_NAMES.has(key) ||
+        /^SUPABASE(?:_|$)/.test(key) ||
+        /^(?:DATABASE|POSTGRES|PG)(?:_|$)/.test(key) ||
+        SENSITIVE_BINDING_NAME_PART.test(key)),
+  );
+}
+
 export interface WorkerHandler {
   fetch(request: Request, env: WorkerEnv, context: WorkerContext): Promise<Response>;
 }
@@ -971,6 +994,14 @@ export function createWorker(runtime: WorkerRuntimeOptions = {}): WorkerHandler 
       if (!validHost(request)) return plainResponse(421, "Misdirected Request");
       const checkedOrigin = checkOrigin(request);
       if (!checkedOrigin.ok) return plainResponse(403, "Origin denied");
+
+      // Wrangler preserves dashboard/API secrets across normal deploys. The
+      // remote predeploy gate inventories them, and this name-only guard is a
+      // second line of defense if a known credential binding reaches runtime.
+      // Never reflect the binding name: even secret names are operational data.
+      if (hasKnownSensitiveRuntimeBinding(env)) {
+        return withCors(plainResponse(503, "Operator configuration rejected"), checkedOrigin.origin);
+      }
 
       if (path === HEALTH_PATH) {
         if (request.method === "OPTIONS") {

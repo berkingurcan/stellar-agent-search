@@ -201,7 +201,7 @@ export function deriveCapabilities(a: AgentResponse): AgentCapabilities {
     .map((t) => sanitizeText(t, 40))
     .filter((t) => t.length > 0);
   return {
-    x402: Boolean(a.x402Enabled),
+    x402: a.x402Enabled === true,
     mpp: deriveMpp(a),
     hasServices: a.hasServices ?? services.length > 0,
     supportedTrust,
@@ -539,7 +539,7 @@ export function toSafeFeedback(f: FeedbackResponse): SafeFeedbackEntry {
     tag2: sanNull(f.tag2, 60),
     endpoint: sanNull(f.endpoint, CAPS.serviceEndpoint),
     feedbackUri: sanNull(f.feedbackUri, CAPS.serviceEndpoint),
-    isRevoked: Boolean(f.isRevoked),
+    isRevoked: f.isRevoked === true,
     createdAt: sanitizeText(f.createdAt, 40),
     responseCount: f.responses?.length ?? 0,
   };

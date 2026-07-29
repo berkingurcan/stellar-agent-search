@@ -68,13 +68,6 @@ function parseBool(raw: string | undefined, def: boolean, name: string): boolean
   throw new ConfigError(`${name} must be a boolean (true/false, 1/0, yes/no, on/off), got '${raw}'`);
 }
 
-function parseNum(raw: string | undefined, def: number, name: string): number {
-  if (raw == null || raw.trim() === "") return def;
-  const n = Number(raw);
-  if (!Number.isFinite(n)) throw new ConfigError(`${name} must be a finite number, got '${raw}'`);
-  return n;
-}
-
 /**
  * Load config from an environment map (defaults to process.env in Node and an
  * empty map in runtimes without `process`). Worker entrypoints must pass their
@@ -117,8 +110,19 @@ export function loadConfig(env: EnvironmentMap = defaultEnvironment()): Config {
         `(volume=0.4, breadth=0.6) so callers cannot silently redefine score semantics.`,
     );
   }
-  const scoreMax = parseNum(env.RANK_SCORE_MAX, RANK_SCORE_MAX, "RANK_SCORE_MAX");
-  if (scoreMax <= 0) throw new ConfigError("RANK_SCORE_MAX must be greater than zero");
+  const rawScoreMax = env.RANK_SCORE_MAX?.trim();
+  if (rawScoreMax) {
+    const configuredScoreMax = Number(rawScoreMax);
+    if (!Number.isFinite(configuredScoreMax) || configuredScoreMax !== RANK_SCORE_MAX) {
+      throw new ConfigError(
+        `RANK_SCORE_MAX cannot change stellar-agent-mcp-declared-evidence-v1 semantics; ` +
+          `the only accepted value is ${RANK_SCORE_MAX}, got '${env.RANK_SCORE_MAX}'.`,
+      );
+    }
+  }
+  // Keep the field for runtime drift assertions and response plumbing, but do
+  // not let an environment variable silently redefine a versioned policy.
+  const scoreMax = RANK_SCORE_MAX;
 
   return {
     network,

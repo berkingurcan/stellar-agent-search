@@ -32,6 +32,10 @@
     }
   ],
 
+  // No credential belongs in this keyless adapter. `npm run deploy` also
+  // inventories remote dashboard/API secrets because Wrangler can preserve
+  // them even when this file declares none.
+
   "ratelimits": [
     {
       "name": "MCP_RATE_LIMITER",
@@ -47,14 +51,6 @@
       }
     }
   ],
-
-  // @trionlabs/stellar8004 imports all three SDK paths. Missing any alias can
-  // silently restore the axios build in the Worker bundle.
-  "alias": {
-    "@stellar/stellar-sdk": "@stellar/stellar-sdk/no-axios",
-    "@stellar/stellar-sdk/contract": "@stellar/stellar-sdk/no-axios/contract",
-    "@stellar/stellar-sdk/rpc": "@stellar/stellar-sdk/no-axios/rpc"
-  },
 
   "observability": {
     "enabled": true,

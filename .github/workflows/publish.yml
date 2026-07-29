@@ -70,6 +70,16 @@ jobs:
           package_version="$(node -p "require('./package.json').version")"
           server_version="$(node -p "require('./server.json').version")"
           package_manifest_version="$(node -p "require('./server.json').packages[0].version")"
+          repository_url="$(node -p "require('./package.json').repository.url.replace(/^git\\+/, '').replace(/\\.git$/, '')")"
+          repository_slug="${repository_url#https://github.com/}"
+          if [[ "$GITHUB_REPOSITORY" != "$repository_slug" ]]; then
+            echo "::error::Workflow repository ${GITHUB_REPOSITORY} does not match package identity ${repository_slug}."
+            exit 1
+          fi
+          if [[ "$EXPECTED_REPOSITORY_URL" != "$repository_url" ]]; then
+            echo "::error::EXPECTED_REPOSITORY_URL does not match package repository ${repository_url}."
+            exit 1
+          fi
           if [[ "$GITHUB_REF_NAME" != "v${package_version}" ]]; then
             echo "::error::Tag ${GITHUB_REF_NAME} does not match package version ${package_version}."
             exit 1

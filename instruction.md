@@ -3,10 +3,15 @@
 Operational runbook for the one-time npm name reservation and every real release after it. The blocking work
 is tracked in [`issues/`](issues/); this file is the ordered procedure.
 
-**State verified 29 July 2026:** the npm name is unclaimed and the repository is private. Finalize the
-canonical GitHub owner and reserve the npm name with the inert bootstrap **before** making source files with
-prepared commands public. The repository must then be public before the provenance-backed real release.
-Public onboarding stays disabled until both real registries are verified.
+**State verified 29 July 2026:** the npm name is unclaimed, the repository is private, the GitHub
+`npm-production` environment does not exist, and the repository has no Actions variables (therefore
+`NPM_PACKAGE_OWNERS` is unset). Finalize the canonical GitHub owner and reserve the npm name with the inert
+bootstrap **before** making source files with prepared commands public. The repository must then be public
+before the provenance-backed real release. Public onboarding stays disabled until both real registries are
+verified.
+
+**Mandatory first-release order:** canonical owner/transfer while private → inert `0.0.0` reservation under
+the non-default `bootstrap` tag while private → public repository → protected OIDC real release.
 
 ## Release model
 
@@ -26,6 +31,11 @@ If transferring, do it while the repository is private, then update every reposi
 the owner-string audit in [P0-01](issues/P0-01-make-repository-public.md). Do not expose the repository yet:
 the npm name is still unclaimed and the prepared documentation contains exact future commands.
 
+`npm run validate:release` now derives one canonical GitHub owner/repository from `package.json` and rejects
+drift in `server.json`, the publish workflow, landing links, skill commands, security/docs links, or the MCP
+namespace. The tag workflow independently requires runtime `GITHUB_REPOSITORY` to equal that same identity;
+a GitHub redirect is not accepted as proof after a transfer.
+
 ## 2. Prepare a green release commit on `main`
 
 Start from a clean checkout. Keep the release version synchronized in `package.json`, both `server.json`
@@ -40,6 +50,13 @@ npm test
 npm run build
 npm pack --dry-run
 ```
+
+Do not tag while [P1-06](issues/P1-06-published-package-ships-vulnerable-axios.md) remains open. Before the
+release commit, reproduce the workflow's downstream view rather than trusting this repository's root
+`overrides`: pack with `--ignore-scripts`, install that exact tarball in a new temporary npm project, run its
+`stellar-agent-mcp --version`, inspect `npm ls --all`, and require
+`npm audit --omit=dev --audit-level=high` to pass. The current clean-consumer result is **two high-severity
+findings** through the upstream Stellar SDK v15/axios branch, so a green workspace audit is not release proof.
 
 Date the changelog, merge the reviewed release commit to `main`, and wait for required CI. Do not tag a feature
 branch or a dirty working tree.
@@ -79,10 +96,13 @@ GitHub → Settings → General → Danger Zone → Change visibility → Public
 the repository/organization owner's explicit action; it is not automated by this runbook.
 
 The real public release requires public source for npm provenance and MCP Registry GitHub OIDC ownership. In a
-logged-out session, confirm the canonical path selected in step 1:
+logged-out session, confirm the canonical path selected in step 1. Do not retain the current personal owner
+by accident:
 
 ```bash
-curl -fsS https://raw.githubusercontent.com/berkingurcan/stellar-agent-mcp/main/skills/mcp/SKILL.md >/dev/null
+canonical_owner='<set-after-owner-decision>'
+test "$canonical_owner" != '<set-after-owner-decision>'
+curl -fsS "https://raw.githubusercontent.com/${canonical_owner}/stellar-agent-mcp/main/skills/mcp/SKILL.md" >/dev/null
 ```
 
 Also re-check that `npm view stellar-agent-mcp dist-tags --json` still shows only the owned bootstrap and no
@@ -97,7 +117,7 @@ does not configure any of these rules.
 On npmjs.com → package → Settings → Trusted Publisher, set:
 
 - provider: **GitHub Actions**;
-- organization/user: `berkingurcan`;
+- organization/user: the exact canonical owner selected in step 1 (recommended: `trionlabs`);
 - repository: `stellar-agent-mcp`;
 - workflow filename: **`publish.yml`** (filename only, not `.github/workflows/publish.yml`);
 - environment name: **`npm-production`**;
@@ -132,7 +152,8 @@ The MCP Registry step performs the same fail-closed check: an existing exact ver
 ```bash
 npm view stellar-agent-mcp@0.1.0 version dist.integrity repository --json
 npm view stellar-agent-mcp dist-tags --json
-curl -fsS 'https://registry.modelcontextprotocol.io/v0.1/servers/io.github.berkingurcan%2Fstellar-agent-mcp/versions/0.1.0'
+canonical_mcp_name_urlencoded="$(node -e "process.stdout.write(encodeURIComponent(require('./server.json').name))")"
+curl -fsS "https://registry.modelcontextprotocol.io/v0.1/servers/${canonical_mcp_name_urlencoded}/versions/0.1.0"
 ```
 
 On npm, verify that the provenance badge resolves to this repository, `.github/workflows/publish.yml`, the
@@ -149,7 +170,10 @@ Canary every copy button. Persistent configs must stay pinned to
 
 - The repository is private or the tag commit is not on `main`.
 - The repository is about to become public while the npm name is still unclaimed.
+- [P1-06](issues/P1-06-published-package-ships-vulnerable-axios.md) is open, or a clean install of the exact
+  packed tarball reports a high-severity production advisory or more than one Stellar SDK major.
 - The `npm-production` environment is missing any protection rule.
+- `NPM_PACKAGE_OWNERS` is unset or does not exactly match the intended npm maintainer allowlist.
 - npm Trusted Publisher uses a full path instead of filename `publish.yml`, omits the environment, or allows
   an action other than the intended `npm publish`.
 - The bootstrap package contains executable code or creates `latest`.

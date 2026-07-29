@@ -13,3 +13,5 @@ coverage/
 # x402 demo evidence output (append-only recovery journal + final receipt)
 examples/run-*.json
 examples/run-*.journal.jsonl
+examples/x402-funded-*.lock.json
+.gstack/

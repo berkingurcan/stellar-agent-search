@@ -8,6 +8,8 @@ import { ExplorerService, type GetAgentsParams } from "../src/lib/explorer.js";
 import { ReputationVerifier } from "../src/lib/reputation.js";
 import { buildServer } from "../src/server.js";
 
+const OWNER = "GDDTQFQZK734EXIJE5LWU4G4YC5A6P5AHJ4UWVMV6WBFWT6BAAQQHV2V";
+
 const closers: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
@@ -25,7 +27,7 @@ describe("MCP v2 server contract", () => {
       id: 42,
       name: "MPP Agent",
       description: "test",
-      owner: "GOWNER42",
+      owner: OWNER,
       x402Enabled: false,
       mppEnabled: true,
       hasServices: false,

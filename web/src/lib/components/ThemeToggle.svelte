@@ -24,7 +24,7 @@
 			fill="none"
 			viewBox="0 0 24 24"
 			stroke="currentColor"
-			stroke-width="1.5"
+			stroke-width="2"
 		>
 			<path
 				stroke-linecap="round"
@@ -39,7 +39,7 @@
 			fill="none"
 			viewBox="0 0 24 24"
 			stroke="currentColor"
-			stroke-width="1.5"
+			stroke-width="2"
 		>
 			<path
 				stroke-linecap="round"
@@ -54,7 +54,7 @@
 			fill="none"
 			viewBox="0 0 24 24"
 			stroke="currentColor"
-			stroke-width="1.5"
+			stroke-width="2"
 		>
 			<path
 				stroke-linecap="round"

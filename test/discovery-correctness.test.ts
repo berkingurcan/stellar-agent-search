@@ -16,6 +16,8 @@ import { registerRankAgent } from "../src/tools/rank_agent.js";
 import type { ToolDeps } from "../src/tools/shared.js";
 import { collectFeedbackWindow } from "../src/tools/shared.js";
 
+const OWNER = "GDDTQFQZK734EXIJE5LWU4G4YC5A6P5AHJ4UWVMV6WBFWT6BAAQQHV2V";
+
 interface MockResponse {
   ok: boolean;
   status: number;
@@ -40,7 +42,7 @@ function agent(id: number, name = `Scraper ${id}`): AgentResponse {
     id,
     name,
     description: "scrapes web pages",
-    owner: `GOWNER${id}`,
+    owner: OWNER,
     x402Enabled: false,
     mppEnabled: true,
     hasServices: true,

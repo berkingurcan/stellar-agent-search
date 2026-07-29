@@ -13,6 +13,38 @@ function read(path) {
   return readFileSync(resolve(ROOT, path), "utf8");
 }
 
+function parseCanonicalGitHubRepository(value) {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value.replace(/^git\+/, "").replace(/\.git$/, ""));
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (
+      url.protocol !== "https:" ||
+      url.hostname !== "github.com" ||
+      url.port ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      parts.length !== 2 ||
+      !/^[A-Za-z0-9-]+$/.test(parts[0]) ||
+      !/^[A-Za-z0-9._-]+$/.test(parts[1])
+    ) {
+      return null;
+    }
+    const [owner, repository] = parts;
+    return {
+      owner,
+      repository,
+      slug: `${owner}/${repository}`,
+      url: `https://github.com/${owner}/${repository}`,
+      mcpName: `io.github.${owner}/${repository}`,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function valueAfter(flag) {
   const index = process.argv.indexOf(flag);
   if (index === -1) return undefined;
@@ -30,9 +62,22 @@ const check = (condition, message) => {
 
 const pkg = readJson("package.json");
 const server = readJson("server.json");
+const workerPkg = readJson("worker/package.json");
 const serverPackage = server.packages?.[0];
+const repositoryIdentity = parseCanonicalGitHubRepository(pkg.repository?.url);
 
 check(pkg.engines?.node === ">=22", "package.json must require Node >=22");
+check(
+  pkg.devEngines?.runtime?.name === "node" &&
+    pkg.devEngines.runtime.version === "^22.18.0 || >=24.11.0" &&
+    pkg.devEngines.runtime.onFail === "error",
+  "package.json must pin the contributor runtime to Node ^22.18.0 or >=24.11.0",
+);
+check(read(".node-version").trim() === "22.18.0", ".node-version must pin the minimum contributor runtime");
+check(
+  workerPkg.engines?.node === "^22.18.0 || >=24.11.0",
+  "worker/package.json must use the contributor runtime range ^22.18.0 or >=24.11.0",
+);
 check(
   pkg.bin?.["stellar-agent-mcp"] === "dist/index.js" && Object.keys(pkg.bin).length === 1,
   "package.json must expose exactly the stellar-agent-mcp CLI bin",
@@ -59,13 +104,76 @@ check(
   "server.json description must be 1-100 characters",
 );
 
+check(
+  repositoryIdentity !== null,
+  "package.json repository.url must be one canonical https://github.com/<owner>/<repository> identity",
+);
+if (repositoryIdentity) {
+  check(
+    pkg.mcpName === repositoryIdentity.mcpName,
+    "package.json mcpName must derive from the canonical GitHub owner/repository",
+  );
+  check(
+    server.repository?.source === "github" && server.repository.url === repositoryIdentity.url,
+    "server.json repository must match the canonical package repository",
+  );
+  check(
+    !server.websiteUrl?.startsWith("https://github.com/") || server.websiteUrl === repositoryIdentity.url,
+    "a GitHub server.json websiteUrl must match the canonical package repository",
+  );
+  check(
+    !pkg.homepage?.startsWith("https://github.com/") || pkg.homepage === `${repositoryIdentity.url}#readme`,
+    "a GitHub package homepage must match the canonical package repository",
+  );
+  check(
+    pkg.bugs?.url === `${repositoryIdentity.url}/issues`,
+    "package.json bugs.url must match the canonical package repository",
+  );
+}
+
 const publishWorkflow = read(".github/workflows/publish.yml");
 check(
   publishWorkflow.includes("environment: npm-production"),
   ".github/workflows/publish.yml must use the npm-production protected environment",
 );
+const workflowRepository = publishWorkflow.match(/^\s*EXPECTED_REPOSITORY_URL:\s*(\S+)\s*$/m)?.[1];
+if (repositoryIdentity) {
+  check(
+    workflowRepository === repositoryIdentity.url,
+    ".github/workflows/publish.yml EXPECTED_REPOSITORY_URL must match package.json repository.url",
+  );
+  check(
+    publishWorkflow.includes('[[ "$GITHUB_REPOSITORY" != "$repository_slug" ]]'),
+    ".github/workflows/publish.yml must fail closed when the executing repository differs from package metadata",
+  );
 
-const expectedRuntime = `stellar-agent-mcp@${pkg.version}`;
+  const links = read("web/src/lib/links.ts");
+  const landingRepository = links.match(/export const GITHUB = ['"]([^'"]+)['"];/)?.[1];
+  check(
+    landingRepository === repositoryIdentity.url,
+    "web/src/lib/links.ts GITHUB must match the canonical package repository",
+  );
+
+  const identitySurfaces = [
+    ["README.md", `npx skills add ${repositoryIdentity.slug} --skill mcp`],
+    ["CONTRIBUTING.md", `git clone ${repositoryIdentity.url}`],
+    ["CONTRIBUTING.md", `npx skills add ${repositoryIdentity.slug} --skill mcp`],
+    ["SECURITY.md", `${repositoryIdentity.url}/security/advisories/new`],
+    ["docs/getting-started.md", `npx skills add ${repositoryIdentity.slug} --skill mcp`],
+    ["docs/recordings.md", `raw.githubusercontent.com/${repositoryIdentity.slug}/main/skills/mcp/SKILL.md`],
+    ["docs/recordings.md", `npx skills add ${repositoryIdentity.slug} --skill mcp`],
+    ["docs/evidence.md", repositoryIdentity.url],
+    ["docs/evidence.md", `npx skills add ${repositoryIdentity.slug} --skill mcp`],
+    ["skills/mcp/SKILL.md", `npx skills add ${repositoryIdentity.slug} --skill mcp`],
+    ["skills/mcp/SKILL.md", `github.com/${repositoryIdentity.slug}`],
+    ["web/src/lib/install-published.ts", `npx skills add ${repositoryIdentity.slug} --skill mcp`],
+  ];
+  for (const [path, expected] of identitySurfaces) {
+    check(read(path).includes(expected), `${path} does not name the canonical repository identity`);
+  }
+}
+
+const expectedRuntime = `${pkg.name}@${pkg.version}`;
 const smithery = read("smithery.yaml");
 check(
   smithery.includes(`args: ["-y", "${expectedRuntime}", "mcp"]`),
@@ -95,6 +203,12 @@ for (const path of persistentDocs) {
     `${path} contains an unpinned persistent global install`,
   );
 }
+
+const publishedLanding = read("web/src/lib/install-published.ts");
+check(
+  publishedLanding.includes("packageMetadata.version") && !publishedLanding.includes("stellar-agent-mcp@0.1.0"),
+  "published landing commands must derive their exact package pin from package.json.version",
+);
 
 for (const path of ["CONTRIBUTING.md", "skills/mcp/SKILL.md"]) {
   check(!/Node(?:\.js)?\s*(?:≥|>=)\s*18/.test(read(path)), `${path} still advertises Node 18`);

@@ -25,9 +25,16 @@ try {
 }
 
 const source = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
-if (source.name !== "stellar-agent-mcp") fail("unexpected source package name");
 if (source.version === "0.0.0") fail("the source tree itself must never be the bootstrap version");
-if (source.mcpName !== "io.github.berkingurcan/stellar-agent-mcp") {
+const repositoryMatch = source.repository?.url?.match(
+  /^git\+https:\/\/github\.com\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)\.git$/,
+);
+if (!repositoryMatch) fail("source package has no canonical GitHub repository identity");
+if (source.name?.split("/").at(-1) !== repositoryMatch[2]) {
+  fail("source package basename does not match the canonical repository");
+}
+const expectedMcpName = `io.github.${repositoryMatch[1]}/${repositoryMatch[2]}`;
+if (source.mcpName !== expectedMcpName) {
   fail("unexpected MCP registry name");
 }
 
