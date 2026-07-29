@@ -28,6 +28,7 @@ import {
   assertOnchainSettlement,
   assertResultHash,
   assertTransactionHash,
+  buildFeedbackEvidenceUri,
   canonicalRequestIdentity,
   captureUntrustedSettlementClaim,
   credentialFreeChildUrl,
@@ -112,8 +113,8 @@ function paymentEnvelope(nonce = 1n) {
     .build();
 }
 
-function feedbackOnchainFixture() {
-  const feedbackHash = "67".repeat(32);
+function feedbackOnchainFixture(overrides: Partial<FeedbackOnchainExpectation> = {}) {
+  const feedbackHash = overrides.feedbackHash ?? "67".repeat(32);
   const expected: FeedbackOnchainExpectation = {
     contractId: REPUTATION_CONTRACT,
     caller: OTHER_ACCOUNT,
@@ -127,6 +128,7 @@ function feedbackOnchainFixture() {
     feedbackHash,
     submittedAtMs: 1_700_000_000_500,
     networkPassphrase: Networks.PUBLIC,
+    ...overrides,
   };
   const invocation = new xdr.InvokeContractArgs({
     contractAddress: Address.fromString(expected.contractId).toScAddress(),
@@ -1144,10 +1146,38 @@ describe("x402 evidence integrity", () => {
   it("will not write an incomplete or unsuccessful full evidence receipt", () => {
     const identity = canonicalRequestIdentity(config(false), OTHER_ACCOUNT, SCRAPPER_AGENT_ID, ENDPOINT);
     const settlementEnvelope = paymentEnvelope(20n);
-    const feedbackEnvelope = paymentEnvelope(21n);
     const paymentTxHash = transactionEnvelopeHash(settlementEnvelope.toXDR(), Networks.PUBLIC);
-    const feedbackTxHash = transactionEnvelopeHash(feedbackEnvelope.toXDR(), Networks.PUBLIC);
-    const feedbackEventXdr = new xdr.ContractEvent({
+    const startedAt = "2023-11-14T22:13:20.000Z";
+    const settlementConfirmedAt = "2023-11-14T22:13:20.000Z";
+    const feedbackUri = buildFeedbackEvidenceUri({
+      agentId: SCRAPPER_AGENT_ID,
+      owner: SCRAPPER_OWNER,
+      endpoint: ENDPOINT,
+      challengeNetwork: STELLAR_PUBNET_CAIP2,
+      asset: USDC_PUBNET_ADDRESS,
+      payTo: SCRAPPER_EXPECTED_PAY_TO,
+      price: "1000",
+      paymentTxHash,
+      paymentAuthorizationHash: paymentAuthorizationHash(settlementEnvelope.toXDR(), Networks.PUBLIC),
+      settlementLedger: 123,
+      settlementConfirmedAt,
+      resultHash: RESULT_HASH,
+      resultOk: true,
+      startedAt,
+    });
+    const feedback = feedbackOnchainFixture({
+      caller: OTHER_ACCOUNT,
+      agentId: SCRAPPER_AGENT_ID,
+      value: 95n,
+      valueDecimals: 0,
+      tag1: "starred",
+      tag2: "successRate",
+      endpoint: ENDPOINT,
+      feedbackUri,
+      feedbackHash: createHash("sha256").update(feedbackUri).digest("hex"),
+      submittedAtMs: Date.parse(startedAt),
+    });
+    const unrelatedFeedbackEventXdr = new xdr.ContractEvent({
       ext: new xdr.ExtensionPoint(0),
       contractId: StrKey.decodeContract(USDC_PUBNET_ADDRESS) as any,
       type: xdr.ContractEventType.contract(),
@@ -1181,17 +1211,17 @@ describe("x402 evidence integrity", () => {
       settlementRecomputedTxHash: paymentTxHash,
       settlementTransactionXdr: settlementEnvelope.toXDR(),
       settlementLedger: 123,
-      settlementConfirmedAt: "2026-07-29T00:00:00.500Z",
+      settlementConfirmedAt,
       resultHash: RESULT_HASH,
       resultOk: true,
-      feedbackTxHash,
+      feedbackTxHash: feedback.txHash,
       feedbackIndex: "7",
-      feedbackLedger: 124,
-      feedbackConfirmedAt: "2026-07-29T00:00:00.750Z",
-      feedbackTransactionXdr: feedbackEnvelope.toXDR(),
-      feedbackEventXdr,
-      startedAt: "2026-07-29T00:00:00.000Z",
-      finishedAt: "2026-07-29T00:00:01.000Z",
+      feedbackLedger: feedback.transaction.ledger,
+      feedbackConfirmedAt: "2023-11-14T22:13:21.000Z",
+      feedbackTransactionXdr: feedback.signedTransactionXdr,
+      feedbackEventXdr: feedback.transaction.events.contractEventsXdr[0][0].toXDR("base64"),
+      startedAt,
+      finishedAt: "2023-11-14T22:13:22.000Z",
       expertLinks: {},
     };
     expect(() => assertCompleteEvidenceRecord(rec)).not.toThrow();
@@ -1207,6 +1237,12 @@ describe("x402 evidence integrity", () => {
     );
     expect(() => assertCompleteEvidenceRecord({ ...rec, settlementRecomputedTxHash: TX })).toThrow(
       /settlement XDR\/hash binding/,
+    );
+    expect(() =>
+      assertCompleteEvidenceRecord({ ...rec, feedbackEventXdr: unrelatedFeedbackEventXdr }),
+    ).toThrow(/feedback envelope\/event\/source binding/);
+    expect(() => assertCompleteEvidenceRecord({ ...rec, resultHash: "ef".repeat(32) })).toThrow(
+      /feedback envelope\/event\/source binding/,
     );
   });
 });

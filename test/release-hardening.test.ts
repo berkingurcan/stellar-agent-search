@@ -140,6 +140,37 @@ describe("real release fail-closed gates", () => {
     expect(ci).not.toContain("node: ['20'");
   });
 
+  it("vendors the exact canonical SDK while shipping one Stellar SDK v16 graph", () => {
+    const pkg = JSON.parse(read("package.json")) as {
+      files: string[];
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+      overrides: Record<string, unknown>;
+    };
+    const lock = JSON.parse(read("package-lock.json")) as {
+      packages: Record<string, { version?: string; dev?: boolean }>;
+    };
+
+    expect(pkg.dependencies["@stellar/stellar-sdk"]).toBe("16.2.0");
+    expect(pkg.devDependencies["@trionlabs/stellar8004"]).toBe("0.0.11");
+    expect(pkg.devDependencies["@x402/stellar"]).toBe("~2.20.0");
+    expect(pkg.dependencies).not.toHaveProperty("@trionlabs/stellar8004");
+    expect(pkg.dependencies).not.toHaveProperty("@x402/stellar");
+    expect(pkg.overrides["@stellar/stellar-sdk"]).toBe("$@stellar/stellar-sdk");
+    expect(pkg.files).toContain("THIRD_PARTY_NOTICES.md");
+
+    const sdkInstalls = Object.keys(lock.packages).filter((path) =>
+      path.endsWith("node_modules/@stellar/stellar-sdk"),
+    );
+    expect(sdkInstalls).toEqual(["node_modules/@stellar/stellar-sdk"]);
+    expect(lock.packages["node_modules/@stellar/stellar-sdk"]?.version).toBe("16.2.0");
+    expect(lock.packages["node_modules/@trionlabs/stellar8004"]?.dev).toBe(true);
+    expect(lock.packages["node_modules/@x402/stellar"]?.dev).toBe(true);
+
+    expect(read("tsup.config.ts")).toContain('noExternal: ["@trionlabs/stellar8004"]');
+    expect(read("THIRD_PARTY_NOTICES.md")).toContain("@trionlabs/stellar8004@0.0.11");
+  });
+
   it("keeps the package bin-only and validates before any direct publish", () => {
     const pkg = JSON.parse(read("package.json")) as Record<string, unknown> & {
       scripts: Record<string, string>;
@@ -200,7 +231,7 @@ describe("real release fail-closed gates", () => {
     const releaseSurfaceCheck = read("web", "scripts", "assert-release-surface.mjs");
     const webPackage = JSON.parse(read("web", "package.json")) as { scripts: Record<string, string> };
     expect(landing).not.toContain('code="npx -y stellar-agent-mcp@');
-    expect(landing).toContain("source and install links stay withheld");
+    expect(landing).toContain("install commands stay withheld until public package ownership is verified");
     expect(installSelector).toContain("export * from './install-pending.js'");
     expect(pendingSurface).toContain("export const PACKAGE_PUBLISHED = false");
     expect(pendingSurface).not.toContain("npx");

@@ -95,8 +95,8 @@ returned `summary_value 96`, `summary_value_decimals 0`, and `count 8`. Both cal
 but the second result describes only its caller-supplied subset. It does not prove that the subset is complete,
 that it shares a snapshot with the Explorer, or that the reviewers are Sybil-resistant.
 
-> **Note for anyone running behind an HTTP proxy.** The contract reachability read deliberately uses Stellar SDK's
-> fetch-based `no-axios` transport, so the historical axios/proxy `405` failure is not an accepted explanation
+> **Note for anyone running behind an HTTP proxy.** The contract reachability read deliberately uses Stellar SDK
+> v16's fetch-based default contract transport, so the historical axios/proxy `405` failure is not an accepted explanation
 > anymore. If `doctor` reports `✗ contract read path FAILED`, treat the RPC/simulation path as unhealthy and
 > investigate it. Tool calls still degrade to `unavailable` rather than guessing.
 

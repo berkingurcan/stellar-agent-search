@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { reveal } from '$lib/actions/reveal.js';
+	import { TOOL_COUNT } from '$lib/surface.js';
 
 	const checks = [
 		{ label: 'Node', value: 'v26.4.0', ok: true },
@@ -8,7 +9,7 @@
 		{ label: 'Explorer', value: 'healthy', ok: true },
 		{ label: 'Soroban RPC', value: 'healthy', ok: true },
 		{ label: 'Contract', value: 'readable', ok: true },
-		{ label: 'Tools', value: '7 loaded', ok: true }
+		{ label: 'Tools', value: `${TOOL_COUNT} loaded`, ok: true }
 	];
 </script>
 

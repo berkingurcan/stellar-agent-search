@@ -5,9 +5,6 @@ const JAVASCRIPT_FILE = /\.(?:c|m)?js$/i;
 const AXIOS_IMPLEMENTATION_MARKERS = [
   /node_modules[\\/]axios(?:[\\/]|$)/i,
   /@stellar[\\/]stellar-sdk[\\/](?:lib[\\/])?axios(?:[\\/]|$)/i,
-  /\bAxiosError\b/,
-  /\bAxiosHeaders\b/,
-  /\baxios\.create\s*\(/,
 ];
 
 async function javascriptFiles(root) {

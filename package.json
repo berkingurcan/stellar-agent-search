@@ -60,7 +60,7 @@
   "dependencies": {
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
-    "@stellar/stellar-sdk": "^16.0.1",
+    "@stellar/stellar-sdk": "16.2.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
@@ -81,8 +81,6 @@
   "overrides": {
     "axios": "1.18.1",
     "@hono/node-server": "^2.0.5",
-    "@trionlabs/stellar8004": {
-      "@stellar/stellar-sdk": "$@stellar/stellar-sdk"
-    }
+    "@stellar/stellar-sdk": "$@stellar/stellar-sdk"
   }
 }

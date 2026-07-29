@@ -138,7 +138,9 @@ with this run's signed Soroban authorization and the exact USDC asset/payer/paye
 matches the Scrapper's exact `{ success: true, data: "URL: …\\n…\\nContent:\\n<non-empty content>" }` contract, its
 SHA-256 was recorded, and a fresh RPC read proves the exact signed `give_feedback` invocation and matching
 `NewFeedback` event. An invalid paid result may still receive a below-expectation feedback entry, but it is not labeled
-or written as successful acceptance evidence.
+or written as successful acceptance evidence. Before persistence, the receipt validator reconstructs the canonical
+public feedback evidence URI from the receipt's payment/result facts and replays the finalized transaction/event check;
+an unrelated contract event or a `give_feedback` tuple that commits different evidence cannot pass as `run.json`.
 
 - Payment tx: `https://stellar.expert/explorer/public/tx/<hash>` — USDC transfer to the scrapper's payTo.
 - Feedback tx: `https://stellar.expert/explorer/public/tx/<hash>` — emits `NewFeedback` for the agent.
