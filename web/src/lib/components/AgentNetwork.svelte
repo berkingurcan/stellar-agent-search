@@ -5,9 +5,12 @@
 	let raf = 0;
 	let mouse = { x: -9999, y: -9999 };
 	let smooth = { x: -9999, y: -9999 };
-	const GLOW = 180;
+	let hasMouse = false;
+	let time = 0;
+
+	const GLOW = 200;
 	const GLOW_SQ = GLOW * GLOW;
-	const LERP = 0.08;
+	const LERP = 0.06;
 
 	const COLS = 7;
 	const ROWS = 7;
@@ -21,6 +24,7 @@
 		sx: number;
 		sy: number;
 		r: number;
+		phase: number;
 		el: SVGCircleElement | null;
 		baseOpacity: number;
 	};
@@ -34,37 +38,35 @@
 	}
 
 	function build() {
-		const builtNodes: Node[] = [];
-		const builtEdges: Edge[] = [];
+		const n: Node[] = [];
+		const e: Edge[] = [];
 		for (let row = 0; row < ROWS; row++) {
 			for (let col = 0; col < COLS; col++) {
-				// Keep SSR and hydration byte-stable. Math.random() here makes the
-				// server and browser render different SVG attributes.
 				const radiusStep = (col * 17 + row * 31) % 11;
 				const opacityStep = (col * 7 + row * 11) % 5;
-				builtNodes.push({
+				const phaseStep = (col * 13 + row * 23) % 100;
+				n.push({
 					ix: col,
 					iy: row,
 					sx: isoX(col, row),
 					sy: isoY(col, row),
-					r: 1.8 + radiusStep * 0.2,
+					r: 2 + radiusStep * 0.25,
+					phase: (phaseStep / 100) * Math.PI * 2,
 					el: null,
-					baseOpacity: 0.12 + opacityStep * 0.02
+					baseOpacity: 0.15 + opacityStep * 0.02
 				});
 			}
 		}
-		for (let i = 0; i < builtNodes.length; i++) {
-			const n = builtNodes[i];
-			const right = builtNodes.find((m) => m.ix === n.ix + 1 && m.iy === n.iy);
-			const down = builtNodes.find((m) => m.ix === n.ix && m.iy === n.iy + 1);
-			if (right) builtEdges.push({ a: n, b: right, el: null });
-			if (down) builtEdges.push({ a: n, b: down, el: null });
+		for (let i = 0; i < n.length; i++) {
+			const node = n[i];
+			const right = n.find((m) => m.ix === node.ix + 1 && m.iy === node.iy);
+			const down = n.find((m) => m.ix === node.ix && m.iy === node.iy + 1);
+			if (right) e.push({ a: node, b: right, el: null });
+			if (down) e.push({ a: node, b: down, el: null });
 		}
-
-		return { nodes: builtNodes, edges: builtEdges };
+		return { nodes: n, edges: e };
 	}
 
-	// Pre-build deterministically so SSR and hydration emit identical SVG.
 	const { nodes, edges } = build();
 
 	function tick() {
@@ -73,6 +75,11 @@
 			return;
 		}
 
+		const rect = svg.getBoundingClientRect();
+		const cx0 = rect.left + rect.width / 2;
+		const cy0 = rect.top + rect.height / 2;
+		const t = time * 0.001;
+
 		const dx = mouse.x - smooth.x;
 		const dy = mouse.y - smooth.y;
 		const moving = dx * dx + dy * dy > 0.5;
@@ -80,22 +87,30 @@
 			smooth.x += dx * LERP;
 			smooth.y += dy * LERP;
 		}
-		const rect = svg.getBoundingClientRect();
 
 		for (const node of nodes) {
 			if (!node.el) continue;
-			const cx = rect.left + rect.width / 2 + node.sx;
-			const cy = rect.top + rect.height / 2 + node.sy;
-			const ddx = cx - smooth.x;
-			const ddy = cy - smooth.y;
-			const distSq = ddx * ddx + ddy * ddy;
+			const px = cx0 + node.sx;
+			const py = cy0 + node.sy;
 
-			if (distSq < GLOW_SQ) {
-				const prox = 1 - Math.sqrt(distSq) / GLOW;
-				node.el.setAttribute('opacity', String(node.baseOpacity + prox * 0.6));
-				node.el.setAttribute('r', String(node.r + prox * 2));
+			const breathe = 0.85 + 0.15 * Math.sin(t * 0.8 + node.phase);
+
+			if (hasMouse) {
+				const ddx = px - smooth.x;
+				const ddy = py - smooth.y;
+				const distSq = ddx * ddx + ddy * ddy;
+
+				if (distSq < GLOW_SQ) {
+					const prox = 1 - Math.sqrt(distSq) / GLOW;
+					const p2 = prox * prox;
+					node.el.setAttribute('opacity', String((node.baseOpacity + p2 * 0.55) * breathe));
+					node.el.setAttribute('r', String(node.r + p2 * 2.5));
+				} else {
+					node.el.setAttribute('opacity', String(node.baseOpacity * breathe));
+					node.el.setAttribute('r', String(node.r));
+				}
 			} else {
-				node.el.setAttribute('opacity', String(node.baseOpacity));
+				node.el.setAttribute('opacity', String(node.baseOpacity * breathe));
 				node.el.setAttribute('r', String(node.r));
 			}
 		}
@@ -104,37 +119,55 @@
 			if (!edge.el) continue;
 			const mx = (edge.a.sx + edge.b.sx) / 2;
 			const my = (edge.a.sy + edge.b.sy) / 2;
-			const cx = rect.left + rect.width / 2 + mx;
-			const cy = rect.top + rect.height / 2 + my;
-			const ddx = cx - smooth.x;
-			const ddy = cy - smooth.y;
-			const distSq = ddx * ddx + ddy * ddy;
+			const px = cx0 + mx;
+			const py = cy0 + my;
+			const breathe = 0.7 + 0.3 * Math.sin(t * 0.6 + edge.a.phase + edge.b.phase);
 
-			if (distSq < GLOW_SQ) {
-				const prox = 1 - Math.sqrt(distSq) / GLOW;
-				edge.el.setAttribute('opacity', String(0.08 + prox * 0.3));
-				edge.el.setAttribute('stroke-width', String(0.6 + prox * 1));
+			if (hasMouse) {
+				const ddx = px - smooth.x;
+				const ddy = py - smooth.y;
+				const distSq = ddx * ddx + ddy * ddy;
+
+				if (distSq < GLOW_SQ) {
+					const prox = 1 - Math.sqrt(distSq) / GLOW;
+					edge.el.setAttribute('opacity', String((0.1 + prox * 0.35) * breathe));
+					edge.el.setAttribute('stroke-width', String(0.5 + prox * 1.2));
+				} else {
+					edge.el.setAttribute('opacity', String(0.1 * breathe));
+					edge.el.setAttribute('stroke-width', '0.5');
+				}
 			} else {
-				edge.el.setAttribute('opacity', '0.08');
-				edge.el.setAttribute('stroke-width', '0.6');
+				edge.el.setAttribute('opacity', String(0.1 * breathe));
+				edge.el.setAttribute('stroke-width', '0.5');
 			}
 		}
 
-		raf = moving ? requestAnimationFrame(tick) : 0;
+		time += 16;
+		raf = requestAnimationFrame(tick);
 	}
 
-	function onMove(e: MouseEvent) {
+	function onMouseMove(e: MouseEvent) {
 		mouse.x = e.clientX;
 		mouse.y = e.clientY;
-		if (raf === 0) raf = requestAnimationFrame(tick);
+		hasMouse = true;
+	}
+
+	function onTouchMove(e: TouchEvent) {
+		if (e.touches.length > 0) {
+			mouse.x = e.touches[0].clientX;
+			mouse.y = e.touches[0].clientY;
+			hasMouse = true;
+		}
+	}
+
+	function onLeave() {
+		hasMouse = false;
 	}
 
 	onMount(() => {
 		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 		if (!svg) return;
 
-		// These refs are animation-only state; mutating them avoids a redundant
-		// template update after hydration.
 		for (let i = 0; i < nodes.length; i++) {
 			nodes[i].el = svg.querySelector(`[data-node="${i}"]`);
 		}
@@ -142,10 +175,16 @@
 			edges[i].el = svg.querySelector(`[data-edge="${i}"]`);
 		}
 
-		window.addEventListener('mousemove', onMove, { passive: true });
+		window.addEventListener('mousemove', onMouseMove, { passive: true });
+		window.addEventListener('touchmove', onTouchMove, { passive: true });
+		window.addEventListener('touchend', onLeave, { passive: true });
+
+		raf = requestAnimationFrame(tick);
 
 		return () => {
-			window.removeEventListener('mousemove', onMove);
+			window.removeEventListener('mousemove', onMouseMove);
+			window.removeEventListener('touchmove', onTouchMove);
+			window.removeEventListener('touchend', onLeave);
 			cancelAnimationFrame(raf);
 		};
 	});
@@ -153,11 +192,11 @@
 
 <svg
 	bind:this={svg}
-	class="pointer-events-none absolute inset-0 h-full w-full"
-	viewBox="-260 -160 520 320"
+	class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+	viewBox="-280 -180 560 360"
 	preserveAspectRatio="xMidYMid slice"
 	aria-hidden="true"
-	style="opacity: 0.7;"
+	style="opacity: 0.8;"
 >
 	<g transform="translate(0, -30)">
 		{#each edges as edge, i (i)}
@@ -168,8 +207,8 @@
 				x2={edge.b.sx}
 				y2={edge.b.sy}
 				stroke="var(--color-text-dim)"
-				stroke-width="0.6"
-				opacity="0.08"
+				stroke-width="0.5"
+				opacity="0.1"
 			/>
 		{/each}
 		{#each nodes as node, i (i)}
