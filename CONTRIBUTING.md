@@ -138,17 +138,17 @@ release validator enforce the machine-readable surfaces; review the complete pin
 
 ### First release — one-time setup
 
-**Mandatory first-release order:** canonical owner/transfer while private → inert `0.0.0` reservation under
+**Mandatory first-release order:** private move to selected owner `berkingurcan` → inert `0.0.0` reservation under
 the non-default `bootstrap` tag while private → public repository → protected OIDC real release.
 
 Do not swap the middle steps: making prepared `npx` commands public while the npm name is unclaimed creates a
 supply-chain takeover window, while a real provenance-backed publish requires the final repository to be
 public. Execute the one-time setup in this order:
 
-1. **Finalize the canonical owner while the repository remains private.** Decide between the recommended
-   `trionlabs/stellar-agent-mcp` transfer and the explicitly accepted personal namespace, perform any transfer,
-   then update and validate every repository/MCP/npm identity-bearing file. Do not reserve npm under a
-   temporary owner and do not make the repository public yet.
+1. **Move the private repository to the selected canonical owner.** The chosen identity is
+   `berkingurcan/stellar-agent-mcp`. Transfer the existing repository if possible so history and settings stay
+   intact; otherwise create the private destination and push the complete history. Validate every
+   repository/MCP/npm identity-bearing file before reserving npm or making the destination public.
 2. **Reserve the name while the repository is still private.** Trusted Publisher configuration requires the
    package to exist. Generate an inert `0.0.0` package outside the repository: it contains only
    `package.json`, `README.md`, and `LICENSE`, while its `publishConfig` forces the non-`latest` `bootstrap`

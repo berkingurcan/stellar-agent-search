@@ -3,14 +3,14 @@
 Operational runbook for the one-time npm name reservation and every real release after it. The blocking work
 is tracked in [`issues/`](issues/); this file is the ordered procedure.
 
-**State verified 29 July 2026:** the npm name is unclaimed, the repository is private, the GitHub
-`npm-production` environment does not exist, and the repository has no Actions variables (therefore
-`NPM_PACKAGE_OWNERS` is unset). Finalize the canonical GitHub owner and reserve the npm name with the inert
-bootstrap **before** making source files with prepared commands public. The repository must then be public
-before the provenance-backed real release. Public onboarding stays disabled until both real registries are
-verified.
+**State verified 29 July 2026:** `berkingurcan` is the selected canonical GitHub owner, but the source still
+lives in the private staging repository and `berkingurcan/stellar-agent-mcp` is not publicly accessible. The
+npm name is unclaimed, the destination's `npm-production` environment is not configured, and
+`NPM_PACKAGE_OWNERS` is unset. Move the private repository first, then reserve the npm name with the inert
+bootstrap **before** making prepared commands public. Public onboarding stays disabled until both real
+registries are verified.
 
-**Mandatory first-release order:** canonical owner/transfer while private → inert `0.0.0` reservation under
+**Mandatory first-release order:** private move to selected owner `berkingurcan` → inert `0.0.0` reservation under
 the non-default `bootstrap` tag while private → public repository → protected OIDC real release.
 
 ## Release model
@@ -26,10 +26,11 @@ then does it publish or verify the immutable MCP Registry version.
 
 ## 1. Finalize repository identity while it is still private
 
-Choose the permanent owner (`trionlabs` is recommended; retaining `berkingurcan` is the explicit fallback).
-If transferring, do it while the repository is private, then update every repository/MCP/npm identity and run
-the owner-string audit in [P0-01](issues/P0-01-make-repository-public.md). Do not expose the repository yet:
-the npm name is still unclaimed and the prepared documentation contains exact future commands.
+The permanent owner is **`berkingurcan`**. Move the repository to
+`berkingurcan/stellar-agent-mcp` while both source and destination remain private, then run the owner-string
+audit in [P0-01](issues/P0-01-make-repository-public.md). Prefer a GitHub transfer over a second disconnected
+copy because it preserves history and repository settings. Do not expose the destination yet: the npm name is
+still unclaimed and the prepared documentation contains exact future commands.
 
 `npm run validate:release` now derives one canonical GitHub owner/repository from `package.json` and rejects
 drift in `server.json`, the publish workflow, landing links, skill commands, security/docs links, or the MCP
@@ -51,12 +52,12 @@ npm run build
 npm pack --dry-run
 ```
 
-Do not tag while [P1-06](issues/P1-06-published-package-ships-vulnerable-axios.md) remains open. Before the
-release commit, reproduce the workflow's downstream view rather than trusting this repository's root
-`overrides`: pack with `--ignore-scripts`, install that exact tarball in a new temporary npm project, run its
-`stellar-agent-mcp --version`, inspect `npm ls --all`, and require
-`npm audit --omit=dev --audit-level=high` to pass. The current clean-consumer result is **two high-severity
-findings** through the upstream Stellar SDK v15/axios branch, so a green workspace audit is not release proof.
+Before tagging, reproduce [P1-06](issues/P1-06-published-package-ships-vulnerable-axios.md)'s locally green
+downstream proof rather than trusting this repository's root `overrides`: pack with `--ignore-scripts`, install
+that exact tarball in a new temporary npm project, run its `stellar-agent-mcp --version`, inspect `npm ls
+--all`, and require `npm audit --omit=dev --audit-level=high` to pass. The current packed-consumer proof has no
+high/critical finding; the issue's final checkbox remains open only so the immutable OIDC-published artifact is
+checked again after release.
 
 Date the changelog, merge the reviewed release commit to `main`, and wait for required CI. Do not tag a feature
 branch or a dirty working tree.
@@ -100,8 +101,8 @@ logged-out session, confirm the canonical path selected in step 1. Do not retain
 by accident:
 
 ```bash
-canonical_owner='<set-after-owner-decision>'
-test "$canonical_owner" != '<set-after-owner-decision>'
+canonical_owner='berkingurcan'
+test "$canonical_owner" = 'berkingurcan'
 curl -fsS "https://raw.githubusercontent.com/${canonical_owner}/stellar-agent-mcp/main/skills/mcp/SKILL.md" >/dev/null
 ```
 
@@ -117,7 +118,7 @@ does not configure any of these rules.
 On npmjs.com → package → Settings → Trusted Publisher, set:
 
 - provider: **GitHub Actions**;
-- organization/user: the exact canonical owner selected in step 1 (recommended: `trionlabs`);
+- organization/user: **`berkingurcan`**;
 - repository: `stellar-agent-mcp`;
 - workflow filename: **`publish.yml`** (filename only, not `.github/workflows/publish.yml`);
 - environment name: **`npm-production`**;
