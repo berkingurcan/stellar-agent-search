@@ -55,6 +55,13 @@ describe("pure normalizers", () => {
     expect(qualityNorm(-10, 3, 100)).toBe(0);
   });
 
+  it("rejects a score scale that would redefine the versioned v1 policy", () => {
+    expect(() => qualityNorm(5, 1, 10)).toThrow(/fixes scoreMax at 100/);
+    expect(() => scoreAgent(input(), { ...OPTS, scoreMax: 10 })).toThrow(
+      /fixes scoreMax at 100/,
+    );
+  });
+
   it("uses the documented log saturation points", () => {
     expect(volumeNorm(0)).toBe(0);
     expect(volumeNorm(RANKING.VOL_SAT)).toBeCloseTo(1, 12);

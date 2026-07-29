@@ -127,13 +127,41 @@ describe("fail-closed Worker deploy config validation", () => {
     expect(() => validateDeployConfig(config)).toThrow(/vars must be an object/);
   });
 
-  it("rejects the wrong service target or an axios-capable Stellar SDK alias", () => {
+  it("rejects the wrong service target or any module alias", () => {
     const wrongService = deployableConfig();
     wrongService.services[0].service = "public-indexer-copy";
     expect(() => validateDeployConfig(wrongService)).toThrow(/bind exactly once/);
 
-    const axios = deployableConfig();
-    axios.alias["@stellar/stellar-sdk"] = "@stellar/stellar-sdk";
-    expect(() => validateDeployConfig(axios)).toThrow(/no-axios/);
+    const aliased = deployableConfig();
+    aliased.alias = {
+      "@stellar/stellar-sdk": "@stellar/stellar-sdk/axios",
+    };
+    expect(() => validateDeployConfig(aliased)).toThrow(/top-level alias is not an approved/);
+  });
+
+  it("rejects unreviewed resource/secret settings and extra bindings or aliases", () => {
+    for (const key of ["secrets_store_secrets", "unsafe", "kv_namespaces"]) {
+      const config = deployableConfig();
+      config[key] = [];
+      expect(() => validateDeployConfig(config)).toThrow(
+        new RegExp(`top-level ${key} is not an approved`),
+      );
+    }
+
+    const extraService = deployableConfig();
+    extraService.services.push({ binding: "EXTRA", service: "unreviewed" });
+    expect(() => validateDeployConfig(extraService)).toThrow(/only the canonical Explorer binding/);
+
+    const extraLimiter = deployableConfig();
+    extraLimiter.ratelimits.push({
+      name: "EXTRA_LIMITER",
+      namespace_id: "123",
+      simple: { limit: 1, period: 60 },
+    });
+    expect(() => validateDeployConfig(extraLimiter)).toThrow(/configured exactly once/);
+
+    const extraAlias = deployableConfig();
+    extraAlias.alias = { "unreviewed-package": "./shim.js" };
+    expect(() => validateDeployConfig(extraAlias)).toThrow(/top-level alias is not an approved/);
   });
 });

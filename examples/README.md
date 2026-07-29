@@ -117,22 +117,28 @@ npx tsx examples/x402-demo.ts | tee examples/run-$(date +%Y%m%d).log
 
 ## Output & evidence
 
-On a full run the script first creates and fsyncs an append-only crash-recovery journal at
-`examples/run-<timestamp>.journal.jsonl` **before the signed request leaves the process**. It appends HTTP response,
-independent settlement, and result-hash stages as each becomes known. Before broadcasting feedback it signs locally,
-computes the canonical transaction hash, and fsyncs `feedback_submitted`; only an RPC terminal `SUCCESS` appends
-`feedback_confirmed`. Terminal `FAILED` and uncertain send/poll outcomes get distinct recovery entries. It then prints **two
-mainnet tx hashes** with Stellar Expert links and writes `examples/run-<timestamp>.json` (**no secrets** — network,
-payer G-address, pinned identity/endpoint,
-challenge network/asset/payTo/price, payment tx hash, exact response-body SHA-256, feedback tx hash,
-timestamps, Expert links). Dry-run writes the same record with empty payment/result/feedback fields.
+On a full run the script creates a 0600 exclusive lock keyed by payer + agent + canonical endpoint/method/body
+digest. After signing, but **before the signed request can leave the process**, it atomically writes and fsyncs a private
+`examples/run-<timestamp>-….payment-recovery.json` containing the exact payment transaction XDR and compact signed
+payload JSON. Treat this file as sensitive recovery material: do not upload, paste, or log it. Only its path and
+SHA-256 are copied into the 0600 append-only `run-<timestamp>.journal.jsonl` and lock, together with the canonical
+request/challenge facts and payload/XDR digests. The script then submits exactly once.
+
+The journal records the bounded response-header digest and normalized settlement claim, independently verified
+settlement envelope/event evidence, and exact response-body hash. Before broadcasting feedback it signs locally and
+fsyncs `feedback_submitted`; `feedback_confirmed` is appended only after a fresh RPC read binds the exact finalized
+envelope, `give_feedback` argument tuple, and `NewFeedback` event tuple. Terminal `FAILED` and uncertain send/poll/RPC
+verification outcomes get distinct recovery entries. Finally it prints **two mainnet tx hashes** and atomically writes
+`examples/run-<timestamp>.json` (no private payload or result body). Dry-run writes a receipt with empty
+payment/result/feedback fields.
 
 The full receipt is written only when the initial response was exactly HTTP 402, the settlement header reports
 success with the expected payer/network/amount, Stellar RPC independently confirms a fresh final transaction
 with this run's signed Soroban authorization and the exact USDC asset/payer/payee/amount transfer, the paid body
-matches the Scrapper's exact `{ success: true, data: "URL: …\\n…\\nContent:\\n…" }` contract, its SHA-256 was recorded,
-and the exact signed `give_feedback` transaction reached RPC terminal `SUCCESS`. An invalid paid result may still receive a
-below-expectation feedback entry, but it is not labeled or written as successful acceptance evidence.
+matches the Scrapper's exact `{ success: true, data: "URL: …\\n…\\nContent:\\n<non-empty content>" }` contract, its
+SHA-256 was recorded, and a fresh RPC read proves the exact signed `give_feedback` invocation and matching
+`NewFeedback` event. An invalid paid result may still receive a below-expectation feedback entry, but it is not labeled
+or written as successful acceptance evidence.
 
 - Payment tx: `https://stellar.expert/explorer/public/tx/<hash>` — USDC transfer to the scrapper's payTo.
 - Feedback tx: `https://stellar.expert/explorer/public/tx/<hash>` — emits `NewFeedback` for the agent.
@@ -145,9 +151,28 @@ below-expectation feedback entry, but it is not labeled or written as successful
 |---|---|---|
 | 1 | `runPreflight` | Horizon balances (USDC trustline? USDC ≥ `MIN_USDC`? XLM ≥ `MIN_XLM`?), RPC health, payer ≠ scrapper owner. Aborts before spend (balance/key/RPC checks advisory in dry-run). |
 | 2 | `discoverScrapper` | Spawns the read-only MCP server (secret-free env), requires successful structured results, finds agent 10, fetches its profile, then validates x402 + pinned owner + endpoint without fallback. |
-| 3/4 | `payForService` | Fail-closed, no-redirect `fetch` → require 402 → validate exact/pubnet/USDC/amount/timeout/sponsorship/pinned payTo → sign once → fsync the authorization hash → submit once → validate settlement response → independently verify the exact final transfer via RPC → hash exact result bytes. Never auto-retries a submitted payment. |
-| 5 | `writeFeedback` | `createClients(...).reputation.give_feedback({...})` via `wrapBasicSigner` — signs, fsyncs the canonical tx hash before send, and requires final `SUCCESS`; this is the only key/signing site besides the payment. |
-| 6 | `recordEvidence` | Revalidates the complete receipt, prints 2 tx hashes + result SHA-256 + Expert links, then writes `run.json` (no secrets). |
+| 3/4 | `payForService` | Require and validate the pinned 402 tuple → sign once → atomically fsync exact signed recovery material → bind its path/digest and canonical request into journal + exclusive lock → submit once with redirects disabled → verify the response claim and exact final transfer via fresh RPC → hash bounded result bytes. Never auto-retries a prepared payment. |
+| 5 | `writeFeedback` | `createClients(...).reputation.give_feedback({...})` via `wrapBasicSigner` — signs and journals the canonical tx hash before one send, requires both SDK response hashes to match, then independently verifies the finalized envelope, full invocation, and `NewFeedback` event through fresh RPC. |
+| 6 | `recordEvidence` | Revalidates the complete payment and feedback proof, prints 2 tx hashes + result SHA-256 + Expert links, then atomically writes `run.json` (no private recovery payload). |
+
+## Manual reconciliation — no automatic resume
+
+The demo has no automatic payment replay or resume path. Reconcile the exact journal, private recovery artifact,
+payment authorization, claimed/final transaction hash, and Stellar ledger before taking any recovery action. To remove
+only the exclusive mutex after that review:
+
+```bash
+npx tsx examples/x402-demo.ts \
+  --release-reconciled-lock <idempotency-key> \
+  --confirmed-ledger-reconciled
+```
+
+This command fails closed unless a prepared lock matches the exact artifact digest and
+`payment_submission_prepared` journal entry. It appends an audit marker and removes only the mutex. It does **not**
+delete the artifact/journal, authorize a full rerun, or resend anything; those surviving records continue to produce
+`REPLAY_BLOCKED`. A lock still in the pre-signing `locked` state may be released only after confirming that no signed
+request left the process. Any missing feedback/evidence stage must be recovered manually under explicit operator review,
+never by rerunning the full funded script.
 
 ## Troubleshooting
 
@@ -158,8 +183,9 @@ below-expectation feedback entry, but it is not labeled or written as successful
 | `network mismatch` | The 402 challenge network ≠ your `STELLAR_NETWORK`. |
 | `resource mismatch: challenge=http://... expected=https://...` | Upstream proxy/public URL is wrong. Do not fund or weaken the HTTPS pin; fix the deployment and re-capture the unpaid 402. |
 | `owner/endpoint/payTo mismatch` | Registry or deployment facts changed. Verify independently, then make a reviewed source change; do not bypass the pin at runtime. |
+| `REPLAY_BLOCKED` | A lock, private recovery artifact, journal, or receipt already identifies this funded request. Reconcile it; never delete evidence or rerun merely to clear the error. |
 | `PAYMENT_OUTCOME_UNKNOWN` | The request may have settled despite the missing response. Do not rerun; reconcile the signed authorization/ledger first. |
-| `PAYMENT_ALREADY_SETTLED` | Resume feedback/evidence from the named `.journal.jsonl`; do not create another payment. |
+| `PAYMENT_ALREADY_SETTLED` | Recover only the missing feedback/evidence stage from the named journal/artifact under operator review; do not invoke the full payment flow again. |
 | `FEEDBACK_OUTCOME_UNKNOWN` | Reconcile the exact journaled feedback tx hash. Do not submit another feedback while its send/poll outcome is uncertain. |
 | `FEEDBACK_FAILED` | RPC returned terminal `FAILED`; no confirmation or acceptance receipt is written. Review the failure before authorizing a new feedback. |
 | `settlement transaction ...` | The response receipt or independent RPC finality/transfer check failed. Inspect the ledger before any rerun; the script will not auto-pay twice. |

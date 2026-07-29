@@ -3,6 +3,8 @@
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<!-- Keep SvelteKit's generated CSP before every resource/script it governs. -->
+		%sveltekit.head%
 		<link rel="icon" type="image/svg+xml" href="%sveltekit.assets%/favicon.svg" />
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -10,21 +12,8 @@
 			href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600&family=JetBrains+Mono:wght@400;500&display=swap"
 			rel="stylesheet"
 		/>
-		<script>
-			// Runs before first paint so the theme never flashes. Mirrors stellar8004.com.
-			(function () {
-				var t = localStorage.getItem('theme');
-				if (t === 'light' || t === 'dark') {
-					document.documentElement.setAttribute('data-theme', t);
-				} else {
-					document.documentElement.setAttribute(
-						'data-theme',
-						window.matchMedia('(prefers-color-scheme:light)').matches ? 'light' : 'dark'
-					);
-				}
-			})();
-		</script>
-		%sveltekit.head%
+		<!-- Synchronous and external: runs before paint without adding a route-specific CSP hash. -->
+		<script src="%sveltekit.assets%/theme-init.js"></script>
 	</head>
 	<body data-sveltekit-preload-data="hover">
 		<div style="display: contents">%sveltekit.body%</div>

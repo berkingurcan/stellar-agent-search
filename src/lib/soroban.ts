@@ -3,11 +3,10 @@
  *
  * WHY THIS FILE EXISTS
  *
- * `@trionlabs/stellar8004`'s generated `ReputationClient` extends the Stellar
- * SDK's `contract.Client` from the SDK's *default* build, whose RPC transport is
- * **axios**. Two consequences, both of which reach users of the published
- * package and neither of which an `overrides` block can fix (npm honours
- * `overrides` only from the root project):
+ * `@trionlabs/stellar8004@0.0.11` was published against Stellar SDK v15, whose
+ * default `contract.Client` used axios. Two consequences reached users of the
+ * published package, and neither could be fixed for consumers by this root
+ * project's `overrides` block:
  *
  *   1. `@stellar/stellar-sdk@15.1.0` pins axios to the exact version `1.15.0`,
  *      which carries two high-severity advisories.
@@ -17,18 +16,19 @@
  *      while the explorer and RPC health checks pass — the one feature this
  *      server exists for, silently degraded on any proxied network.
  *
- * The SDK ships a parallel fetch-based build under `@stellar/stellar-sdk/no-axios`
- * (`.../no-axios/contract` internally requires `../rpc`, so the whole chain is
- * fetch). What it does *not* ship is the stellar-8004 contract spec.
+ * Stellar SDK v16 inverted that layout: its default `./contract` and `./rpc`
+ * exports are fetch-based, while axios is opt-in under `./axios/*`. The root
+ * dependency and the exact-pinned generated bindings are forced onto one v16
+ * instance during development/build; the latter is embedded into the bin.
  *
  * WHAT THIS DOES
  *
  * Rather than hand-rolling the contract ABI — the decoding is money-adjacent and
  * a re-implementation would be a second source of truth for it — we borrow the
- * generated bindings' `Spec` and hand it to the no-axios `Client`. Identical
+ * generated bindings' `Spec` and hand it to the v16 fetch `Client`. Identical
  * argument encoding and result decoding, different transport:
  *
- *     new ReputationClient(...)  ->  .spec  ->  new NoAxiosClient(spec, opts)
+ *     new ReputationClient(...)  ->  .spec  ->  new FetchContractClient(spec, opts)
  *
  * The donor is constructed but never used for I/O; building it costs no network
  * call, and the spec it carries is the same XDR the contract was compiled from.
@@ -41,7 +41,7 @@
  */
 
 import { ReputationClient, type SummaryResult } from "@trionlabs/stellar8004";
-import { Client as NoAxiosContractClient } from "@stellar/stellar-sdk/no-axios/contract";
+import { Client as FetchContractClient } from "@stellar/stellar-sdk/contract";
 import type { Config } from "../config.js";
 
 /**
@@ -92,25 +92,23 @@ export function createReputationReadClient(
     ...(opts.simSource ? { publicKey: opts.simSource } : {}),
   });
 
-  // Donor: constructed for its `spec` only. No I/O happens here — but its
-  // constructor MUTATES the options object it is given, writing back an
-  // axios-backed `rpc.Server` under `options.server`. The no-axios client then
-  // honours a pre-set `options.server` (`if (options.server === undefined)`),
-  // so sharing one object between the two silently reinstates axios for every
-  // read — typechecking cleanly and failing only against a live proxy. Each
-  // client therefore gets its own freshly built options.
+  // Donor: constructed for its exact generated `spec` only. No I/O happens
+  // here, but the constructor mutates its options object by installing a
+  // transport server. Keep the donor and reader options separate so generated
+  // binding construction cannot smuggle transport state into the read client.
   const spec = new ReputationClient(clientOptions()).spec;
 
   const common = clientOptions();
 
-  // The default and no-axios builds each declare their own `Spec` class. They
-  // are the same source compiled twice, but a private field makes them
-  // nominally distinct to TypeScript, so the structural cast is required and
-  // safe: `Spec` holds parsed XDR spec entries and no transport state.
-  const NoAxiosClient = NoAxiosContractClient as unknown as new (
+  // The generated package and our direct dependency declare `Spec` through
+  // separate package boundaries. Its private field can therefore remain
+  // nominally distinct to TypeScript even though the override resolves both to
+  // one v16 implementation. This structural cast is safe: `Spec` contains
+  // parsed XDR entries and no transport state.
+  const ContractClient = FetchContractClient as unknown as new (
     spec: unknown,
     options: typeof common,
   ) => ReputationReadClient;
 
-  return new NoAxiosClient(spec, common);
+  return new ContractClient(spec, common);
 }

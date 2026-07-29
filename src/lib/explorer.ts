@@ -31,7 +31,8 @@ import {
 } from "@trionlabs/stellar8004";
 import type { Config } from "../config.js";
 import { systemClock, type Clock } from "./clock.js";
-import { classifyError, ExplorerScopeError } from "./errors.js";
+import { classifyError, ExplorerScopeError, UpstreamDataError } from "./errors.js";
+import { MAX_AGENT_ID, validWalletOrNull } from "./identifier.js";
 import { log, type Logger } from "./logger.js";
 import { normalizeSearchText, unicodeTokens } from "./nlparse.js";
 
@@ -154,6 +155,197 @@ export type ExplorerStatsResponse = StatsResponse & { agentsWithMpp?: number };
 /** v1 offset pages have no revision token and are not transactional snapshots. */
 export const V1_UNVERSIONED_PAGINATION_LIMITATION = "v1-unversioned-offset-pagination";
 
+/** Live v1 identifies only chain/network, not the exact Identity registry contract. */
+export const V1_IDENTITY_CONTRACT_UNATTESTED = "v1-identity-contract-unattested";
+
+export interface ExplorerIdentityAttestation {
+  status: "authenticated" | "unattested";
+  /** Present only when an upstream response supplied and matched the configured contract. */
+  identityContract?: string;
+  /** Present on v1 responses that expose no exact registry identity. */
+  limitation?: typeof V1_IDENTITY_CONTRACT_UNATTESTED;
+}
+
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function malformed(path: string, expectation: string): never {
+  throw new UpstreamDataError(`Explorer field '${path}' must be ${expectation}.`);
+}
+
+function assertOptionalNullableString(row: UnknownRecord, key: string, path: string): void {
+  const value = row[key];
+  if (value !== undefined && value !== null && typeof value !== "string") {
+    malformed(`${path}.${key}`, "a string, null, or absent");
+  }
+}
+
+function assertOptionalBoolean(row: UnknownRecord, key: string, path: string): void {
+  const value = row[key];
+  if (value !== undefined && typeof value !== "boolean") {
+    malformed(`${path}.${key}`, "a boolean or absent");
+  }
+}
+
+function assertOptionalFiniteNumber(
+  row: UnknownRecord,
+  key: string,
+  path: string,
+  nullable = true,
+): void {
+  const value = row[key];
+  if (value === undefined || (nullable && value === null)) return;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    malformed(`${path}.${key}`, nullable ? "a finite number, null, or absent" : "a finite number");
+  }
+}
+
+function assertOptionalCount(row: UnknownRecord, key: string, path: string, nullable = false): void {
+  const value = row[key];
+  if (value === undefined || (nullable && value === null)) return;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    malformed(
+      `${path}.${key}`,
+      nullable ? "a non-negative safe integer, null, or absent" : "a non-negative safe integer or absent",
+    );
+  }
+}
+
+/**
+ * Validate one normalized SDK agent row before it enters a cache or adapter.
+ * The SDK intentionally normalizes names, but it does not runtime-check row
+ * primitives; accepting its TypeScript declaration as proof let values such as
+ * `x402Enabled: "false"` become true through JavaScript truthiness.
+ */
+function assertAgentRow(value: unknown, path: string): asserts value is AgentResponse {
+  if (!isRecord(value)) malformed(path, "an object");
+
+  if (typeof value.id !== "number" || !Number.isSafeInteger(value.id) || value.id < 0 || value.id > MAX_AGENT_ID) {
+    malformed(`${path}.id`, "an unsigned 32-bit integer");
+  }
+  if (
+    typeof value.owner !== "string" ||
+    value.owner !== value.owner.trim() ||
+    validWalletOrNull(value.owner) !== value.owner
+  ) {
+    malformed(`${path}.owner`, "a checksum-valid Stellar G- or C-address");
+  }
+
+  for (const key of ["name", "description", "image", "wallet", "agentUri", "txHash"] as const) {
+    assertOptionalNullableString(value, key, path);
+  }
+  if (value.createdAt !== undefined && typeof value.createdAt !== "string") {
+    malformed(`${path}.createdAt`, "a string or absent");
+  }
+  for (const key of ["x402Enabled", "mppEnabled", "mpp", "hasServices"] as const) {
+    assertOptionalBoolean(value, key, path);
+  }
+  for (const key of ["totalScore", "avgScore"] as const) {
+    assertOptionalFiniteNumber(value, key, path);
+  }
+  for (const key of ["feedbackCount", "uniqueClients"] as const) {
+    assertOptionalCount(value, key, path);
+  }
+  assertOptionalCount(value, "createdLedger", path, true);
+
+  if (value.supportedTrust !== undefined) {
+    if (!Array.isArray(value.supportedTrust) || value.supportedTrust.some((item) => typeof item !== "string")) {
+      malformed(`${path}.supportedTrust`, "an array of strings or absent");
+    }
+  }
+  if (value.metadata !== undefined) {
+    if (!isRecord(value.metadata) || Object.values(value.metadata).some((item) => typeof item !== "string")) {
+      malformed(`${path}.metadata`, "a string-valued object or absent");
+    }
+  }
+  if (
+    value.resolveStatus !== undefined &&
+    value.resolveStatus !== "ready" &&
+    value.resolveStatus !== "resolving" &&
+    value.resolveStatus !== "no-uri"
+  ) {
+    malformed(`${path}.resolveStatus`, "ready, resolving, no-uri, or absent");
+  }
+
+  if (value.scores !== undefined) {
+    if (!isRecord(value.scores)) malformed(`${path}.scores`, "an object or absent");
+    assertOptionalFiniteNumber(value.scores, "total", `${path}.scores`, false);
+    assertOptionalFiniteNumber(value.scores, "average", `${path}.scores`, false);
+    assertOptionalCount(value.scores, "feedbackCount", `${path}.scores`);
+    assertOptionalCount(value.scores, "uniqueClients", `${path}.scores`);
+    for (const key of ["total", "average", "feedbackCount", "uniqueClients"] as const) {
+      if (value.scores[key] === undefined) malformed(`${path}.scores.${key}`, "present");
+    }
+  }
+
+  const feedbackCount = value.scores?.feedbackCount ?? value.feedbackCount;
+  const uniqueClients = value.scores?.uniqueClients ?? value.uniqueClients;
+  if (
+    typeof feedbackCount === "number" &&
+    typeof uniqueClients === "number" &&
+    uniqueClients > feedbackCount
+  ) {
+    malformed(`${path}.uniqueClients`, "less than or equal to feedbackCount");
+  }
+}
+
+function assertPagination(value: unknown): void {
+  if (!isRecord(value)) return;
+  const meta = value.meta;
+  if (!isRecord(meta) || meta.pagination === undefined) return;
+  if (!isRecord(meta.pagination)) malformed("meta.pagination", "an object or absent");
+  const pagination = meta.pagination;
+  for (const key of ["page", "limit", "total"] as const) {
+    const item = pagination[key];
+    const minimum = key === "page" ? 1 : 0;
+    if (typeof item !== "number" || !Number.isSafeInteger(item) || item < minimum) {
+      malformed(`meta.pagination.${key}`, `a safe integer >= ${minimum}`);
+    }
+  }
+  if (typeof pagination.hasMore !== "boolean") {
+    malformed("meta.pagination.hasMore", "a boolean");
+  }
+}
+
+function assertAgentListResponse(value: unknown, path = "data"): void {
+  if (!isRecord(value) || !Array.isArray(value.data)) malformed(path, "an array");
+  value.data.forEach((row, index) => assertAgentRow(row, `${path}[${index}]`));
+  assertPagination(value);
+}
+
+function assertAgentDetailResponse(value: unknown, expectedId: number): void {
+  if (!isRecord(value)) malformed("response", "an object");
+  assertAgentRow(value.data, "data");
+  if (value.data.id !== expectedId) {
+    malformed("data.id", "equal to the requested agent id");
+  }
+}
+
+/** Read only explicit response-level identity fields; agent-authored data never attests registry scope. */
+function exposedIdentityContract(value: unknown): string | null {
+  if (!isRecord(value) || !isRecord(value.meta)) return null;
+  const candidates: unknown[] = [];
+  if (value.meta.identityContract !== undefined) candidates.push(value.meta.identityContract);
+  if (value.meta.contracts !== undefined) {
+    if (!isRecord(value.meta.contracts)) {
+      throw new ExplorerScopeError("Explorer contract metadata is malformed");
+    }
+    if (value.meta.contracts.identity !== undefined) candidates.push(value.meta.contracts.identity);
+  }
+  if (candidates.length === 0) return null;
+  if (candidates.some((candidate) => typeof candidate !== "string")) {
+    throw new ExplorerScopeError("Explorer Identity contract metadata is malformed");
+  }
+  const identities = new Set(candidates as string[]);
+  if (identities.size !== 1) {
+    throw new ExplorerScopeError("Explorer Identity contract metadata is contradictory");
+  }
+  return [...identities][0]!;
+}
+
 export interface ExplorerServiceOptions {
   clock?: Clock;
   logger?: Logger;
@@ -174,6 +366,7 @@ export class ExplorerService {
   private readonly cache: TtlCache;
   private readonly logger: Logger;
   private readonly expectedNetwork: Config["network"];
+  private readonly expectedIdentity: string;
 
   constructor(cfg: Config, opts: ExplorerServiceOptions = {}) {
     this.logger = (opts.logger ?? log).child({ component: "explorer" });
@@ -184,6 +377,7 @@ export class ExplorerService {
         clock: opts.clock ?? systemClock,
       });
     this.expectedNetwork = cfg.network;
+    this.expectedIdentity = cfg.stellar.contracts.identity;
     this.client =
       opts.client ??
       new ExplorerClient(cfg.explorerBaseUrl, {
@@ -195,9 +389,18 @@ export class ExplorerService {
 
   /** Wrap a loader with logging so SDK typed errors get a stable code, then
    *  rethrow unchanged for the tool layer to map. */
-  private async run<V>(key: string, ttl: TtlSpec<V>, loader: () => Promise<V>): Promise<V> {
+  private async run<V>(
+    key: string,
+    ttl: TtlSpec<V>,
+    loader: () => Promise<V>,
+    validate?: (value: V) => void,
+  ): Promise<V> {
     try {
-      return await this.cache.wrap(key, ttl, async () => this.assertExplorerScope(await loader()));
+      return await this.cache.wrap(key, ttl, async () => {
+        const value = this.assertExplorerScope(await loader());
+        validate?.(value);
+        return value;
+      });
     } catch (err) {
       const body = classifyError(err);
       this.logger.debug("explorer request failed", { key, errorCode: body.code });
@@ -232,17 +435,54 @@ export class ExplorerService {
         `Explorer network '${String(rawNetwork)}' does not match configured network '${this.expectedNetwork}'`,
       );
     }
+    const identityContract = exposedIdentityContract(value);
+    if (identityContract !== null && identityContract !== this.expectedIdentity) {
+      throw new ExplorerScopeError(
+        "Explorer Identity contract does not match the configured registry contract",
+      );
+    }
     return value;
+  }
+
+  /**
+   * Exact registry identity is authenticated only when response-level metadata
+   * supplies it and it matches the SDK's configured contract. Live v1 omits it,
+   * so absence is reported as unattested rather than guessed from the hostname.
+   */
+  identityAttestation(value: unknown): ExplorerIdentityAttestation {
+    const identityContract = exposedIdentityContract(value);
+    if (identityContract === null) {
+      return {
+        status: "unattested",
+        limitation: V1_IDENTITY_CONTRACT_UNATTESTED,
+      };
+    }
+    if (identityContract !== this.expectedIdentity) {
+      throw new ExplorerScopeError(
+        "Explorer Identity contract does not match the configured registry contract",
+      );
+    }
+    return { status: "authenticated", identityContract };
   }
 
   // --- passthrough (cached) reads --------------------------------------------
 
   getAgents(params: GetAgentsParams = {}): Promise<ApiResponse<AgentResponse[]>> {
-    return this.run(`agents:${stableKey(params)}`, TTL.list, () => this.client.getAgents(params));
+    return this.run(
+      `agents:${stableKey(params)}`,
+      TTL.list,
+      () => this.client.getAgents(params),
+      assertAgentListResponse,
+    );
   }
 
   getAgent(id: number): Promise<ApiResponse<AgentResponse>> {
-    return this.run(`agent:${id}`, TTL.detail, () => this.client.getAgent(id));
+    return this.run(
+      `agent:${id}`,
+      TTL.detail,
+      () => this.client.getAgent(id),
+      (value) => assertAgentDetailResponse(value, id),
+    );
   }
 
   getFeedback(id: number, params?: GetFeedbackParams): Promise<ApiResponse<FeedbackResponse[]>> {
@@ -253,8 +493,11 @@ export class ExplorerService {
 
   /** Raw explorer full-text search (weak substring match — prefer findAgents). */
   search(q: string, params?: SearchParams): Promise<ApiResponse<AgentResponse[]>> {
-    return this.run(`search:${q}:${stableKey(params)}`, TTL.list, () =>
-      this.client.search(q, params),
+    return this.run(
+      `search:${q}:${stableKey(params)}`,
+      TTL.list,
+      () => this.client.search(q, params),
+      assertAgentListResponse,
     );
   }
 
@@ -267,7 +510,17 @@ export class ExplorerService {
   }
 
   getAgentsByOwner(address: string): Promise<ApiResponse<AgentResponse[]>> {
-    return this.run(`owner:${address}`, TTL.list, () => this.client.getAgentsByAddress(address));
+    return this.run(
+      `owner:${address}`,
+      TTL.list,
+      () => this.client.getAgentsByAddress(address),
+      (value) => {
+        assertAgentListResponse(value);
+        for (const [index, row] of value.data.entries()) {
+          if (row.owner !== address) malformed(`data[${index}].owner`, "equal to the requested owner");
+        }
+      },
+    );
   }
 
   // --- discovery primitive ---------------------------------------------------

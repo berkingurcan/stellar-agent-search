@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { mkdtemp, readFile as readFsFile, readdir, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { STELLAR_PUBNET_CAIP2, USDC_PUBNET_ADDRESS } from "@x402/stellar";
 import type { PaymentRequired, SettleResponse } from "@x402/core/types";
@@ -17,11 +20,16 @@ import {
   SCRAPPER_ALLOWED_ENDPOINTS,
   SCRAPPER_EXPECTED_PAY_TO,
   SCRAPPER_OWNER,
+  acquireFundedRunLock,
+  appendDurableJsonLine,
   assertCompleteEvidenceRecord,
   assertEvidenceTarget,
+  assertOnchainFeedback,
   assertOnchainSettlement,
   assertResultHash,
   assertTransactionHash,
+  canonicalRequestIdentity,
+  captureUntrustedSettlementClaim,
   credentialFreeChildUrl,
   expectedScrapeUrl,
   loadConfig,
@@ -30,13 +38,18 @@ import {
   pickScrapper,
   readPaidResult,
   redactSensitiveError,
+  releaseReconciledFundedRunLock,
   requireMcpStructuredContent,
   resolveEndpoint,
   scrapeInit,
   submitFeedbackTransaction,
   submitSignedPaymentRequest,
+  transactionEnvelopeHash,
   validatePaymentChallenge,
   validateSettlementResponse,
+  writeAtomicJsonFile,
+  writePaymentRecoveryArtifact,
+  type FeedbackOnchainExpectation,
   type FeedbackTransactionLike,
   type PaymentAttemptContext,
   type ResolvedAgent,
@@ -46,8 +59,20 @@ import {
 
 const OTHER_ACCOUNT = "GAAIBWG3M3U6PAS3IC5BATPT52XKNYXBRJXQIPHEDQUQIEFQDYH4KZY7";
 const ENDPOINT = SCRAPPER_ALLOWED_ENDPOINTS[0];
+const REPUTATION_CONTRACT = "CBOIAIMMWAXI57OATLX6BWVDQLCC4YU55HV6MZXFRP6CBSGAMXSTEPPA";
 const TX = "ab".repeat(32);
 const RESULT_HASH = "cd".repeat(32);
+const FAKE_FEEDBACK_PROOF = {
+  ledger: 456,
+  confirmedAt: "2026-07-29T00:00:02.000Z",
+  feedbackIndex: "7",
+  transactionXdr: "AAAA",
+  eventXdr: "AAAA",
+};
+const TEST_PAYMENT_RECOVERY_REFERENCE = {
+  path: "/tmp/payment-recovery.json",
+  sha256: "45".repeat(32),
+};
 
 function paymentEnvelope(nonce = 1n) {
   const args = new xdr.InvokeContractArgs({
@@ -87,6 +112,99 @@ function paymentEnvelope(nonce = 1n) {
     .build();
 }
 
+function feedbackOnchainFixture() {
+  const feedbackHash = "67".repeat(32);
+  const expected: FeedbackOnchainExpectation = {
+    contractId: REPUTATION_CONTRACT,
+    caller: OTHER_ACCOUNT,
+    agentId: SCRAPPER_AGENT_ID,
+    value: 95n,
+    valueDecimals: 0,
+    tag1: "starred",
+    tag2: "successRate",
+    endpoint: ENDPOINT,
+    feedbackUri: "data:application/json;base64,e30=",
+    feedbackHash,
+    submittedAtMs: 1_700_000_000_500,
+    networkPassphrase: Networks.PUBLIC,
+  };
+  const invocation = new xdr.InvokeContractArgs({
+    contractAddress: Address.fromString(expected.contractId).toScAddress(),
+    functionName: "give_feedback",
+    args: [
+      nativeToScVal(expected.caller, { type: "address" }),
+      nativeToScVal(expected.agentId, { type: "u32" }),
+      nativeToScVal(expected.value, { type: "i128" }),
+      nativeToScVal(expected.valueDecimals, { type: "u32" }),
+      nativeToScVal(expected.tag1, { type: "string" }),
+      nativeToScVal(expected.tag2, { type: "string" }),
+      nativeToScVal(expected.endpoint, { type: "string" }),
+      nativeToScVal(expected.feedbackUri, { type: "string" }),
+      nativeToScVal(Buffer.from(expected.feedbackHash, "hex")),
+    ],
+  });
+  const envelope = new TransactionBuilder(new Account(expected.caller, "0"), {
+    fee: "100",
+    networkPassphrase: Networks.PUBLIC,
+  })
+    .addOperation(
+      Operation.invokeHostFunction({
+        func: xdr.HostFunction.hostFunctionTypeInvokeContract(invocation),
+        auth: [],
+      }),
+    )
+    .setTimeout(30)
+    .build();
+  const data = xdr.ScVal.scvMap(
+    [
+      ["feedback_index", nativeToScVal(7n, { type: "u64" })],
+      ["value", nativeToScVal(expected.value, { type: "i128" })],
+      ["value_decimals", nativeToScVal(expected.valueDecimals, { type: "u32" })],
+      ["tag2", nativeToScVal(expected.tag2, { type: "string" })],
+      ["endpoint", nativeToScVal(expected.endpoint, { type: "string" })],
+      ["feedback_uri", nativeToScVal(expected.feedbackUri, { type: "string" })],
+      ["feedback_hash", nativeToScVal(Buffer.from(expected.feedbackHash, "hex"))],
+    ].map(
+      ([key, val]) =>
+        new xdr.ScMapEntry({
+          key: nativeToScVal(key as string, { type: "symbol" }),
+          val: val as xdr.ScVal,
+        }),
+    ),
+  );
+  const event = new xdr.ContractEvent({
+    ext: new xdr.ExtensionPoint(0),
+    contractId: StrKey.decodeContract(expected.contractId) as any,
+    type: xdr.ContractEventType.contract(),
+    body: new xdr.ContractEventBody(
+      0,
+      new xdr.ContractEventV0({
+        topics: [
+          nativeToScVal("new_feedback", { type: "symbol" }),
+          nativeToScVal(expected.agentId, { type: "u32" }),
+          nativeToScVal(expected.caller, { type: "address" }),
+          nativeToScVal(expected.tag1, { type: "string" }),
+        ],
+        data,
+      }),
+    ),
+  });
+  const txHash = transactionEnvelopeHash(envelope.toXDR(), Networks.PUBLIC);
+  return {
+    expected,
+    txHash,
+    signedTransactionXdr: envelope.toXDR(),
+    transaction: {
+      status: "SUCCESS",
+      txHash,
+      ledger: 456,
+      createdAt: 1_700_000_001,
+      envelopeXdr: envelope.toEnvelope(),
+      events: { contractEventsXdr: [[event]] },
+    },
+  };
+}
+
 function config(dryRun = true) {
   return loadConfig({ STELLAR_NETWORK: "mainnet", DRY_RUN: dryRun ? "1" : "0" });
 }
@@ -123,22 +241,27 @@ function challenge(overrides: Record<string, unknown> = {}): PaymentRequired {
 }
 
 function paymentAttempt(): PaymentAttemptContext {
+  const identity = canonicalRequestIdentity(config(false), OTHER_ACCOUNT, SCRAPPER_AGENT_ID, ENDPOINT);
   return {
+    ...identity,
     startedAt: "2026-07-29T00:00:00.000Z",
-    payerPublicKey: OTHER_ACCOUNT,
-    agentId: SCRAPPER_AGENT_ID,
     endpoint: ENDPOINT,
     challengeNetwork: STELLAR_PUBNET_CAIP2,
     asset: USDC_PUBNET_ADDRESS,
     payTo: SCRAPPER_EXPECTED_PAY_TO,
     price: "1000",
+    paymentTransactionXdr: paymentEnvelope().toXDR(),
+    signedPaymentPayload: { x402Version: 2, payload: { transaction: "test-only" } },
   };
 }
 
 function fakeFeedbackTransaction(status: string, sendError?: Error): FeedbackTransactionLike {
   const transaction: FeedbackTransactionLike = {
     async sign() {
-      transaction.signed = { hash: () => Buffer.from(TX, "hex") };
+      transaction.signed = {
+        hash: () => Buffer.from(TX, "hex"),
+        toXDR: () => "signed-feedback-xdr-must-not-be-journaled",
+      };
     },
     async send() {
       if (sendError) throw sendError;
@@ -277,6 +400,8 @@ describe("x402 one-shot submission state machines", () => {
   it("fsync-seams the payment-submitted record before its only fetch attempt", async () => {
     const entries: RunJournalEntry[] = [];
     let fetchCalls = 0;
+    let recoveryArtifactPersisted = false;
+    let persistedArtifact: unknown;
     const result = await submitSignedPaymentRequest(
       ENDPOINT,
       scrapeInit(config(false), { "payment-signature": "signed-capability" }),
@@ -284,13 +409,19 @@ describe("x402 one-shot submission state machines", () => {
       paymentAttempt(),
       {
         nowMs: () => 1_700_000_000_000,
+        persistRecoveryArtifact: async (_startedAt, artifact) => {
+          recoveryArtifactPersisted = true;
+          persistedArtifact = artifact;
+          return TEST_PAYMENT_RECOVERY_REFERENCE;
+        },
         appendJournal: async (_startedAt, entry) => {
+          expect(recoveryArtifactPersisted).toBe(true);
           entries.push(entry);
           return "/tmp/payment.journal.jsonl";
         },
         fetchImpl: async (_input, init) => {
           fetchCalls += 1;
-          expect(entries.map((entry) => entry.event)).toEqual(["payment_submitted"]);
+          expect(entries.map((entry) => entry.event)).toEqual(["payment_submission_prepared"]);
           expect(init?.redirect).toBe("error");
           return new Response("ok", { status: 200 });
         },
@@ -300,9 +431,23 @@ describe("x402 one-shot submission state machines", () => {
     expect(fetchCalls).toBe(1);
     expect(result.journalPath).toBe("/tmp/payment.journal.jsonl");
     expect(entries.map((entry) => entry.event)).toEqual([
-      "payment_submitted",
+      "payment_submission_prepared",
       "payment_response_received",
     ]);
+    expect(entries[0]).toMatchObject({
+      event: "payment_submission_prepared",
+      paymentTransactionXdrSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      signedPaymentPayloadSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      paymentRecoveryArtifactPath: TEST_PAYMENT_RECOVERY_REFERENCE.path,
+      paymentRecoveryArtifactSha256: TEST_PAYMENT_RECOVERY_REFERENCE.sha256,
+    });
+    expect(persistedArtifact).toMatchObject({
+      kind: "x402_signed_payment_recovery",
+      paymentTransactionXdr: paymentAttempt().paymentTransactionXdr,
+      signedPaymentPayloadJson: JSON.stringify(paymentAttempt().signedPaymentPayload),
+    });
+    expect(JSON.stringify(entries[0])).not.toContain("test-only");
+    expect(JSON.stringify(entries[0])).not.toContain(paymentAttempt().paymentTransactionXdr);
   });
 
   it("records an unknown payment outcome after a submitted request loses its response", async () => {
@@ -310,6 +455,7 @@ describe("x402 one-shot submission state machines", () => {
     let fetchCalls = 0;
     await expect(
       submitSignedPaymentRequest(ENDPOINT, scrapeInit(config(false)), RESULT_HASH, paymentAttempt(), {
+        persistRecoveryArtifact: async () => TEST_PAYMENT_RECOVERY_REFERENCE,
         appendJournal: async (_startedAt, entry) => {
           entries.push(entry);
           return "/tmp/payment.journal.jsonl";
@@ -322,7 +468,7 @@ describe("x402 one-shot submission state machines", () => {
     ).rejects.toThrow(/PAYMENT_OUTCOME_UNKNOWN.*\/tmp\/payment\.journal\.jsonl.*DO NOT rerun/s);
     expect(fetchCalls).toBe(1);
     expect(entries.map((entry) => entry.event)).toEqual([
-      "payment_submitted",
+      "payment_submission_prepared",
       "payment_outcome_unknown",
     ]);
   });
@@ -332,6 +478,7 @@ describe("x402 one-shot submission state machines", () => {
     await expect(
       submitSignedPaymentRequest(ENDPOINT, scrapeInit(config(false)), RESULT_HASH, paymentAttempt(), {
         requestTimeoutMs: 10,
+        persistRecoveryArtifact: async () => TEST_PAYMENT_RECOVERY_REFERENCE,
         appendJournal: async (_startedAt, entry) => {
           entries.push(entry);
           return "/tmp/payment-timeout.journal.jsonl";
@@ -347,7 +494,7 @@ describe("x402 one-shot submission state machines", () => {
       }),
     ).rejects.toThrow(/PAYMENT_OUTCOME_UNKNOWN.*payment-timeout\.journal\.jsonl.*DO NOT rerun/s);
     expect(entries.map((entry) => entry.event)).toEqual([
-      "payment_submitted",
+      "payment_submission_prepared",
       "payment_outcome_unknown",
     ]);
     expect(entries[1]).toMatchObject({ event: "payment_outcome_unknown", stage: "signed_request" });
@@ -357,6 +504,7 @@ describe("x402 one-shot submission state machines", () => {
     let fetchCalls = 0;
     await expect(
       submitSignedPaymentRequest(ENDPOINT, scrapeInit(config(false)), RESULT_HASH, paymentAttempt(), {
+        persistRecoveryArtifact: async () => TEST_PAYMENT_RECOVERY_REFERENCE,
         appendJournal: async () => {
           throw new Error("disk full");
         },
@@ -369,6 +517,46 @@ describe("x402 one-shot submission state machines", () => {
     expect(fetchCalls).toBe(0);
   });
 
+  it("never journals or submits if the private payment recovery artifact is not durable", async () => {
+    let journalCalls = 0;
+    let fetchCalls = 0;
+    await expect(
+      submitSignedPaymentRequest(ENDPOINT, scrapeInit(config(false)), RESULT_HASH, paymentAttempt(), {
+        persistRecoveryArtifact: async () => {
+          throw new Error("recovery disk full");
+        },
+        appendJournal: async () => {
+          journalCalls += 1;
+          return "/tmp/payment.journal.jsonl";
+        },
+        fetchImpl: async () => {
+          fetchCalls += 1;
+          return new Response("unexpected");
+        },
+      }),
+    ).rejects.toThrow(/recovery artifact could not be durably created; refusing to submit/);
+    expect(journalCalls).toBe(0);
+    expect(fetchCalls).toBe(0);
+  });
+
+  it("never submits payment if the exclusive funded-run lock cannot be advanced", async () => {
+    let fetchCalls = 0;
+    await expect(
+      submitSignedPaymentRequest(ENDPOINT, scrapeInit(config(false)), RESULT_HASH, paymentAttempt(), {
+        persistRecoveryArtifact: async () => TEST_PAYMENT_RECOVERY_REFERENCE,
+        appendJournal: async () => "/tmp/payment.journal.jsonl",
+        onSubmissionPrepared: async () => {
+          throw new Error("lock storage unavailable");
+        },
+        fetchImpl: async () => {
+          fetchCalls += 1;
+          return new Response("unexpected");
+        },
+      }),
+    ).rejects.toThrow(/funded-run lock could not be durably advanced; refusing to submit/);
+    expect(fetchCalls).toBe(0);
+  });
+
   it("confirms feedback only after the exact signed hash reaches SUCCESS", async () => {
     const entries: RunJournalEntry[] = [];
     const result = await submitFeedbackTransaction(
@@ -376,6 +564,7 @@ describe("x402 one-shot submission state machines", () => {
       paymentAttempt().startedAt,
       SCRAPPER_AGENT_ID,
       {
+        verifyFinalized: async () => FAKE_FEEDBACK_PROOF,
         appendJournal: async (_startedAt, entry) => {
           entries.push(entry);
           return "/tmp/feedback.journal.jsonl";
@@ -387,12 +576,45 @@ describe("x402 one-shot submission state machines", () => {
       "feedback_submitted",
       "feedback_confirmed",
     ]);
+    expect(entries[0]).toHaveProperty("signedTransactionXdrSha256");
+    expect(JSON.stringify(entries[0])).not.toContain("signed-feedback-xdr-must-not-be-journaled");
+  });
+
+  it("treats either missing feedback response hash as unknown and never verifies or confirms", async () => {
+    for (const missing of ["send", "final"] as const) {
+      const entries: RunJournalEntry[] = [];
+      let verificationCalls = 0;
+      const transaction = fakeFeedbackTransaction("SUCCESS");
+      transaction.send = async () => ({
+        sendTransactionResponse: missing === "send" ? {} : { hash: TX },
+        getTransactionResponse: missing === "final" ? { status: "SUCCESS" } : { status: "SUCCESS", txHash: TX },
+      });
+      await expect(
+        submitFeedbackTransaction(transaction, paymentAttempt().startedAt, SCRAPPER_AGENT_ID, {
+          verifyFinalized: async () => {
+            verificationCalls += 1;
+            return FAKE_FEEDBACK_PROOF;
+          },
+          appendJournal: async (_startedAt, entry) => {
+            entries.push(entry);
+            return "/tmp/feedback-integrity.journal.jsonl";
+          },
+        }),
+      ).rejects.toThrow(/FEEDBACK_OUTCOME_UNKNOWN/);
+      expect(verificationCalls).toBe(0);
+      expect(entries.at(-1)).toMatchObject({
+        event: "feedback_outcome_unknown",
+        stage: "response_integrity",
+      });
+      expect(entries.some((entry) => entry.event === "feedback_confirmed")).toBe(false);
+    }
   });
 
   it("journals terminal FAILED feedback without ever claiming confirmation", async () => {
     const entries: RunJournalEntry[] = [];
     await expect(
       submitFeedbackTransaction(fakeFeedbackTransaction("FAILED"), paymentAttempt().startedAt, SCRAPPER_AGENT_ID, {
+        verifyFinalized: async () => FAKE_FEEDBACK_PROOF,
         appendJournal: async (_startedAt, entry) => {
           entries.push(entry);
           return "/tmp/feedback.journal.jsonl";
@@ -414,6 +636,7 @@ describe("x402 one-shot submission state machines", () => {
     const transaction = fakeFeedbackTransaction(status === "send exception" ? "NOT_FOUND" : status, sendError);
     await expect(
       submitFeedbackTransaction(transaction, paymentAttempt().startedAt, SCRAPPER_AGENT_ID, {
+        verifyFinalized: async () => FAKE_FEEDBACK_PROOF,
         appendJournal: async (_startedAt, entry) => {
           entries.push(entry);
           return "/tmp/feedback.journal.jsonl";
@@ -425,6 +648,193 @@ describe("x402 one-shot submission state machines", () => {
       "feedback_outcome_unknown",
     ]);
     expect(entries.some((entry) => entry.event === "feedback_confirmed")).toBe(false);
+  });
+
+  it("bounds a hanging feedback send/finality call and journals the signed hash as unknown", async () => {
+    const entries: RunJournalEntry[] = [];
+    const transaction = fakeFeedbackTransaction("SUCCESS");
+    transaction.send = () => new Promise(() => undefined);
+    await expect(
+      submitFeedbackTransaction(transaction, paymentAttempt().startedAt, SCRAPPER_AGENT_ID, {
+        sendTimeoutMs: 10,
+        verifyFinalized: async () => FAKE_FEEDBACK_PROOF,
+        appendJournal: async (_startedAt, entry) => {
+          entries.push(entry);
+          return "/tmp/feedback-timeout.journal.jsonl";
+        },
+      }),
+    ).rejects.toThrow(/FEEDBACK_OUTCOME_UNKNOWN.*timed out/s);
+    expect(entries.map((entry) => entry.event)).toEqual([
+      "feedback_submitted",
+      "feedback_outcome_unknown",
+    ]);
+  });
+
+  it("treats a fresh-RPC feedback verification failure as unknown after SDK SUCCESS", async () => {
+    const entries: RunJournalEntry[] = [];
+    await expect(
+      submitFeedbackTransaction(fakeFeedbackTransaction("SUCCESS"), paymentAttempt().startedAt, SCRAPPER_AGENT_ID, {
+        verifyFinalized: async () => {
+          throw new Error("independent envelope mismatch");
+        },
+        appendJournal: async (_startedAt, entry) => {
+          entries.push(entry);
+          return "/tmp/feedback-rpc.journal.jsonl";
+        },
+      }),
+    ).rejects.toThrow(/FEEDBACK_OUTCOME_UNKNOWN.*independent envelope mismatch/s);
+    expect(entries.at(-1)).toMatchObject({
+      event: "feedback_outcome_unknown",
+      stage: "independent_rpc_verification",
+      feedbackTxHash: TX,
+    });
+  });
+});
+
+describe("x402 crash-safe filesystem state", () => {
+  it("writes private durable JSONL and atomically replaces the final receipt on a real filesystem", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "stellar-agent-mcp-x402-durability-"));
+    try {
+      const journal = join(directory, "run.journal.jsonl");
+      await appendDurableJsonLine(journal, { sequence: 1 });
+      await appendDurableJsonLine(journal, { sequence: 2 });
+      expect((await stat(journal)).mode & 0o777).toBe(0o600);
+      expect((await readFsFile(journal, "utf8")).trim().split("\n").map((line) => JSON.parse(line))).toEqual([
+        { sequence: 1 },
+        { sequence: 2 },
+      ]);
+
+      const receipt = join(directory, "run.json");
+      await writeAtomicJsonFile(receipt, { complete: true });
+      expect((await stat(receipt)).mode & 0o777).toBe(0o600);
+      expect(JSON.parse(await readFsFile(receipt, "utf8"))).toEqual({ complete: true });
+      expect((await readdir(directory)).some((name) => name.includes(".tmp-"))).toBe(false);
+
+      await expect(writeAtomicJsonFile(receipt, { invalid: 1n })).rejects.toThrow();
+      expect(JSON.parse(await readFsFile(receipt, "utf8"))).toEqual({ complete: true });
+      expect((await readdir(directory)).some((name) => name.includes(".tmp-"))).toBe(false);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("allows only one concurrent funded process for the same canonical request", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "stellar-agent-mcp-x402-lock-"));
+    try {
+      const identity = canonicalRequestIdentity(config(false), OTHER_ACCOUNT, SCRAPPER_AGENT_ID, ENDPOINT);
+      const startedAt = "2026-07-29T00:00:00.000Z";
+      const attempts = await Promise.allSettled([
+        acquireFundedRunLock(identity, startedAt, directory),
+        acquireFundedRunLock(identity, startedAt, directory),
+      ]);
+      expect(attempts.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      expect(attempts.filter((result) => result.status === "rejected")).toHaveLength(1);
+      expect(String((attempts.find((result) => result.status === "rejected") as PromiseRejectedResult).reason)).toMatch(
+        /REPLAY_BLOCKED/,
+      );
+
+      const lock = (attempts.find((result) => result.status === "fulfilled") as PromiseFulfilledResult<
+        Awaited<ReturnType<typeof acquireFundedRunLock>>
+      >).value;
+      expect((await stat(lock.path)).mode & 0o777).toBe(0o600);
+      const journalPath = join(directory, `run-${startedAt.replace(/[:.]/g, "-")}.journal.jsonl`);
+      const attempt = paymentAttempt();
+      const signedPaymentPayloadJson = JSON.stringify(attempt.signedPaymentPayload);
+      const recoveryArtifact = await writePaymentRecoveryArtifact(
+        startedAt,
+        {
+          version: 1,
+          kind: "x402_signed_payment_recovery",
+          recordedAt: startedAt,
+          ...identity,
+          endpoint: ENDPOINT,
+          challengeNetwork: attempt.challengeNetwork,
+          asset: attempt.asset,
+          payTo: attempt.payTo,
+          price: attempt.price,
+          paymentAuthorizationHash: RESULT_HASH,
+          paymentTransactionXdr: attempt.paymentTransactionXdr,
+          signedPaymentPayloadJson,
+        },
+        directory,
+      );
+      expect((await stat(recoveryArtifact.path)).mode & 0o777).toBe(0o600);
+      const recoveryBytes = await readFsFile(recoveryArtifact.path);
+      expect(createHash("sha256").update(recoveryBytes).digest("hex")).toBe(recoveryArtifact.sha256);
+      expect(JSON.parse(recoveryBytes.toString("utf8"))).toMatchObject({
+        paymentTransactionXdr: attempt.paymentTransactionXdr,
+        signedPaymentPayloadJson,
+      });
+      expect((await readdir(directory)).some((name) => name.includes(".tmp-"))).toBe(false);
+      await appendDurableJsonLine(journalPath, {
+        event: "payment_submission_prepared",
+        recordedAt: startedAt,
+        payerPublicKey: identity.payerPublicKey,
+        agentId: identity.agentId,
+        endpoint: ENDPOINT,
+        challengeNetwork: attempt.challengeNetwork,
+        asset: attempt.asset,
+        payTo: attempt.payTo,
+        price: attempt.price,
+        canonicalEndpoint: identity.canonicalEndpoint,
+        requestMethod: identity.requestMethod,
+        requestBodySha256: identity.requestBodySha256,
+        requestDigest: identity.requestDigest,
+        idempotencyKey: identity.idempotencyKey,
+        paymentAuthorizationHash: RESULT_HASH,
+        paymentTransactionXdrSha256: createHash("sha256").update(attempt.paymentTransactionXdr).digest("hex"),
+        signedPaymentPayloadSha256: createHash("sha256").update(signedPaymentPayloadJson).digest("hex"),
+        paymentRecoveryArtifactPath: recoveryArtifact.path,
+        paymentRecoveryArtifactSha256: recoveryArtifact.sha256,
+      } satisfies RunJournalEntry);
+      await lock.markPaymentSubmissionPrepared({
+        journalPath,
+        authorizationHash: RESULT_HASH,
+        paymentRecoveryArtifactPath: recoveryArtifact.path,
+        paymentRecoveryArtifactSha256: recoveryArtifact.sha256,
+      });
+      expect(JSON.parse(await readFsFile(lock.path, "utf8"))).toMatchObject({
+        state: "payment_submission_prepared",
+        idempotencyKey: identity.idempotencyKey,
+        journalPath,
+        paymentAuthorizationHash: RESULT_HASH,
+      });
+      await expect(acquireFundedRunLock(identity, startedAt, directory)).rejects.toThrow(/REPLAY_BLOCKED/);
+      await releaseReconciledFundedRunLock(identity.idempotencyKey, directory);
+      await expect(stat(lock.path)).rejects.toMatchObject({ code: "ENOENT" });
+      const journalEntries = (await readFsFile(journalPath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(journalEntries.at(-1)).toMatchObject({
+        event: "funded_lock_released",
+        idempotencyKey: identity.idempotencyKey,
+        previousState: "payment_submission_prepared",
+      });
+      await expect(acquireFundedRunLock(identity, startedAt, directory)).rejects.toThrow(/REPLAY_BLOCKED/);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when a prepared lock cannot be reconciled to its artifact and journal", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "stellar-agent-mcp-x402-reconcile-"));
+    try {
+      const identity = canonicalRequestIdentity(config(false), OTHER_ACCOUNT, SCRAPPER_AGENT_ID, ENDPOINT);
+      const lock = await acquireFundedRunLock(identity, paymentAttempt().startedAt, directory);
+      await lock.markPaymentSubmissionPrepared({
+        journalPath: join(directory, "run-2026-07-29T00-00-00-000Z.journal.jsonl"),
+        authorizationHash: RESULT_HASH,
+        paymentRecoveryArtifactPath: join(directory, "missing.payment-recovery.json"),
+        paymentRecoveryArtifactSha256: TEST_PAYMENT_RECOVERY_REFERENCE.sha256,
+      });
+      await expect(
+        releaseReconciledFundedRunLock(identity.idempotencyKey, directory),
+      ).rejects.toThrow();
+      expect((await stat(lock.path)).isFile()).toBe(true);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
 
@@ -446,6 +856,13 @@ describe("x402 evidence integrity", () => {
     expect(message).not.toContain(env.STELLAR_PRIVATE_KEY);
     expect(message).not.toContain(env.X402_API_KEY);
     expect(message.match(/\[REDACTED\]/g)).toHaveLength(3);
+
+    const componentMessage = redactSensitiveError(
+      new Error("provider provider-secret rejected token query-secret"),
+      env,
+    );
+    expect(componentMessage).not.toContain("provider-secret");
+    expect(componentMessage).not.toContain("query-secret");
   });
 
   it("requires canonical 32-byte transaction and result hashes", () => {
@@ -469,6 +886,73 @@ describe("x402 evidence integrity", () => {
     await expect(
       readPaidResult(new Response(new Uint8Array(1_048_577))),
     ).rejects.toThrow(/exceeds 1048576 bytes/);
+  });
+
+  it("cancels a paid body that never finishes when its post-payment deadline expires", async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+    });
+    await expect(readPaidResult(new Response(body), 10)).rejects.toThrow(/paid result body timed out/);
+    expect(cancelled).toBe(true);
+  });
+
+  it("durably captures a signed-response transaction claim without journaling untrusted error text", async () => {
+    const entries: RunJournalEntry[] = [];
+    const untrustedReason = "PAYMENT-SIGNATURE=signed-capability-must-not-be-logged";
+    const encoded = Buffer.from(
+      JSON.stringify({
+        success: false,
+        payer: OTHER_ACCOUNT,
+        transaction: TX,
+        network: STELLAR_PUBNET_CAIP2,
+        errorReason: untrustedReason,
+      }),
+    ).toString("base64");
+    const response = new Response("", { status: 402, headers: { "PAYMENT-RESPONSE": encoded } });
+    const claim = await captureUntrustedSettlementClaim(
+      response,
+      { payer: OTHER_ACCOUNT, network: STELLAR_PUBNET_CAIP2, amount: "1000" },
+      paymentAttempt().startedAt,
+      async (_startedAt, entry) => {
+        entries.push(entry);
+        return "/tmp/payment.journal.jsonl";
+      },
+    );
+    expect(claim.paymentTxHash).toBe(TX);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      event: "settlement_claim_received",
+      httpStatus: 402,
+      decoded: true,
+      claimSuccess: false,
+      paymentTxHash: TX,
+      claimedNetwork: STELLAR_PUBNET_CAIP2,
+      claimedPayer: OTHER_ACCOUNT,
+      claimedAmount: null,
+    });
+    expect(JSON.stringify(entries[0])).not.toContain(untrustedReason);
+    expect(JSON.stringify(entries[0])).not.toContain(encoded);
+    expect(() =>
+      validateSettlementResponse(claim.response!, {
+        payer: OTHER_ACCOUNT,
+        network: STELLAR_PUBNET_CAIP2,
+        amount: "1000",
+      }),
+    ).toThrow("x402 settlement reported failure");
+
+    const storageFailure = await captureUntrustedSettlementClaim(
+      response,
+      { payer: OTHER_ACCOUNT, network: STELLAR_PUBNET_CAIP2, amount: "1000" },
+      paymentAttempt().startedAt,
+      async () => {
+        throw new Error("disk full");
+      },
+    );
+    expect(storageFailure.paymentTxHash).toBe(TX);
+    expect(storageFailure.journalError).toContain("disk full");
   });
 
   it("requires a successful settlement response with the expected payer/network/amount", () => {
@@ -495,8 +979,10 @@ describe("x402 evidence integrity", () => {
   it("requires a final, fresh on-chain transfer matching the full tuple", () => {
     const submittedAtMs = 1_700_000_000_500;
     const envelope = paymentEnvelope(1n);
+    const txHash = transactionEnvelopeHash(envelope.toXDR(), Networks.PUBLIC);
     const authorizationHash = paymentAuthorizationHash(envelope.toXDR(), Networks.PUBLIC);
     const transfer = {
+      toXDR: () => "AAAA",
       type: () => ({ name: "contract" }),
       contractId: () => StrKey.decodeContract(USDC_PUBNET_ADDRESS),
       body: () => ({
@@ -512,7 +998,7 @@ describe("x402 evidence integrity", () => {
     };
     const tx = {
       status: "SUCCESS",
-      txHash: TX,
+      txHash,
       ledger: 123,
       createdAt: 1_700_000_001,
       envelopeXdr: envelope.toEnvelope(),
@@ -527,18 +1013,21 @@ describe("x402 evidence integrity", () => {
       authorizationHash,
       networkPassphrase: Networks.PUBLIC,
     };
-    expect(assertOnchainSettlement(tx, TX, expected)).toEqual({
+    expect(assertOnchainSettlement(tx, txHash, expected)).toMatchObject({
       ledger: 123,
       confirmedAt: "2023-11-14T22:13:21.000Z",
     });
-    expect(() => assertOnchainSettlement({ ...tx, status: "FAILED" }, TX, expected)).toThrow(
+    expect(() => assertOnchainSettlement({ ...tx, status: "FAILED" }, txHash, expected)).toThrow(
       /not final-success/,
     );
     expect(() =>
-      assertOnchainSettlement({ ...tx, createdAt: 1_699_999_999 }, TX, expected),
+      assertOnchainSettlement({ ...tx, createdAt: 1_699_999_999 }, txHash, expected),
     ).toThrow(/predates/);
-    expect(() => assertOnchainSettlement(tx, TX, { ...expected, amount: "1001" })).toThrow(
+    expect(() => assertOnchainSettlement(tx, txHash, { ...expected, amount: "1001" })).toThrow(
       /does not match expected/,
+    );
+    expect(() => assertOnchainSettlement({ ...tx, txHash: TX }, TX, expected)).toThrow(
+      /envelope hash does not match/,
     );
   });
 
@@ -546,6 +1035,7 @@ describe("x402 evidence integrity", () => {
     const expectedEnvelope = paymentEnvelope(1n);
     const priorEnvelope = paymentEnvelope(2n);
     const transfer = {
+      toXDR: () => "AAAA",
       type: () => ({ name: "contract" }),
       contractId: () => StrKey.decodeContract(USDC_PUBNET_ADDRESS),
       body: () => ({
@@ -562,14 +1052,14 @@ describe("x402 evidence integrity", () => {
     const submittedAtMs = 1_700_000_000_999;
     const priorSameSecond = {
       status: "SUCCESS",
-      txHash: TX,
+      txHash: transactionEnvelopeHash(priorEnvelope.toXDR(), Networks.PUBLIC),
       ledger: 122,
       createdAt: 1_700_000_000,
       envelopeXdr: priorEnvelope.toEnvelope(),
       events: { contractEventsXdr: [[transfer]] },
     };
     expect(() =>
-      assertOnchainSettlement(priorSameSecond, TX, {
+      assertOnchainSettlement(priorSameSecond, priorSameSecond.txHash, {
         payer: OTHER_ACCOUNT,
         payTo: SCRAPPER_EXPECTED_PAY_TO,
         asset: USDC_PUBNET_ADDRESS,
@@ -597,6 +1087,30 @@ describe("x402 evidence integrity", () => {
     );
   });
 
+  it("independently binds finalized give_feedback invocation and NewFeedback event to the full tuple", () => {
+    const fixture = feedbackOnchainFixture();
+    expect(
+      assertOnchainFeedback(
+        fixture.transaction,
+        fixture.txHash,
+        fixture.signedTransactionXdr,
+        fixture.expected,
+      ),
+    ).toMatchObject({
+      ledger: 456,
+      feedbackIndex: "7",
+      transactionXdr: fixture.signedTransactionXdr,
+    });
+    expect(() =>
+      assertOnchainFeedback(
+        fixture.transaction,
+        fixture.txHash,
+        fixture.signedTransactionXdr,
+        { ...fixture.expected, tag2: "different" },
+      ),
+    ).toThrow(/does not match/);
+  });
+
   it("admits only the deployed Scrapper's terminal success envelope and output format", () => {
     const output = "URL: https://example.com\nTitle: Example\n\nContent:\nHello";
     expect(isSuccessfulResult({ success: true, data: output }, "https://example.com")).toBe(true);
@@ -611,6 +1125,8 @@ describe("x402 evidence integrity", () => {
     expect(isSuccessfulResult({ arbitrary: "non-empty" })).toBe(false);
     expect(isSuccessfulResult(["not a Scrapper envelope"])).toBe(false);
     expect(isSuccessfulResult({ success: true, data: "URL: https://example.com\nno content section" })).toBe(false);
+    expect(isSuccessfulResult({ success: true, data: "URL: https://example.com\n\nContent:\n" })).toBe(false);
+    expect(isSuccessfulResult({ success: true, data: "URL: https://example.com\n\nContent:\n \t\r\n" })).toBe(false);
   });
 
   it("pins a valid Scrapper request before payment", () => {
@@ -626,6 +1142,20 @@ describe("x402 evidence integrity", () => {
   });
 
   it("will not write an incomplete or unsuccessful full evidence receipt", () => {
+    const identity = canonicalRequestIdentity(config(false), OTHER_ACCOUNT, SCRAPPER_AGENT_ID, ENDPOINT);
+    const settlementEnvelope = paymentEnvelope(20n);
+    const feedbackEnvelope = paymentEnvelope(21n);
+    const paymentTxHash = transactionEnvelopeHash(settlementEnvelope.toXDR(), Networks.PUBLIC);
+    const feedbackTxHash = transactionEnvelopeHash(feedbackEnvelope.toXDR(), Networks.PUBLIC);
+    const feedbackEventXdr = new xdr.ContractEvent({
+      ext: new xdr.ExtensionPoint(0),
+      contractId: StrKey.decodeContract(USDC_PUBNET_ADDRESS) as any,
+      type: xdr.ContractEventType.contract(),
+      body: new xdr.ContractEventBody(
+        0,
+        new xdr.ContractEventV0({ topics: [], data: nativeToScVal("feedback", { type: "symbol" }) }),
+      ),
+    }).toXDR("base64");
     const rec: RunRecord = {
       network: "mainnet",
       dryRun: false,
@@ -633,17 +1163,33 @@ describe("x402 evidence integrity", () => {
       agentId: SCRAPPER_AGENT_ID,
       owner: SCRAPPER_OWNER,
       endpoint: ENDPOINT,
+      canonicalEndpoint: identity.canonicalEndpoint,
+      requestMethod: identity.requestMethod,
+      requestBodySha256: identity.requestBodySha256,
+      requestDigest: identity.requestDigest,
+      idempotencyKey: identity.idempotencyKey,
       challengeNetwork: STELLAR_PUBNET_CAIP2,
       asset: USDC_PUBNET_ADDRESS,
       payTo: SCRAPPER_EXPECTED_PAY_TO,
       price: "1000",
-      paymentTxHash: TX,
-      paymentAuthorizationHash: "12".repeat(32),
+      paymentTxHash,
+      paymentAuthorizationHash: paymentAuthorizationHash(settlementEnvelope.toXDR(), Networks.PUBLIC),
+      paymentTransactionXdrSha256: "12".repeat(32),
+      signedPaymentPayloadSha256: "23".repeat(32),
+      paymentResponseHeaderBytes: 128,
+      paymentResponseHeaderSha256: "34".repeat(32),
+      settlementRecomputedTxHash: paymentTxHash,
+      settlementTransactionXdr: settlementEnvelope.toXDR(),
       settlementLedger: 123,
       settlementConfirmedAt: "2026-07-29T00:00:00.500Z",
       resultHash: RESULT_HASH,
       resultOk: true,
-      feedbackTxHash: "ef".repeat(32),
+      feedbackTxHash,
+      feedbackIndex: "7",
+      feedbackLedger: 124,
+      feedbackConfirmedAt: "2026-07-29T00:00:00.750Z",
+      feedbackTransactionXdr: feedbackEnvelope.toXDR(),
+      feedbackEventXdr,
       startedAt: "2026-07-29T00:00:00.000Z",
       finishedAt: "2026-07-29T00:00:01.000Z",
       expertLinks: {},
@@ -656,6 +1202,11 @@ describe("x402 evidence integrity", () => {
     expect(() => assertCompleteEvidenceRecord({ ...rec, payerPublicKey: null })).toThrow(/payerPublicKey/);
     expect(() => assertCompleteEvidenceRecord({ ...rec, resultOk: false })).toThrow(/not usable/);
     expect(() => assertCompleteEvidenceRecord({ ...rec, feedbackTxHash: "" })).toThrow(/feedbackTxHash/);
-    expect(() => assertCompleteEvidenceRecord({ ...rec, feedbackTxHash: TX })).toThrow(/two distinct transactions/);
+    expect(() => assertCompleteEvidenceRecord({ ...rec, feedbackTxHash: paymentTxHash })).toThrow(
+      /two distinct transactions/,
+    );
+    expect(() => assertCompleteEvidenceRecord({ ...rec, settlementRecomputedTxHash: TX })).toThrow(
+      /settlement XDR\/hash binding/,
+    );
   });
 });

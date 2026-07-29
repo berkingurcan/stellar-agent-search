@@ -6,20 +6,10 @@
 # million. `svelte.config.js` uses adapter-static (not adapter-cloudflare, which
 # stellar8004.com needs for its server routes) precisely to keep this true.
 #
-# NO SECRETS, NO BINDINGS, NO DATABASE. The one piece of live data on the page —
-# the registry counts in the stat row — is read from the already-public
-# stellar8004 explorer API straight from the browser. `wrangler secret put` is
-# not part of deploying this.
-#
-# WHY BROWSER-DIRECT INSTEAD OF PROXYING THROUGH A WORKER:
-#   The upstream API rate-limits per client address (x-ratelimit-limit: 30/min;
-#   its Cloudflare adapter reads cf-connecting-ip). Proxying server-side could
-#   collapse every visitor onto one
-#   egress IP, so all users would share ONE 30/min budget and a single busy tab
-#   would 429 everyone. Fetching from the browser gives each visitor their own
-#   budget. The upstream already sends `access-control-allow-origin: *` and
-#   `cache-control: public, max-age=30, stale-while-revalidate=120`, so CORS
-#   permits it and both the browser and Cloudflare's edge cache the reads.
+# NO SECRETS, NO BINDINGS, NO DATABASE, NO LIVE API FETCH. The page ships a
+# date-stamped transcript captured by the release process; it does not proxy or
+# read Supabase/Explorer at request time. `wrangler secret put` is not part of
+# deploying this.
 #
 # Deploy: `npm run deploy` in this directory (builds, then wrangler deploy).
 

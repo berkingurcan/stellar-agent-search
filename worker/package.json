@@ -4,14 +4,15 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.18.0"
+    "node": "^22.18.0 || >=24.11.0"
   },
   "scripts": {
     "typecheck": "tsc --noEmit --strict --skipLibCheck --target ES2022 --module ESNext --moduleResolution Bundler --resolveJsonModule --allowSyntheticDefaultImports --lib ES2022,DOM,DOM.Iterable --types node,vitest/globals src/index.ts test/*.test.ts",
     "test": "vitest run test",
-    "dry-run": "wrangler deploy --dry-run --outdir .wrangler-ci",
+    "dry-run": "node scripts/dry-run.mjs",
     "canary": "node scripts/canary.mjs",
-    "predeploy": "node scripts/validate-deploy-config.mjs wrangler.jsonc",
-    "deploy": "wrangler deploy"
+    "predeploy": "node scripts/validate-deploy-config.mjs wrangler.jsonc && node scripts/validate-persisted-secrets.mjs --config wrangler.jsonc --allowlist deploy-secret-allowlist.json",
+    "deploy": "wrangler deploy",
+    "deploy:first": "node scripts/validate-deploy-config.mjs wrangler.jsonc && node scripts/validate-persisted-secrets.mjs --config wrangler.jsonc --allowlist deploy-secret-allowlist.json --allow-missing-worker && wrangler deploy"
   }
 }

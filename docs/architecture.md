@@ -102,7 +102,7 @@ byte-identical output. The versioned local policy is `stellar-agent-mcp-declared
 ```
 effectiveUniqueClients = min(validSafeInt(uniqueClients), validSafeInt(feedbackCount))
 breadth = clamp(ln(1+effectiveUniqueClients) / ln(1+25), 0, 1)
-quality = clamp(avg / RANK_SCORE_MAX, 0, 1)              # 0 when unrated
+quality = clamp(avg / 100, 0, 1)                         # fixed by v1; 0 when unrated
 effectiveFeedbackCount = min(feedbackCount, effectiveUniqueClients · 3)
 volume  = clamp(ln(1+effectiveFeedbackCount) / ln(1+50), 0, 1)
 evidenceStrength = 0.4·volume + 0.6·breadth
@@ -112,8 +112,9 @@ score100 = round(score · 100)
 
 Owner-declared x402, MPP, and service-presence claims never add trust points. The retained `paymentBonus`,
 `endpointBonus`, and `verifiedBonus` response fields are always `0` for pre-release schema continuity.
-The evidence weights are fixed; legacy `RANK_W_*` configuration and supplied `rank_agent.weights` are
-rejected rather than silently changing the meaning of a public score.
+The scale and evidence weights are fixed; `RANK_SCORE_MAX` values other than `100`, legacy `RANK_W_*`
+configuration, and supplied `rank_agent.weights` are rejected rather than silently changing the meaning of
+a public score.
 
 **Why breadth > volume:** indexer-declared unique clients (breadth) are harder to fake than raw feedback
 volume. Weighting breadth above volume is a Sybil-cost hedge, not a chain-verified breadth claim,

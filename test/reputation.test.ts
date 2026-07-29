@@ -207,13 +207,10 @@ describe("probe(): transport and configuration failures remain distinguishable",
   });
 });
 
-describe("on-chain reads never fall back to the axios transport (soroban.ts)", () => {
-  // The generated bindings' Client constructor MUTATES the options object it is
-  // given, writing back an axios-backed rpc.Server under `options.server`. The
-  // no-axios Client honours a pre-set `options.server`, so sharing one object
-  // between the spec donor and the real client silently reinstates axios for
-  // every read. It typechecks, it passes offline tests, and it fails only
-  // against a live proxy with a 405 — so it has to be pinned here.
+describe("on-chain reads stay on Stellar SDK v16's fetch transport (soroban.ts)", () => {
+  // The generated bindings' Client constructor mutates the options object it
+  // receives by installing a server. Keep that state out of the separately
+  // constructed reader even though both now resolve to v16's fetch transport.
   it("gives the reader its own options object, not the donor's", async () => {
     const { createReputationReadClient } = await import("../src/lib/soroban.js");
     const cfg = {
@@ -243,24 +240,20 @@ describe("on-chain reads never fall back to the axios transport (soroban.ts)", (
   });
 });
 
-describe("the no-axios subpath this build depends on still exists", () => {
-  // stellar-sdk INVERTED this layout in v16: the default build became
-  // fetch-based and axios moved behind an explicit `./axios` subpath, so
-  // `./no-axios/*` — which src/lib/soroban.ts imports — does not exist there.
+describe("the Stellar SDK v16 fetch subpath this build depends on exists", () => {
+  // Stellar SDK inverted this layout in v16: the default build became
+  // fetch-based and axios moved behind an explicit `./axios` subpath.
   //   v15: .  ./contract  ./rpc  ./no-axios  ./no-axios/contract  ./no-axios/rpc
   //   v16: .  ./contract  ./rpc  ./axios     ./axios/contract     ./axios/rpc
-  // We pin ^15, so this is fine today. Bumping to ^16 must switch soroban.ts to
-  // the plain `./contract` subpath (already fetch-based there) — and this test
-  // is what turns that into a red build instead of a runtime resolution error.
-  it("resolves @stellar/stellar-sdk/no-axios/contract under the pinned major", async () => {
+  it("resolves the default fetch contract build under the pinned major", async () => {
     const pkg = JSON.parse(
       readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8"),
     ) as { dependencies: Record<string, string> };
     expect(
       pkg.dependencies["@stellar/stellar-sdk"],
-      "soroban.ts imports ./no-axios/*, which v16 removed — see the comment above",
-    ).toMatch(/\^?15/);
+      "soroban.ts imports v16's default fetch-based ./contract export",
+    ).toMatch(/\^?16/);
 
-    await expect(import("@stellar/stellar-sdk/no-axios/contract")).resolves.toBeDefined();
+    await expect(import("@stellar/stellar-sdk/contract")).resolves.toBeDefined();
   });
 });

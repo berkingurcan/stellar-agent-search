@@ -27,18 +27,18 @@ const config = {
 			precompress: false
 		}),
 
-		// CSP lives here rather than in _headers because two of the page's scripts are
-		// inline — the pre-paint theme script in app.html, and SvelteKit's own hydration
-		// bootstrap, whose content (and therefore hash) changes on every build. Hand-written
-		// hashes in _headers would silently go stale and blank the page; SvelteKit recomputes
-		// them at build time and emits them with the HTML.
+		// CSP lives here rather than in _headers because SvelteKit's hydration bootstrap is
+		// inline and its content (and therefore hash) changes per route and build. The
+		// pre-paint theme initializer is an external same-origin file, so every generated
+		// page has only the hydration hash to maintain. Hand-written hashes in _headers
+		// would silently go stale and blank the page; SvelteKit recomputes them at build time.
 		csp: {
 			// 'hash', not 'nonce': every route is prerendered to a file, so there is no server
 			// to mint a per-request nonce.
 			mode: 'hash',
 			directives: {
 				'default-src': ['none'],
-				// No 'unsafe-inline' — the two inline scripts are covered by build-time hashes.
+				// No 'unsafe-inline' — the hydration bootstrap is covered by a build-time hash.
 				'script-src': ['self'],
 				// 'unsafe-inline' IS needed here: CSP hashes do not apply to inline `style=`
 				// attributes, and two exist (app.html's `display: contents` wrapper and the

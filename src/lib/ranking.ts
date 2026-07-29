@@ -80,9 +80,13 @@ export function qualityNorm(
   feedbackCount: number,
   scoreMax: number = RANK_SCORE_MAX,
 ): number | null {
+  if (scoreMax !== RANK_SCORE_MAX) {
+    throw new RangeError(
+      `${RANKING.VERSION} fixes scoreMax at ${RANK_SCORE_MAX}; received ${String(scoreMax)}`,
+    );
+  }
   if (feedbackCount <= 0 || avg == null || !Number.isFinite(avg)) return null;
-  const max = scoreMax > 0 ? scoreMax : RANK_SCORE_MAX;
-  return clamp(avg / max, 0, 1);
+  return clamp(avg / RANK_SCORE_MAX, 0, 1);
 }
 
 /** Volume axis, [0,1]. Log-saturating: fc=0→0, fc=VOL_SAT→~1. */
@@ -121,7 +125,7 @@ export interface RankInput {
 }
 
 export interface ScoreOptions {
-  /** Feedback score scale for the quality axis. Defaults to RANK_SCORE_MAX. */
+  /** Compatibility assertion only; v1 rejects every value except RANK_SCORE_MAX. */
   scoreMax?: number;
   /** Epoch ms "now" for the `newAgent` flag. Defaults to Date.now(). */
   now?: number;
@@ -158,6 +162,11 @@ function parseCreatedAt(createdAt: string | number | null | undefined): number |
  */
 export function scoreAgent(input: RankInput, opts: ScoreOptions = {}): RankResult {
   const scoreMax = opts.scoreMax ?? RANK_SCORE_MAX;
+  if (scoreMax !== RANK_SCORE_MAX) {
+    throw new RangeError(
+      `${RANKING.VERSION} fixes scoreMax at ${RANK_SCORE_MAX}; received ${String(scoreMax)}`,
+    );
+  }
   const now = opts.now ?? Date.now();
 
   const validCount = (value: number): number =>

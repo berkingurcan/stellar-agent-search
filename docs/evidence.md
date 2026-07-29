@@ -15,9 +15,13 @@ checked in a browser in about five minutes.
 
 > [!IMPORTANT]
 > **The repository is currently private.** Every link on this page returns 404 to anyone who is not a
-> collaborator, and the SOW requires a *public* MIT repository. Flip it before sending this to a reviewer:
-> **Settings → General → Danger Zone → Change visibility → Make public**. This also unblocks npm provenance and
-> the MCP Registry publish, both of which require a public repository.
+> collaborator, and the SOW requires a *public* MIT repository. Do **not** flip visibility yet: first finalize
+> the canonical owner and reserve the npm name with the inert, non-install-default `bootstrap: 0.0.0` package
+> while the repository remains private. Only after that reservation is independently verified should an owner
+> make the repository public; then configure the protected OIDC publisher and perform the real release.
+
+**Mandatory first-release order:** canonical owner/transfer while private → inert `0.0.0` reservation under
+the non-default `bootstrap` tag while private → public repository → protected OIDC real release.
 
 ---
 
@@ -271,16 +275,19 @@ file per item under [`issues/`](../issues/); this table is the ordering, not a s
 
 | # | Item | Unblocks |
 |---|---|---|
-| [01](../issues/P0-01-make-repository-public.md) | **Make the repository public** | Everything reviewer-facing; also npm provenance and the MCP Registry publish |
+| [01 phase A](../issues/P0-01-make-repository-public.md) | Finalize canonical owner/transfer while private | Stable GitHub/npm/MCP provenance identity |
 | [02](../issues/P0-02-set-default-branch-to-main.md) | Default branch is `main`; delete the still-present stale working branch | Repository hygiene; no longer blocks default-branch installs |
-| [03](../issues/P0-03-first-npm-publish.md) | First npm bootstrap + Trusted Publisher | D1's npm link; makes the pinned `npx -y stellar-agent-mcp@0.1.0` resolve |
+| [03 phase A](../issues/P0-03-first-npm-publish.md) | Reserve inert `bootstrap: 0.0.0` while private | Safe public visibility without advertising an unclaimed command |
+| [01 phase B](../issues/P0-01-make-repository-public.md) | Make the finalized canonical repository public | Anonymous review, npm provenance, and MCP Registry OIDC |
+| [03 phase B](../issues/P0-03-first-npm-publish.md) | Configure protected OIDC and publish the real release | D1's npm link; makes the pinned `npx -y stellar-agent-mcp@0.1.0` resolve |
 | [04](../issues/P0-04-funded-mainnet-x402-run.md) | Funded mainnet run of `examples/x402-demo.ts` | D2's two transaction hashes |
 | [05](../issues/P0-05-record-three-demos.md) | Recordings 1–3 | The D1, D2 and D3 recordings |
 
-Item 01 blocks public review and the optional skill acquisition; 02's default-branch blocker is resolved but
-its stale branch still needs deletion; 03 gates the actual `setup`
-bootstrap and the two install recordings; 04 gates the payment recording. [docs/recordings.md](recordings.md)
-has the shot-by-shot scripts.
+The owner/transfer half of item 01 blocks item 03's inert reservation; that reservation in turn blocks item
+01's visibility change. Public visibility then blocks item 03's protected real release. Item 02's
+default-branch blocker is resolved but its stale branch still needs deletion; the real release gates the
+actual `setup` bootstrap and the two install recordings; item 04 gates the payment recording.
+[docs/recordings.md](recordings.md) has the shot-by-shot scripts.
 
 Known engineering work that does **not** block SOW delivery — including one defect that reaches users of the
 published package — is tracked in the same place: see [`issues/README.md`](../issues/README.md). It is listed

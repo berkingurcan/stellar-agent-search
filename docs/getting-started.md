@@ -161,10 +161,11 @@ also raise `MCP_TIMEOUT` for the client.
 | `EXPLORER_BASE_URL` | `https://stellar8004.com` | Explorer HTTP API base — **indexes mainnet only** |
 | `STELLAR_RPC_URL` | `https://mainnet.sorobanrpc.com` | Soroban RPC for the bounded Reputation-contract reachability probe |
 | `VERIFY_ONCHAIN` | `true` | `false` = skip the probe; reputation remains declared-only either way |
-| `RANK_SCORE_MAX` | `100` | Normalization scale for the displayed ranking quality axis |
+| `RANK_SCORE_MAX` | `100` | Fixed v1 compatibility assertion; any other value fails startup |
 
-The fixed `stellar-agent-mcp-declared-evidence-v1` rank policy uses evidence weights volume `0.4` and breadth
-`0.6`; retired `RANK_W_*` variables are rejected. CLI flags override env (`--network`, `--explorer-url`,
+The fixed `stellar-agent-mcp-declared-evidence-v1` rank policy normalizes quality against exactly `100` and
+uses evidence weights volume `0.4` and breadth `0.6`; a changed `RANK_SCORE_MAX` and retired `RANK_W_*`
+variables are rejected. CLI flags override env (`--network`, `--explorer-url`,
 `--rpc-url`, `--no-verify`, `--limit`, `--min-explorer-score`,
 `--x402`, `--mpp`, `--json`). Setup adds `--client`, `--scope`, `--check`, `--dry-run`, and `--handshake`.
 Precedence is **flag → env → default**.

@@ -22,6 +22,8 @@ import { loadConfig, type Config } from "../src/config.js";
 import { ExplorerService, TtlCache } from "../src/lib/explorer.js";
 import { manualClock } from "../src/lib/clock.js";
 
+const OWNER = "GDDTQFQZK734EXIJE5LWU4G4YC5A6P5AHJ4UWVMV6WBFWT6BAAQQHV2V";
+
 // ---------------------------------------------------------------------------
 // Mock fetch: records every requested URL and returns canned JSON pages.
 // ---------------------------------------------------------------------------
@@ -65,7 +67,7 @@ function agentPage(agents: AgentResponse[], opts: { page?: number; total?: numbe
 }
 
 function agent(id: number, name: string, description = ""): AgentResponse {
-  return { id, name, description, owner: `G${id}`, x402Enabled: false } as AgentResponse;
+  return { id, name, description, owner: OWNER, x402Enabled: false } as AgentResponse;
 }
 
 /** A controllable mock fetch. Each call resolves via the configured responder. */
@@ -171,6 +173,85 @@ describe("single-flight", () => {
     expect(r1.data[0].id).toBe(1);
     expect(r2.data[0].id).toBe(1);
     expect(mock.calls.length).toBe(1); // deduped
+  });
+});
+
+describe("runtime Explorer payload validation", () => {
+  it.each([
+    ["id", { id: "10" }, /data\[0\]\.id/],
+    ["owner", { owner: "GNOT-A-REAL-ADDRESS" }, /data\[0\]\.owner/],
+    ["boolean", { x402Enabled: "false" }, /data\[0\]\.x402Enabled/],
+    ["count", { feedbackCount: "8" }, /data\[0\]\.feedbackCount/],
+    ["impossible aggregate", { feedbackCount: 1, uniqueClients: 2 }, /uniqueClients/],
+  ])("rejects a malformed list-row %s instead of coercing it", async (_label, patch, error) => {
+    const malformedRow = { ...agent(10, "agent"), ...patch };
+    const mock = new MockFetch(() => jsonResponse(agentPage([malformedRow as AgentResponse])));
+    const svc = new ExplorerService(config, { fetch: mock.fn });
+
+    await expect(svc.getAgents()).rejects.toThrow(error as RegExp);
+  });
+
+  it("does not cache a malformed success payload", async () => {
+    let calls = 0;
+    const mock = new MockFetch(() => {
+      calls++;
+      const row = calls === 1
+        ? ({ ...agent(10, "agent"), x402Enabled: "false" } as unknown as AgentResponse)
+        : agent(10, "agent");
+      return jsonResponse(agentPage([row]));
+    });
+    const svc = new ExplorerService(config, { fetch: mock.fn, retries: 0 });
+
+    await expect(svc.getAgents()).rejects.toThrow(/x402Enabled/);
+    await expect(svc.getAgents()).resolves.toMatchObject({ data: [{ id: 10 }] });
+    expect(mock.calls).toHaveLength(2);
+  });
+
+  it("rejects a detail row whose id does not match the requested agent", async () => {
+    const page = agentPage([]);
+    const mock = new MockFetch(() =>
+      jsonResponse({ ...page, data: agent(11, "wrong detail") }),
+    );
+    const svc = new ExplorerService(config, { fetch: mock.fn });
+
+    await expect(svc.getAgent(10)).rejects.toThrow(/data\.id.*requested agent id/);
+  });
+
+  it("reports v1 identity as unattested and authenticates an exact response-level contract", async () => {
+    const noIdentity = new MockFetch(() => jsonResponse(agentPage([agent(10, "agent")])));
+    const unattestedService = new ExplorerService(config, { fetch: noIdentity.fn });
+    const unattested = await unattestedService.getAgents();
+    expect(unattestedService.identityAttestation(unattested)).toEqual({
+      status: "unattested",
+      limitation: "v1-identity-contract-unattested",
+    });
+
+    const body = agentPage([agent(10, "agent")]);
+    body.meta = {
+      ...body.meta,
+      contracts: { identity: config.stellar.contracts.identity },
+    } as typeof body.meta;
+    const exactService = new ExplorerService(config, {
+      fetch: new MockFetch(() => jsonResponse(body)).fn,
+    });
+    const exact = await exactService.getAgents();
+    expect(exactService.identityAttestation(exact)).toEqual({
+      status: "authenticated",
+      identityContract: config.stellar.contracts.identity,
+    });
+  });
+
+  it("fails closed when response-level Identity metadata names another contract", async () => {
+    const body = agentPage([agent(10, "agent")]);
+    body.meta = {
+      ...body.meta,
+      contracts: { identity: config.stellar.contracts.reputation },
+    } as typeof body.meta;
+    const svc = new ExplorerService(config, {
+      fetch: new MockFetch(() => jsonResponse(body)).fn,
+    });
+
+    await expect(svc.getAgents()).rejects.toThrow(/Identity contract.*does not match/);
   });
 });
 

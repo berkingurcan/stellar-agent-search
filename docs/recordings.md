@@ -125,12 +125,17 @@ Copy both hashes into [docs/evidence.md](evidence.md) §2 as
 
 ### If something goes wrong mid-take
 
-If the failure happened **before** `payment_submitted` was durably written, stop and restart the recording.
-After that marker exists, do not rerun the full script: a payment may already have settled. Preserve the named
-`.journal.jsonl`, reconcile the exact payment authorization or feedback transaction hash, and resume only the
-missing feedback/evidence stage under explicit operator review. A terminal `FEEDBACK_FAILED` may justify a new
-feedback transaction after its cause is fixed; it never justifies a second payment. Unknown feedback outcomes
-must be reconciled before any new feedback is submitted.
+If the lock is still in its pre-signing `locked` state and no `.payment-recovery.json` or
+`payment_submission_prepared` entry exists, first prove that no signed request left the process. Only then may an operator
+use the documented confirmed-reconciliation lock-release command and start a new take.
+
+Once the private `.payment-recovery.json` exists—or `payment_submission_prepared` was durably written—do **not**
+rerun the full script: a payment may already have settled. Preserve the 0600 artifact, `.journal.jsonl`, and lock;
+never show or upload the artifact because it contains exact signed payment material. Reconcile its authorization and
+transaction evidence against Stellar, then recover only the missing feedback/evidence stage through an explicitly
+reviewed manual procedure. Releasing the reconciled mutex does not delete the journal/artifact replay gate and does not
+authorize another payment. A terminal `FEEDBACK_FAILED` may justify a new feedback transaction after its cause is fixed;
+it never justifies a second payment. Unknown feedback outcomes must be reconciled before any new feedback is submitted.
 
 ---
 

@@ -7,13 +7,21 @@
   "engines": {
     "node": ">=22"
   },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "^22.18.0 || >=24.11.0",
+      "onFail": "error"
+    }
+  },
   "bin": {
     "stellar-agent-mcp": "dist/index.js"
   },
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "publishConfig": {
     "access": "public"
@@ -52,19 +60,19 @@
   "dependencies": {
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
-    "@stellar/stellar-sdk": "^15",
-    "@trionlabs/stellar8004": "0.0.11",
-    "@x402/core": "~2.20.0",
-    "@x402/fetch": "~2.20.0",
-    "@x402/stellar": "~2.20.0",
-    "dotenv": "^16.6.1",
+    "@stellar/stellar-sdk": "^16.0.1",
     "zod": "4.4.3"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
     "@types/node": "^22",
+    "@trionlabs/stellar8004": "0.0.11",
+    "@x402/core": "~2.20.0",
+    "@x402/fetch": "~2.20.0",
+    "@x402/stellar": "~2.20.0",
     "agents": "0.20.1",
     "ajv": "8.20.0",
+    "dotenv": "^16.6.1",
     "tsup": "^8",
     "typescript": "^5",
     "vitest": "^3",
@@ -72,6 +80,9 @@
   },
   "overrides": {
     "axios": "1.18.1",
-    "@hono/node-server": "^2.0.5"
+    "@hono/node-server": "^2.0.5",
+    "@trionlabs/stellar8004": {
+      "@stellar/stellar-sdk": "$@stellar/stellar-sdk"
+    }
   }
 }

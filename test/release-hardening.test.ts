@@ -20,9 +20,10 @@ describe("npm bootstrap name reservation", () => {
       expect(readdirSync(target).sort()).toEqual(["LICENSE", "README.md", "package.json"]);
 
       const pkg = JSON.parse(readFileSync(join(target, "package.json"), "utf8")) as Record<string, unknown>;
+      const sourcePkg = JSON.parse(read("package.json")) as { mcpName: string };
       expect(pkg.name).toBe("stellar-agent-mcp");
       expect(pkg.version).toBe("0.0.0");
-      expect(pkg.mcpName).toBe("io.github.berkingurcan/stellar-agent-mcp");
+      expect(pkg.mcpName).toBe(sourcePkg.mcpName);
       expect(pkg.publishConfig).toEqual({ access: "public", tag: "bootstrap" });
       for (const field of ["bin", "scripts", "dependencies", "devDependencies", "optionalDependencies"]) {
         expect(pkg, `${field} would make the reservation executable`).not.toHaveProperty(field);
@@ -76,15 +77,59 @@ describe("npm bootstrap name reservation", () => {
 });
 
 describe("real release fail-closed gates", () => {
+  it("locks every first-release runbook to owner -> private bootstrap -> public -> protected OIDC", () => {
+    const canonicalOrder =
+      "canonical owner/transfer while private → inert `0.0.0` reservation under the non-default `bootstrap` tag while private → public repository → protected OIDC real release";
+    const releaseDocs = [
+      "CONTRIBUTING.md",
+      "instruction.md",
+      "docs/evidence.md",
+      "issues/P0-01-make-repository-public.md",
+      "issues/P0-03-first-npm-publish.md",
+      "issues/README.md",
+    ];
+
+    for (const path of releaseDocs) {
+      const normalized = read(...path.split("/")).replace(/\s+/g, " ");
+      expect(normalized, `${path} contradicts the canonical first-release order`).toContain(canonicalOrder);
+    }
+    expect(read("CONTRIBUTING.md")).not.toContain(
+      "1. **The repository must be public.**",
+    );
+    expect(read("docs", "evidence.md")).not.toContain(
+      "Flip it before sending this to a reviewer",
+    );
+  });
+
   it("advertises and enforces the x402 dependency chain's Node 22 runtime floor", () => {
-    const pkg = JSON.parse(read("package.json")) as { engines: { node: string } };
+    const pkg = JSON.parse(read("package.json")) as {
+      engines: { node: string };
+      devEngines: { runtime: { name: string; version: string; onFail: string } };
+    };
     const lock = JSON.parse(read("package-lock.json")) as {
-      packages: Record<string, { engines?: { node?: string } }>;
+      packages: Record<
+        string,
+        {
+          engines?: { node?: string };
+          devEngines?: { runtime?: { name?: string; version?: string; onFail?: string } };
+        }
+      >;
     };
     const ci = read(".github", "workflows", "ci.yml");
 
     expect(pkg.engines.node).toBe(">=22");
     expect(lock.packages[""]?.engines?.node).toBe(">=22");
+    expect(pkg.devEngines.runtime).toEqual({
+      name: "node",
+      version: "^22.18.0 || >=24.11.0",
+      onFail: "error",
+    });
+    expect(lock.packages[""]?.devEngines?.runtime).toEqual(pkg.devEngines.runtime);
+    expect(read(".node-version").trim()).toBe("22.18.0");
+    expect(JSON.parse(read("worker", "package.json")).engines.node).toBe(
+      "^22.18.0 || >=24.11.0",
+    );
+    expect(read("CONTRIBUTING.md")).toContain("Node.js `^22.18.0` or `>=24.11.0`");
     expect(read("scripts", "release", "validate-release.mjs")).toContain(
       'pkg.engines?.node === ">=22"',
     );
@@ -114,6 +159,8 @@ describe("real release fail-closed gates", () => {
   it("protects OIDC publication and reuses the exact consumer-tested tarball", () => {
     const workflow = read(".github", "workflows", "publish.yml");
     expect(workflow).toContain("environment: npm-production");
+    expect(workflow).toContain('[[ "$GITHUB_REPOSITORY" != "$repository_slug" ]]');
+    expect(workflow).toContain('[[ "$EXPECTED_REPOSITORY_URL" != "$repository_url" ]]');
     expect(workflow).toContain("git merge-base --is-ancestor");
     expect(workflow).toContain("npm run typecheck");
     expect(workflow).toContain("NPM_PACKAGE_OWNERS");
@@ -127,6 +174,9 @@ describe("real release fail-closed gates", () => {
     expect(workflow).toContain('npm publish "${{ steps.pack.outputs.path }}" --ignore-scripts --access public');
     expect(workflow).toContain("/v0.1/servers/$encoded_name/versions/$encoded_version");
     expect(workflow).toContain("verify-mcp-registry.mjs");
+    expect(read("scripts", "release", "validate-release.mjs")).toContain(
+      "package.json mcpName must derive from the canonical GitHub owner/repository",
+    );
   });
 
   it("documents the exact npm publisher filename, environment, and post-publish landing gate", () => {
@@ -135,6 +185,10 @@ describe("real release fail-closed gates", () => {
     expect(runbook).toContain("environment name: **`npm-production`**");
     expect(runbook).toContain("`web/src/lib/install.ts`");
     expect(runbook).toContain("Never manually publish `0.1.0`");
+    expect(runbook).toContain("P1-06");
+    expect(runbook).toContain("npm audit --omit=dev --audit-level=high");
+    expect(runbook).toContain("<set-after-owner-decision>");
+    expect(runbook).not.toContain("organization/user: `berkingurcan`");
     expect(runbook.indexOf("Reserve the npm name once")).toBeLessThan(
       runbook.indexOf("Make the canonical repository public"),
     );
@@ -142,12 +196,19 @@ describe("real release fail-closed gates", () => {
     const landing = read("web", "src", "routes", "+page.svelte");
     const installSelector = read("web", "src", "lib", "install.ts");
     const pendingSurface = read("web", "src", "lib", "install-pending.ts");
+    const publishedSurface = read("web", "src", "lib", "install-published.ts");
+    const releaseSurfaceCheck = read("web", "scripts", "assert-release-surface.mjs");
     const webPackage = JSON.parse(read("web", "package.json")) as { scripts: Record<string, string> };
-    expect(landing).not.toContain('code="npx -y stellar-agent-mcp@0.1.0');
-    expect(landing).toContain("Install command withheld until the npm package");
+    expect(landing).not.toContain('code="npx -y stellar-agent-mcp@');
+    expect(landing).toContain("source and install links stay withheld");
     expect(installSelector).toContain("export * from './install-pending.js'");
     expect(pendingSurface).toContain("export const PACKAGE_PUBLISHED = false");
     expect(pendingSurface).not.toContain("npx");
+    expect(publishedSurface).toContain("packageMetadata.version");
+    expect(publishedSurface).not.toContain("stellar-agent-mcp@0.1.0");
+    expect(releaseSurfaceCheck).toContain("rootPackage.version");
+    expect(releaseSurfaceCheck).toContain("private repository or unclaimed npm package");
+    expect(releaseSurfaceCheck).not.toContain("0\\.1\\.0");
     expect(webPackage.scripts.deploy).toContain("npm run check:release-surface");
   });
 });

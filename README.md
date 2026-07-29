@@ -13,6 +13,13 @@
 > shows a release owned by this project. Once installed, `setup` pins the exact package version in persistent
 > MCP client configuration rather than executing a mutable `latest` tag on every launch.
 
+There are two official interfaces, not two copies of the stack. TypeScript applications, registration, and
+signed writes use the canonical [`@trionlabs/stellar8004`](https://www.npmjs.com/package/@trionlabs/stellar8004)
+SDK from `trionlabs/stellar-8004`; MCP clients and terminal discovery use this package, which exact-pins that
+SDK internally. The upstream repo's restricted Supabase Studio `/mcp` is database-operator tooling behind
+SSH/IP controls, not an agent-registry MCP and must never be exposed as this runtime. See
+[the integration boundary](docs/stellar8004-integration.md).
+
 A **read-only, keyless** MCP server (and human CLI) that lets an AI agent — or you — **discover, rank, and
 vet on-chain [stellar-8004](https://stellar8004.com) agents** on Stellar mainnet, then prepare an x402
 (USDC pay-per-call) payment. One binary speaks the [Model Context Protocol](https://modelcontextprotocol.io)
@@ -153,11 +160,12 @@ All configuration is via environment variables (canonical for MCP mode); CLI fla
 | `EXPLORER_BASE_URL` | `https://stellar8004.com` | Explorer HTTP API base. **Indexes mainnet only** |
 | `STELLAR_RPC_URL` | `https://mainnet.sorobanrpc.com` | Soroban RPC for the bounded Reputation-contract reachability probe |
 | `VERIFY_ONCHAIN` | `true` | Set `false` to skip the probe; reputation remains declared-only either way |
-| `RANK_SCORE_MAX` | `100` | Normalization scale for the displayed ranking quality axis; raw averages may be fractional |
+| `RANK_SCORE_MAX` | `100` | Fixed v1 compatibility assertion; any value other than `100` is rejected |
 
-Ranking uses the fixed, versioned `stellar-agent-mcp-declared-evidence-v1` policy: normalized indexed average
-multiplied by `0.4 × capped volume + 0.6 × effective breadth`. Legacy `RANK_W_*` variables are rejected so a deployment
-cannot silently redefine published score semantics.
+Ranking uses the fixed, versioned `stellar-agent-mcp-declared-evidence-v1` policy: indexed average normalized
+against exactly `100`, multiplied by `0.4 × capped volume + 0.6 × effective breadth`. Both a changed
+`RANK_SCORE_MAX` and legacy `RANK_W_*` variables are rejected so a deployment cannot silently redefine
+published score semantics.
 
 `STELLAR_PRIVATE_KEY` is **intentionally ignored** if present (and warned about on stderr) — this server is
 keyless by construction.

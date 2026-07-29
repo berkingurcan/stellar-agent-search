@@ -161,6 +161,7 @@ The current v1 integration is useful and intentionally honest, but not globally 
 |---|---|
 | Read boundary | `ExplorerService` wraps the upstream `ExplorerClient`; there is no Supabase dependency |
 | Network | Mainnet by default; testnet requires an explicit Explorer URL rather than silently reading mainnet |
+| Registry identity | v1 metadata names chain/network but not the exact Identity contract; the MCP treats that contract scope as unattested rather than trusting the hostname |
 | Filters | MCP `x402`, `mpp`, `hasServices`, `trust`, and explicit `minExplorerScore` are sent to the v1 list (`minExplorerScore` maps to upstream `minScore`; it is not local rank) |
 | Text | The v1 list projection omits `services[]`, so the bounded first-pass stem match can use only fetched agent name/description; service text is not globally searchable today |
 | Pagination | v1 uses page/offset pagination; every MCP walk has a hard page cap |
@@ -186,6 +187,17 @@ offset-paginated with no revision cursor, every v1 result is conservatively `sna
 as `paginationExhausted: true`; it is useful progress evidence, not a global-completeness proof. The v2 contract
 below moves filtering, text retrieval, stable ordering, and cursor pagination to the canonical indexed read
 boundary.
+
+The SDK's TypeScript response types are not runtime validation. `ExplorerService` therefore validates every
+agent list/search/owner/detail row before caching it: agent ids stay u32 integers, owners must be valid Stellar
+G- or C-addresses, boolean capability fields must actually be booleans, and aggregate fields must be finite/safe.
+It also recognizes explicit response-level `meta.contracts.identity` (and the compatibility alias
+`meta.identityContract`): a supplied value must exactly match the configured SDK Identity contract or the
+read fails closed. The live v1 API did not expose either field when checked on 2026-07-29, so ordinary v1
+discovery remains available but `identityAttestation()` returns `unattested`; configuration, network, and a
+canonical-looking hostname are not promoted to registry-contract verification. Upstream attestation and the
+eventual required-field rollout are tracked in
+[P1-18](../issues/P1-18-upstream-registry-contract-attestation.md).
 
 Two other v1 limits remain explicit:
 

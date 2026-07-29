@@ -10,6 +10,7 @@ import {
   createWorker,
   estimateUpstreamCost,
   heavyToolCallCount,
+  hasKnownSensitiveRuntimeBinding,
   type EdgeCache,
   type RateLimitBinding,
   type ServiceBinding,
@@ -857,6 +858,34 @@ describe("Explorer Service Binding egress", () => {
 });
 
 describe("health and real MCP factory smoke", () => {
+  it("rejects known credential/database bindings on both routes without reflecting their names", async () => {
+    const worker = createWorker({ cache: null });
+    const binding = new ThrowingBinding();
+    const sensitiveNames = [
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "DATABASE_URL",
+      "STELLAR_PRIVATE_KEY",
+      "OBSERVABILITY_API_KEY",
+    ];
+
+    for (const name of sensitiveNames) {
+      const env = Object.assign(workerEnv(binding), { [name]: "must-not-be-readable" });
+      expect(hasKnownSensitiveRuntimeBinding(env)).toBe(true);
+      for (const request of [
+        new Request("http://localhost/healthz"),
+        legacyRequest(initializeBody),
+      ]) {
+        const response = await worker.fetch(request, env, new TestContext());
+        expect(response.status).toBe(503);
+        const body = await response.text();
+        expect(body).not.toContain(name);
+        expect(body).not.toContain("must-not-be-readable");
+      }
+    }
+    expect(hasKnownSensitiveRuntimeBinding(workerEnv(binding))).toBe(false);
+    expect(binding.calls).toBe(0);
+  });
+
   it("keeps /healthz upstream- and limiter-free", async () => {
     const binding = new ThrowingBinding();
     const limiter = new FakeLimiter(undefined, true);

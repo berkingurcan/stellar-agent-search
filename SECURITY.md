@@ -45,6 +45,12 @@ These are enforced in code and CI, not merely documented:
 5. **No database shortcut.** The remote Worker calls the existing `stellar8004-web` API through a restricted
    Service Binding. It has no Supabase URL, service-role key, or direct database client and does not maintain
    a shadow indexer. The existing indexer/Supabase projection stays canonical.
+6. **Persisted Worker secrets are deployment state, not config state.** Wrangler can preserve dashboard/API
+   secrets that do not appear in `wrangler.jsonc`. The deploy lifecycle therefore inventories the exact remote
+   Worker with `wrangler secret list --format json` and allows only the checked-in safe-name allowlist (empty by
+   default). Command/auth/network/schema failures block deploy; the missing-Worker result is accepted only by
+   the explicit first-deploy command. Runtime also rejects known credential/database binding names without
+   reflecting them in the response.
 
 ---
 

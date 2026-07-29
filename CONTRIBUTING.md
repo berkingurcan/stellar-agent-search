@@ -15,12 +15,14 @@ npm test           # vitest
 npm run typecheck  # tsc --noEmit
 ```
 
-Requires **Node.js ≥ 22**. No API keys, no wallet, no `.env` needed — the defaults read Stellar **mainnet**.
+The published CLI supports **Node.js ≥ 22**. This repository's contributor/build toolchain requires
+**Node.js `^22.18.0` or `>=24.11.0`** and `.node-version` pins the minimum supported contributor release. No API
+keys, wallet, or `.env` are needed — the defaults read Stellar **mainnet**.
 
 Try it end to end without installing anything into a client:
 
 ```bash
-node dist/index.js doctor              # self-check: env, explorer, RPC, on-chain verify
+node dist/index.js doctor              # self-check: env, explorer, RPC, bounded contract reachability
 node dist/index.js find "web scraper"  # the CLI surface
 node dist/index.js                     # the MCP stdio surface (speaks JSON-RPC; Ctrl-C to exit)
 ```
@@ -34,7 +36,7 @@ node dist/index.js                     # the MCP stdio surface (speaks JSON-RPC;
 | `src/tools/` | One file per tool, plus `shared.ts` (cross-tool adapters) and `schemas.ts` (zod) |
 | `src/resources/` | The `stellar8004://` resource layer |
 | `src/prompts/` | Slash-command workflow templates |
-| `src/lib/` | Core logic: `explorer` (registry reads), `reputation` (on-chain verify), `ranking`, `sanitize`, `nlparse`, `agentcard`, `identifier` |
+| `src/lib/` | Core logic: `explorer` (registry reads), `reputation` (fail-closed contract probe), `ranking`, `sanitize`, `nlparse`, `agentcard`, `identifier` |
 | `src/cli/` | Human terminal surface |
 | `examples/` | `x402-demo.ts` — the *only* keyed code in the repo, run manually |
 | `test/` | vitest suites, including the invariant tests below |
@@ -136,12 +138,19 @@ release validator enforce the machine-readable surfaces; review the complete pin
 
 ### First release — one-time setup
 
-The tag-driven path needs two things that only exist after a first publish:
+**Mandatory first-release order:** canonical owner/transfer while private → inert `0.0.0` reservation under
+the non-default `bootstrap` tag while private → public repository → protected OIDC real release.
 
-1. **The repository must be public.** npm provenance is generated from a public source, and the MCP Registry's
-   GitHub OIDC login expects a public repository.
-2. **Reserve the name with a non-install-default bootstrap version.** Trusted Publisher configuration requires
-   the package to exist. Generate an inert `0.0.0` package outside the repository: it contains only
+Do not swap the middle steps: making prepared `npx` commands public while the npm name is unclaimed creates a
+supply-chain takeover window, while a real provenance-backed publish requires the final repository to be
+public. Execute the one-time setup in this order:
+
+1. **Finalize the canonical owner while the repository remains private.** Decide between the recommended
+   `trionlabs/stellar-agent-mcp` transfer and the explicitly accepted personal namespace, perform any transfer,
+   then update and validate every repository/MCP/npm identity-bearing file. Do not reserve npm under a
+   temporary owner and do not make the repository public yet.
+2. **Reserve the name while the repository is still private.** Trusted Publisher configuration requires the
+   package to exist. Generate an inert `0.0.0` package outside the repository: it contains only
    `package.json`, `README.md`, and `LICENSE`, while its `publishConfig` forces the non-`latest` `bootstrap`
    dist-tag. Inspect and publish that placeholder, not a version-rewritten copy of the real runtime:
 
@@ -160,14 +169,18 @@ The tag-driven path needs two things that only exist after a first publish:
    ```
 
    Do not publish `0.1.0` manually: that release must come from OIDC so it has verifiable provenance.
-3. **Configure npm Trusted Publishing.** In the package settings, select GitHub Actions, repository
-   `berkingurcan/stellar-agent-mcp`, and workflow filename **`publish.yml`** (the npm field takes the filename,
+3. **Only after the inert reservation is independently visible, make the canonical repository public.** Verify
+   logged-out source access and confirm the repository identity still matches the reserved package owner.
+   npm provenance and MCP Registry GitHub OIDC require this public source.
+4. **Configure and protect npm Trusted Publishing.** Create and protect GitHub environment
+   **`npm-production`** first. Then, in npm package settings, select GitHub Actions, the exact canonical
+   owner/repository chosen in step 1, and workflow filename **`publish.yml`** (the npm field takes the filename,
    not `.github/workflows/publish.yml`). Set environment name **`npm-production`** and allow `npm publish` only.
    Restrict token publishing after the OIDC path succeeds.
-4. **Set the repository Actions variable `NPM_PACKAGE_OWNERS`.** Its comma-separated value must be the exact
+5. **Set the repository Actions variable `NPM_PACKAGE_OWNERS`.** Its comma-separated value must be the exact
    npm maintainer allowlist (usually the one account that performed the bootstrap). The workflow refuses both
    a missing variable and an unexpected extra owner.
-5. **Protect the GitHub `npm-production` environment.** Require a second reviewer, prevent self-review, allow
+6. **Verify the `npm-production` protection.** Require a second reviewer, prevent self-review, allow
    only selected tags matching `v*`, and disable administrator bypass. A YAML environment reference alone does
    not create those rules; a solo maintainer needs a second trusted repository reviewer.
 
