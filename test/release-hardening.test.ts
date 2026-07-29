@@ -79,7 +79,7 @@ describe("npm bootstrap name reservation", () => {
 describe("real release fail-closed gates", () => {
   it("locks every first-release runbook to owner -> private bootstrap -> public -> protected OIDC", () => {
     const canonicalOrder =
-      "canonical owner/transfer while private → inert `0.0.0` reservation under the non-default `bootstrap` tag while private → public repository → protected OIDC real release";
+      "private move to selected owner `berkingurcan` → inert `0.0.0` reservation under the non-default `bootstrap` tag while private → public repository → protected OIDC real release";
     const releaseDocs = [
       "CONTRIBUTING.md",
       "instruction.md",
@@ -218,8 +218,8 @@ describe("real release fail-closed gates", () => {
     expect(runbook).toContain("Never manually publish `0.1.0`");
     expect(runbook).toContain("P1-06");
     expect(runbook).toContain("npm audit --omit=dev --audit-level=high");
-    expect(runbook).toContain("<set-after-owner-decision>");
-    expect(runbook).not.toContain("organization/user: `berkingurcan`");
+    expect(runbook).toContain("canonical_owner='berkingurcan'");
+    expect(runbook).toContain("organization/user: **`berkingurcan`**");
     expect(runbook.indexOf("Reserve the npm name once")).toBeLessThan(
       runbook.indexOf("Make the canonical repository public"),
     );

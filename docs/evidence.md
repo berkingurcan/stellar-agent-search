@@ -14,13 +14,13 @@ checked in a browser in about five minutes.
 > the reviewer can see exactly what is outstanding rather than having to infer it.
 
 > [!IMPORTANT]
-> **The repository is currently private.** Every link on this page returns 404 to anyone who is not a
-> collaborator, and the SOW requires a *public* MIT repository. Do **not** flip visibility yet: first finalize
-> the canonical owner and reserve the npm name with the inert, non-install-default `bootstrap: 0.0.0` package
-> while the repository remains private. Only after that reservation is independently verified should an owner
-> make the repository public; then configure the protected OIDC publisher and perform the real release.
+> **`berkingurcan` is the selected canonical owner, but the repository move and public release are not done.**
+> The target links on this page therefore still return 404. Move/create the private destination first, then
+> reserve the npm name with the inert, non-install-default `bootstrap: 0.0.0` package. Only after that
+> reservation is independently verified should the destination become public; then configure the protected
+> OIDC publisher and perform the real release.
 
-**Mandatory first-release order:** canonical owner/transfer while private → inert `0.0.0` reservation under
+**Mandatory first-release order:** private move to selected owner `berkingurcan` → inert `0.0.0` reservation under
 the non-default `bootstrap` tag while private → public repository → protected OIDC real release.
 
 ---
@@ -46,7 +46,7 @@ Anything deeper — installing the server, running the demo — is covered below
 
 | Evidence required by SOW | Status | Link |
 |---|---|---|
-| Public GitHub repository | 🟡 | [github.com/berkingurcan/stellar-agent-mcp](https://github.com/berkingurcan/stellar-agent-mcp) — code complete and MIT-licensed, but **visibility is still private**; see the note at the top |
+| Public GitHub repository | 🟡 | [github.com/berkingurcan/stellar-agent-mcp](https://github.com/berkingurcan/stellar-agent-mcp) — canonical owner selected; repository transfer/creation and public visibility are still pending |
 | npm package | ⬜ | `‹npmjs.com/package/stellar-agent-mcp — after publish›` |
 | Screen recording of the 4 tools in Claude Code | ⬜ | `‹recording link›` |
 | Tool reference docs | ✅ | [docs/tools.md](tools.md) |
@@ -166,7 +166,7 @@ cannot silently erode.
 |---|---|---|
 | Skill package install command | 🟡 | [`skills/mcp/SKILL.md`](../skills/mcp/SKILL.md) — served from this repository; `main` is now the default branch, so **the command resolves as soon as the repo is public** (outstanding item 01) |
 | One-command MCP bootstrap | 🟡 | [`src/cli/setup.ts`](../src/cli/setup.ts) + [`test/setup.test.ts`](../test/setup.test.ts) — implemented and covered by local tests for Claude, Cursor, and Codex, but real clean-environment evidence still requires the first npm publish and Recording 3 |
-| Developer docs URL | 🟡 | [Repository docs](https://github.com/berkingurcan/stellar-agent-mcp#readme) — files are complete locally, but the URL is not independently accessible until the repository is public |
+| Developer docs URL | 🟡 | [Repository docs](https://github.com/berkingurcan/stellar-agent-mcp#readme) — files are complete locally, but the URL is not independently accessible until the repository is transferred/created and made public |
 | Install + usage screen recording | ⬜ | `‹recording link›` |
 
 ### One-command MCP bootstrap and optional skill acquisition
@@ -275,7 +275,7 @@ file per item under [`issues/`](../issues/); this table is the ordering, not a s
 
 | # | Item | Unblocks |
 |---|---|---|
-| [01 phase A](../issues/P0-01-make-repository-public.md) | Finalize canonical owner/transfer while private | Stable GitHub/npm/MCP provenance identity |
+| [01 phase A](../issues/P0-01-make-repository-public.md) | Transfer/create the private repo under selected owner `berkingurcan` | Stable GitHub/npm/MCP provenance identity |
 | [02](../issues/P0-02-set-default-branch-to-main.md) | Default branch is `main`; delete the still-present stale working branch | Repository hygiene; no longer blocks default-branch installs |
 | [03 phase A](../issues/P0-03-first-npm-publish.md) | Reserve inert `bootstrap: 0.0.0` while private | Safe public visibility without advertising an unclaimed command |
 | [01 phase B](../issues/P0-01-make-repository-public.md) | Make the finalized canonical repository public | Anonymous review, npm provenance, and MCP Registry OIDC |
