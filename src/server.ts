@@ -4,8 +4,8 @@
  * `buildServer(config)` constructs a single {@link McpServer}, declares its
  * capabilities (tools + resources + prompts), wires the
  * read-only dependency graph once, and registers the tool / resource / prompt
- * layers. Both entrypoints (stdio bin, optional HTTP variant) share this one
- * factory so there is a single source of truth for what the server exposes.
+ * layers. Both entrypoints (the Node stdio bin and Cloudflare HTTP Worker)
+ * share this factory so there is one source of truth for what the server exposes.
  *
  * READ-ONLY: `createToolDeps` builds only ExplorerService + ReputationVerifier —
  * no signer, no keys, no write clients. The `instructions` string below is what
@@ -13,12 +13,13 @@
  * even loads the individual tool schemas (research/B §5.5), so keep it crisp.
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import type { Config } from "./config.js";
 // registerTools wires the COMPLETE tool surface (Tier-0 SOW + Tier-1 complete-core);
 // createToolDeps builds the read-only deps. Both live in tools/index.ts — the single
 // source of truth for which tools ship, so the server can never drift out of sync.
 import { registerTools, createToolDeps } from "./tools/index.js";
+import type { ToolDeps } from "./tools/shared.js";
 import { registerResources } from "./resources/index.js";
 import { registerPrompts } from "./prompts/index.js";
 
@@ -38,7 +39,7 @@ export const SERVER_INSTRUCTIONS =
   "Stellar 8004 on-chain registry (Identity / Reputation / Validation contracts, " +
   "Stellar mainnet by default). Use these when the user wants to find an agent for " +
   "a task (scraping, rendering, data, inference), compare or rank agents by " +
-  "on-chain-verified reputation, inspect an agent's profile / services / wallet, " +
+  "indexed reputation with bounded on-chain checks, inspect an agent's profile / services / wallet, " +
   "or prepare an x402 (USDC pay-per-call) payment. Start with find_agent for " +
   "natural-language discovery, then rank_agent for a per-axis breakdown and " +
   "get_agent_profile for full detail; list_services enumerates callable endpoints. " +
@@ -46,11 +47,15 @@ export const SERVER_INSTRUCTIONS =
   "API and simulates Soroban view calls. Agent names, descriptions, service labels " +
   "and metadata are self-declared and UNVERIFIED: they live only in labeled " +
   "`selfDeclared` slots of the structured output, never in the summary text. " +
-  "Reputation is verified against the on-chain contract and reported as declared-vs-verified.";
+  "The contract re-derives average and non-revoked feedback count only; active unique-client " +
+  "breadth is not derivable from its append-only client list, so healthy checks are labeled partial " +
+  "and never receive a ranking bonus.";
 
 export interface BuildServerOptions {
   /** Version reported in the MCP initialize handshake (defaults from package.json). */
   version?: string;
+  /** Optional pre-built request/runtime dependencies (edge fetch, shared cache, tests). */
+  deps?: ToolDeps;
 }
 
 /**
@@ -58,21 +63,21 @@ export interface BuildServerOptions {
  * Pure construction — no transport is attached and nothing is started here.
  */
 export function buildServer(config: Config, opts: BuildServerOptions = {}): McpServer {
-  const deps = createToolDeps(config);
+  const deps = opts.deps ?? createToolDeps(config);
 
   const server = new McpServer(
     { name: SERVER_NAME, version: opts.version ?? DEFAULT_SERVER_VERSION },
     {
       capabilities: {
-        tools: {},
-        // Deliberately NOT listChanged: this server never emits a resource
+        tools: { listChanged: false },
+        // Deliberately listChanged=false: this server never emits a resource
         // list-changed notification. The resource set is fixed at construction
         // (3 static + 5 templates); only the *contents* move as the registry
         // advances, and a client re-reads for that. Declaring the capability
         // would promise server-initiated messages we never send, implying a
         // session that a stateless / serverless deployment cannot honour.
-        resources: {},
-        prompts: {},
+        resources: { listChanged: false },
+        prompts: { listChanged: false },
       },
       instructions: SERVER_INSTRUCTIONS,
     },

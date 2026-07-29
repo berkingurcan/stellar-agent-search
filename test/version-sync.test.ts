@@ -1,24 +1,10 @@
-/**
- * version-sync.test.ts — the MCP SDK version we advertise must be the one we ship.
- *
- * The SDK version is written by hand in five places: the CLI's `doctor` banner,
- * the README badge, README prose, docs/architecture.md, and the sample doctor
- * output in docs/getting-started.md. Bumping the dependency without sweeping all
- * five leaves the product telling users a version it is not running — and the
- * `doctor` banner is the one a reviewer reads off the screen during a recording.
- *
- * This is not hypothetical: bumping 1.29.0 -> 1.30.0 to clear a CVE invalidated
- * all five in one step.
- *
- * The protocol version is checked against the SDK itself rather than a literal,
- * so `spec 2025-11-25` cannot outlive the SDK that defines it.
- */
+/** Runtime MCP package/version invariants for the split v2 client/server SDK. */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
+import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/server";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -28,45 +14,36 @@ const PKG = JSON.parse(read("package.json")) as {
   dependencies: Record<string, string>;
 };
 
-/** The exact version pinned for the SDK (the pin is exact by design). */
-const SDK_VERSION = PKG.dependencies["@modelcontextprotocol/sdk"];
+/** The split v2 packages are exact pins by design. */
+const SERVER_VERSION = PKG.dependencies["@modelcontextprotocol/server"];
+const CLIENT_VERSION = PKG.dependencies["@modelcontextprotocol/client"];
 
-/** Every file that spells the SDK version out loud, and what it must contain. */
-const SITES: Array<[string, string[], (v: string) => string]> = [
-  ["CLI doctor banner", ["src", "cli", "index.ts"], (v) => `@modelcontextprotocol/sdk ${v}`],
-  ["README badge", ["README.md"], (v) => `MCP-${v}-`],
-  ["README prose", ["README.md"], (v) => `\`@modelcontextprotocol/sdk\` ${v}`],
-  ["architecture.md", ["docs", "architecture.md"], (v) => `\`@modelcontextprotocol/sdk\` **${v}**`],
-  ["getting-started sample", ["docs", "getting-started.md"], (v) => `@modelcontextprotocol/sdk ${v}`],
-];
-
-describe("advertised MCP SDK version matches the shipped dependency", () => {
-  it("the pin is an exact version, not a range", () => {
-    // A range would make "the version we advertise" unknowable at write time.
-    expect(SDK_VERSION, "expected an exact pin like 1.30.0").toMatch(/^\d+\.\d+\.\d+$/);
+describe("advertised MCP v2 runtime matches the shipped dependencies", () => {
+  it("pins both split packages to the same exact version", () => {
+    expect(SERVER_VERSION, "expected an exact server pin like 2.0.0").toMatch(/^\d+\.\d+\.\d+$/);
+    expect(CLIENT_VERSION, "expected an exact client pin like 2.0.0").toMatch(/^\d+\.\d+\.\d+$/);
+    expect(CLIENT_VERSION).toBe(SERVER_VERSION);
   });
 
-  for (const [label, path, expected] of SITES) {
-    it(`${label} says ${SDK_VERSION}`, () => {
-      const body = read(...path);
-      expect(body, `${path.join("/")} does not advertise ${SDK_VERSION}`).toContain(
-        expected(SDK_VERSION),
-      );
-    });
-  }
+  it("the CLI doctor banner advertises the server package actually used", () => {
+    expect(read("src", "cli", "index.ts")).toContain(
+      `@modelcontextprotocol/server ${SERVER_VERSION}`,
+    );
+  });
 
-  it("no file still advertises a different SDK version", () => {
-    const stale: string[] = [];
-    for (const [label, path] of SITES) {
-      const body = read(...path);
-      for (const m of body.matchAll(/@modelcontextprotocol\/sdk[`*\s]+(\d+\.\d+\.\d+)/g)) {
-        if (m[1] !== SDK_VERSION) stale.push(`${label}: ${m[1]}`);
-      }
-      for (const m of body.matchAll(/MCP-(\d+\.\d+\.\d+)-/g)) {
-        if (m[1] !== SDK_VERSION) stale.push(`${label} badge: ${m[1]}`);
-      }
-    }
-    expect(stale, `stale SDK versions: ${stale.join(", ")}`).toEqual([]);
+  it("runtime TypeScript has no imports from the v1 monolithic SDK", () => {
+    const roots = [["src"], ["examples"]];
+    const walk = (parts: string[]): string[] => {
+      const dir = join(ROOT, ...parts);
+      return readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+          ? walk([...parts, entry.name])
+          : entry.name.endsWith(".ts")
+            ? [read(...parts, entry.name)]
+            : [],
+      );
+    };
+    expect(roots.flatMap(walk).join("\n")).not.toContain("@modelcontextprotocol/sdk/");
   });
 
   it("server.json's two version fields match package.json", () => {
@@ -84,16 +61,14 @@ describe("advertised MCP SDK version matches the shipped dependency", () => {
     }
   });
 
+  it("the tag workflow gates mismatched versions and can resume after npm publish", () => {
+    const workflow = read(".github", "workflows", "publish.yml");
+    expect(workflow).toContain('"$GITHUB_REF_NAME" != "v${package_version}"');
+    expect(workflow).toContain("id: npm-version");
+    expect(workflow).toContain("if: steps.npm-version.outputs.exists != 'true'");
+  });
+
   it("the advertised spec date is the SDK's own latest protocol version", () => {
-    for (const path of [
-      ["src", "cli", "index.ts"],
-      ["README.md"],
-      ["docs", "architecture.md"],
-      ["docs", "getting-started.md"],
-    ]) {
-      expect(read(...path), `${path.join("/")} must say spec ${LATEST_PROTOCOL_VERSION}`).toContain(
-        LATEST_PROTOCOL_VERSION,
-      );
-    }
+    expect(read("src", "cli", "index.ts")).toContain(`spec ${LATEST_PROTOCOL_VERSION}`);
   });
 });

@@ -22,23 +22,25 @@ agent-authored free text lives inside labeled `selfDeclared` slots (see
 ### `find_agent`
 
 Natural-language discovery of on-chain stellar-8004 agents → a ranked list. The query is parsed
-deterministically; explicit args override inferred filters. Candidates are fetched via the explorer's
-`getAgents({search})` plus client-side filtering (the raw `/search` substring-matches poorly and has no
-score sort), then ranked client-side.
+deterministically; explicit args override inferred filters. Structured filters are sent to the explorer,
+then a bounded candidate window is text-filtered and ranked client-side because the raw `/search`
+substring-matches poorly and has no score sort.
 
 | Input | Type | Default | Notes |
 |---|---|---|---|
 | `query` | string (min 1) | — | **Required.** e.g. `"a paid web scraper with a good reputation"` |
 | `limit` | int 1–50 | `10` | Max rows returned |
 | `x402` | boolean | — | Require x402 (USDC pay-per-call) support |
-| `mpp` | boolean | — | Require MPP micropayments (filtered client-side) |
+| `mpp` | boolean | — | Require MPP micropayments (filtered by the explorer) |
 | `hasServices` | boolean | — | Require invokable service endpoints |
 | `trust` | `reputation`\|`validation`\|`tee` | — | Require a trust model |
 | `minScore` | number 0–100 | — | Minimum declared reputation |
 | `sortBy` | `relevance`\|`score`\|`confidence`\|`newest` | `relevance` | Ordering |
 | `verify` | boolean | `false` | On-chain-verify the top results (slower; off for discovery) |
 
-**Output:** `{ interpretedQuery: { keywords, filters, matched }, count, agents: RankedAgent[] }`.
+**Output:** `{ interpretedQuery: { keywords, filters, matched }, count, agents: RankedAgent[], coverage }`.
+`coverage` is `{ coverageComplete, pagesScanned, recordsScanned, hasMore? }`; callers must not interpret a
+ranked window as a global result when `coverageComplete` is false.
 
 ### `rank_agent`
 
@@ -55,8 +57,8 @@ verification. This is where declared-vs-verified is most visible. Provide **exac
 | `verify` | boolean | `true` | On-chain-verify (default on for explicit ranking) |
 | `sortBy` | `relevance`\|`score`\|`confidence`\|`newest` | `relevance` | Ordering |
 
-**Output:** `{ weights: {quality,volume,breadth}, count, agents: RankedAgent[] }` — each row includes the
-full per-axis `breakdown`.
+**Output:** `{ weights: {quality,volume,breadth}, count, agents: RankedAgent[], coverage? }` — each row includes
+the full per-axis `breakdown`. `coverage` is present for query-based ranking and absent for explicit ids.
 
 ### `get_agent_profile`
 
@@ -83,14 +85,15 @@ agent's typed capability, trust model, and ranked score. `hasServices: true` is 
 |---|---|---|---|
 | `search` | string | — | Free-text filter over agent name/description |
 | `x402` | boolean | — | Only x402 services |
-| `mpp` | boolean | — | Only MPP services (filtered client-side) |
+| `mpp` | boolean | — | Only MPP services (filtered by the explorer) |
 | `trust` | `reputation`\|`validation`\|`tee` | — | Trust model |
 | `minScore` | number 0–100 | — | Minimum declared reputation |
 | `limit` | int 1–50 | `20` | Agents per page |
 | `page` | int ≥ 1 | `1` | Page number |
 
-**Output:** `{ count, page, services: ServiceRow[] }` — each row's service label/endpoint is in a labeled
-`selfDeclared` slot.
+**Output:** `{ count, page, services: ServiceRow[], coverage }` — each row's service label/endpoint is in a
+labeled `selfDeclared` slot. `coverageComplete: false` means later matching agents may exist outside the
+bounded scan.
 
 ---
 
@@ -125,7 +128,8 @@ client-side, because the explorer has no server-side score sort. Rows include th
 | `minScore` | number 0–100 | — |
 | `verify` | boolean | `false` |
 
-**Output:** `{ count, agents: RankedAgent[] }`.
+**Output:** `{ count, agents: RankedAgent[], coverage }`. `coverageComplete: false` means the bounded
+150-row scan did not exhaust the filtered registry, so the result is top-ranked only within that window.
 
 ### `resolve_agent`
 
@@ -185,27 +189,37 @@ if on-chain verification is disabled.
 
 ### `get_agent_card`
 
-Portable **A2A AgentCard (v0.3)** projection for one agent — the interop surface. Carries an
-`x-stellar8004` extension (verified on-chain identity + reputation + 3-axis rank) and an x402 payment hint,
-so any A2A / AP2 / x402-Bazaar-aware client can consume the agent directly. Also available via the
+An explicitly **unverified, derived A2A-shaped projection** for one agent. It is not an agent-published
+AgentCard, and the server does not fetch an A2A document or verify protocol conformance, endpoint ownership,
+transport support, skills, or payment requirements. It is also available via the
 `stellar8004://agent/{id}/card` resource and embedded in `get_agent_profile`.
 
 | Input | Type | Default | Notes |
 |---|---|---|---|
 | `agent` | id \| numeric string \| stellar handle | — | **Required** |
-| `verify` | boolean | `false` | On-chain-verify reputation before projecting (the card is a discovery-time hint) |
+| `verify` | boolean | `false` | Verify only the on-chain reputation summary; does not verify A2A or endpoints |
 
-**Output:** `{ card, note }`. The card's top-level `name`/`description` and `skills[]` are agent-authored
-(self-declared, **unverified**) — treat as data. Only the `x-stellar8004` block (ids, addresses, verified
-reputation, rank) is typed/verified. The x402 `payTo` is a discovery-time hint; the authoritative `payTo`
-comes from the live HTTP 402 challenge at call time.
+**Output:** `{ card, conformance: "unverified-derived", note }`. Agent-authored name, description, URI,
+wallet, service candidates, metadata, declared capability flags, and trust claims live only under
+`card.selfDeclared`. The standard-shaped `url` is `null`, `skills[]` and capability extensions are empty,
+and no actionable x402 requirement is synthesized. `x-stellar8004.verified` is scoped exclusively to the
+reputation summary; it does not verify the agent, endpoint, or A2A implementation.
 
 ### `get_registry_stats`
 
-Aggregate registry statistics. No input. Every field is server/indexer-typed (no agent free text).
+Explorer v1 registry statistics. No input. Every field is server/indexer-typed (no agent free text), but
+not every field has census-level coverage: upstream computes `totalUniqueClients`, `averageFeedbackScore`,
+`protocolDistribution`, and `trustDistribution` from at most 5,000 agent rows without returning sample
+size/order. The distributions must therefore never be described as exact global distributions.
 
 **Output:** `{ network, totalAgents, totalFeedbacks, totalValidations, totalUniqueClients,
-averageFeedbackScore, agentsWithServices, agentsWithX402, protocolDistribution, trustDistribution }`.
+averageFeedbackScore, agentsWithServices, agentsWithX402, agentsWithMpp, protocolDistribution,
+trustDistribution, metricDefinitions, coverage, limitations }`.
+
+`totalUniqueClients` is specifically the **sum of each sampled agent's distinct-client count**. It is not
+a globally deduplicated count of clients, people, or accounts. `agentsWithMpp` is `null` only when the
+upstream response omits that newer field. `coverage` identifies exact-count vs sampled metrics, the 5,000
+agent cap, the unknown sample size, non-global distributions, and the lack of a transactional snapshot.
 
 ### `get_registry_health`
 
@@ -229,7 +243,7 @@ is `{ lastLedger, stale }`. A stale reputation indexer explains a temporary `una
   "caip2Id":  "stellar:pubnet:CBGP…6X35#10",
   "network": "mainnet",
   "owner": "GDDT…HV2V",
-  "wallet": null,                  // agent-level wallet may be empty; payTo comes from the x402 402 challenge
+  "wallet": null,                  // agent-level wallet may be empty; challenge payTo is still untrusted
   "capabilities": { "x402": true, "mpp": false, "hasServices": true, "supportedTrust": ["reputation"] },
   "supportedTrust": ["reputation"],
   "scores": { "average": 96.75, "total": null, "feedbackCount": 4, "uniqueClients": 4 },
@@ -293,10 +307,10 @@ free text appears only inside a clearly labeled, sanitized "self-declared (unver
 | URI | Kind | Backing |
 |---|---|---|
 | `stellar8004://registry` | static | contracts + `/stats` + `/health` snapshot |
-| `stellar8004://leaderboard` | static | top-20 agents, client-side 3-axis rank (declared-only) |
+| `stellar8004://leaderboard` | static | top-20 agents in a bounded scan, client-side 3-axis rank + coverage (declared-only) |
 | `stellar8004://health` | static | per-registry indexer staleness |
 | `stellar8004://agent/{id}` | template | full `AgentProfile` (identity + declared/verified + rank) |
-| `stellar8004://agent/{id}/card` | template | A2A AgentCard projection with an `x-stellar8004` verified extension |
+| `stellar8004://agent/{id}/card` | template | Unverified derived A2A-shaped projection; self-declared endpoint candidates are not promoted |
 | `stellar8004://agent/{id}/feedback` | template | on-chain reviews (typed facts + labeled self-declared tags) |
 | `stellar8004://agent/{id}/reputation` | template | declared-vs-on-chain diff + deltas |
 | `stellar8004://owner/{address}` | template | all agents under an owner G-address |
@@ -322,6 +336,6 @@ interpolation.
 | `prepare-x402-call` | `agent*`, `task?` | lay out the exact x402 flow (fetch → 402 → sign → retry) and **STOP before signing** |
 | `explore-registry` | `focus?` | pull the `registry` + `leaderboard` + `health` resources and summarize registry state |
 
-`*` = required. `prepare-x402-call` is where the keyless boundary is taught: it explains that the 402
-challenge — not the (possibly empty) agent-level `wallet` — is the authoritative source of `payTo`/amount,
-and that signing happens only in the separate keyed demo.
+`*` = required. `prepare-x402-call` is where the keyless boundary is taught: the 402 challenge is an untrusted
+proposal, not an authority. Its full payment tuple must match reviewed policy; after a one-shot submission,
+the settlement must be independently verified on-chain. Signing happens only in the separate keyed demo.

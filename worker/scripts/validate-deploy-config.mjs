@@ -1,0 +1,221 @@
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
+const EXPECTED_ROUTES = new Set([
+  "https://mcp.stellar8004.com/mcp",
+  "https://mcp.stellar8004.com/healthz",
+]);
+
+const REQUIRED_ALIASES = {
+  "@stellar/stellar-sdk": "@stellar/stellar-sdk/no-axios",
+  "@stellar/stellar-sdk/contract": "@stellar/stellar-sdk/no-axios/contract",
+  "@stellar/stellar-sdk/rpc": "@stellar/stellar-sdk/no-axios/rpc",
+};
+
+function deployError(message) {
+  throw new Error(message);
+}
+
+function objectValue(value, label) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    deployError(`${label} must be an object`);
+  }
+  return value;
+}
+
+function positiveInteger(value, label) {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    deployError(`${label} must be a positive safe integer`);
+  }
+  return value;
+}
+
+/**
+ * Remove JSONC comments without treating comment markers inside strings as
+ * syntax. Comment bytes become spaces so JSON parse offsets remain useful.
+ * Deliberately leaves all other JSON syntax untouched and rejects an
+ * unterminated block comment; malformed config can never fall through as OK.
+ */
+export function stripJsonComments(source) {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let index = 0; index < source.length; index++) {
+    const char = source[index];
+    const next = source[index + 1];
+
+    if (lineComment) {
+      if (char === "\n" || char === "\r") {
+        lineComment = false;
+        output += char;
+      } else {
+        output += " ";
+      }
+      continue;
+    }
+
+    if (blockComment) {
+      if (char === "*" && next === "/") {
+        output += "  ";
+        index++;
+        blockComment = false;
+      } else {
+        output += char === "\n" || char === "\r" ? char : " ";
+      }
+      continue;
+    }
+
+    if (inString) {
+      output += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      output += char;
+    } else if (char === "/" && next === "/") {
+      output += "  ";
+      index++;
+      lineComment = true;
+    } else if (char === "/" && next === "*") {
+      output += "  ";
+      index++;
+      blockComment = true;
+    } else {
+      output += char;
+    }
+  }
+
+  if (blockComment) deployError("wrangler.jsonc contains an unterminated block comment");
+  return output;
+}
+
+export function parseDeployConfig(source) {
+  try {
+    return JSON.parse(stripJsonComments(source));
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown JSON parse error";
+    deployError(`wrangler.jsonc is not valid JSONC: ${detail}`);
+  }
+}
+
+/**
+ * Validate the security-sensitive deployment topology. This is intentionally
+ * stricter than Wrangler's schema: a missing/renamed limiter, accidental broad
+ * route, public workers.dev endpoint, or axios-capable SDK bundle blocks deploy.
+ */
+export function validateDeployConfig(rawConfig) {
+  const config = objectValue(rawConfig, "wrangler config");
+
+  if (config.name !== "stellar-agent-mcp") deployError("worker name must be stellar-agent-mcp");
+  if (config.main !== "src/index.ts") deployError("worker main must be src/index.ts");
+  if (config.workers_dev !== false) deployError("workers_dev must be explicitly false");
+  if (config.preview_urls !== false) deployError("preview_urls must be explicitly false");
+  const versionMetadata = objectValue(config.version_metadata, "version_metadata");
+  if (versionMetadata.binding !== "CF_VERSION_METADATA") {
+    deployError("version_metadata.binding must be CF_VERSION_METADATA");
+  }
+
+  if (!Array.isArray(config.routes) || config.routes.length !== EXPECTED_ROUTES.size) {
+    deployError("routes must contain only the exact /mcp and /healthz HTTPS routes");
+  }
+  const seenRoutes = new Set();
+  for (const [index, rawRoute] of config.routes.entries()) {
+    const route = objectValue(rawRoute, `routes[${index}]`);
+    if (route.zone_name !== "stellar8004.com") {
+      deployError(`routes[${index}].zone_name must be stellar8004.com`);
+    }
+    if (typeof route.pattern !== "string" || !EXPECTED_ROUTES.has(route.pattern)) {
+      deployError(`routes[${index}].pattern is not an approved exact HTTPS route`);
+    }
+    if (seenRoutes.has(route.pattern)) deployError(`duplicate route ${route.pattern}`);
+    seenRoutes.add(route.pattern);
+  }
+
+  if (!Array.isArray(config.services)) deployError("services must be an array");
+  const apiBindings = config.services.filter(
+    (entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      !Array.isArray(entry) &&
+      entry.binding === "STELLAR8004_API",
+  );
+  if (apiBindings.length !== 1 || apiBindings[0].service !== "stellar8004-web") {
+    deployError("STELLAR8004_API must bind exactly once to stellar8004-web");
+  }
+
+  if (!Array.isArray(config.ratelimits)) deployError("ratelimits must be an array");
+  const limiterBindings = config.ratelimits.filter(
+    (entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      !Array.isArray(entry) &&
+      entry.name === "MCP_RATE_LIMITER",
+  );
+  if (limiterBindings.length !== 1) {
+    deployError("MCP_RATE_LIMITER must be configured exactly once");
+  }
+  const limiter = limiterBindings[0];
+  if (
+    typeof limiter.namespace_id !== "string" ||
+    !/^[1-9][0-9]*$/.test(limiter.namespace_id)
+  ) {
+    deployError(
+      "MCP_RATE_LIMITER namespace_id must be a non-zero account-unique decimal string (0 is dry-run only)",
+    );
+  }
+  const simple = objectValue(limiter.simple, "MCP_RATE_LIMITER.simple");
+  positiveInteger(simple.limit, "MCP_RATE_LIMITER.simple.limit");
+  positiveInteger(simple.period, "MCP_RATE_LIMITER.simple.period");
+
+  const aliases = objectValue(config.alias, "alias");
+  for (const [name, target] of Object.entries(REQUIRED_ALIASES)) {
+    if (aliases[name] !== target) deployError(`alias ${name} must resolve to ${target}`);
+  }
+
+  return {
+    namespaceId: limiter.namespace_id,
+    rateLimit: simple.limit,
+    ratePeriod: simple.period,
+    routes: [...seenRoutes].sort(),
+  };
+}
+
+export async function validateDeployConfigFile(path) {
+  let source;
+  try {
+    source = await readFile(path, "utf8");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown read error";
+    deployError(`cannot read ${path}: ${detail}`);
+  }
+  return validateDeployConfig(parseDeployConfig(source));
+}
+
+async function main() {
+  const path = resolve(process.cwd(), process.argv[2] ?? "wrangler.jsonc");
+  try {
+    const result = await validateDeployConfigFile(path);
+    console.log(
+      `Deploy config valid: limiter namespace ${result.namespaceId}, ${result.routes.length} exact routes.`,
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown validation error";
+    console.error(`DEPLOY BLOCKED: ${detail}`);
+    process.exitCode = 1;
+  }
+}
+
+const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : "";
+if (import.meta.url === invokedPath) await main();

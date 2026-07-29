@@ -1,9 +1,10 @@
 # Security Policy
 
 `stellar-agent-mcp` is a **read-only, keyless** MCP server over a **permissionless mainnet registry**. Its
-security model is built on that fact: it holds no secrets, performs no writes, and treats every
-agent-authored byte as untrusted data. This document describes the threat model and how to report a
-vulnerability.
+local stdio transport is available now. A separate stateless Cloudflare Worker is implemented but **not
+deployed**; `https://mcp.stellar8004.com/mcp` currently returns the landing site's 404. Both adapters hold no
+signing secrets, perform no writes, and treat every agent-authored byte as untrusted data. This document
+describes their threat boundaries and how to report a vulnerability.
 
 ## Reporting a vulnerability
 
@@ -41,6 +42,9 @@ These are enforced in code and CI, not merely documented:
 4. **Trust-boundary output.** Server-authored text (`content[].text`, resource markdown) interpolates only
    typed/enum/numeric values — enforced at compile time by a `serverText` tagged template that rejects raw
    strings. Untrusted agent free text lives only in labeled `selfDeclared` structured slots.
+5. **No database shortcut.** The remote Worker calls the existing `stellar8004-web` API through a restricted
+   Service Binding. It has no Supabase URL, service-role key, or direct database client and does not maintain
+   a shadow indexer. The existing indexer/Supabase projection stays canonical.
 
 ---
 
@@ -86,15 +90,60 @@ structured slot.
 
 ---
 
+## Hosted Worker boundary (implemented, not deployed)
+
+The remote endpoint is deliberately **public and unauthenticated**. It exposes only the same read-only public
+registry and on-chain reads as stdio, so OAuth is not required for data confidentiality or write
+authorization. OAuth could still provide durable principals for abuse attribution, revocation, and tenant
+quotas; it should be added if those operational guarantees become requirements. The current public choice
+increases abuse and availability risk, so the Worker adds layered admission controls. None should be
+misrepresented as authentication:
+
+- `/mcp` accepts `POST` and CORS `OPTIONS` only. It requires JSON, reads at most 256 KiB from the actual body
+  stream, caps JSON-RPC batches at 8, and rejects a conservative estimated upstream cost above 24. The cost
+  budget preserves headroom under Cloudflare's maximum Worker invocation chain of 32; it is a heuristic, not
+  exact accounting.
+- The production Host and browser Origin values are allowlisted. Originless requests are accepted for normal
+  non-browser MCP clients. **CORS restricts browsers; it neither authenticates callers nor blocks direct HTTP
+  clients.**
+- A Cloudflare rate-limit binding keys an IP + user-agent hash and charges estimated work, configured for 30
+  units/minute. The limiter is PoP-local, approximate, and fails open if the platform binding fails. It is
+  best-effort DoS friction, not a global quota, billing ledger, authorization rule, or Sybil defense. User-agent
+  rotation can fragment a caller's buckets, and unrelated clients behind the same NAT/user-agent can share a
+  bucket.
+- Explorer egress is limited to `GET` on the configured base's `/api/v1` and `/api/v2` paths, then rewritten
+  to `STELLAR8004_API`. Caller authorization, cookies, MCP headers, forwarding headers, bodies, and arbitrary
+  headers are not forwarded. The Worker never fetches an agent-declared endpoint, so registry metadata cannot
+  turn it into a general SSRF proxy.
+- Every accepted request builds a fresh MCP server. The handler is stateless (including its legacy
+  compatibility lane), with no session store, Durable Object, resume token, or server-initiated message.
+- The shared Explorer `TtlCache` and the separately bounded verifier cache are isolate-local and
+  actor-neutral. Optional Cache API entries are written only for upstream `200` responses that explicitly
+  declare public caching and do not set cookies or vary on authorization/cookies; actor-specific
+  `x-ratelimit-*` headers are stripped before a shared entry is written. These caches are PoP-local or
+  isolate-local best effort and are not correctness, freshness, authorization, or accounting boundaries.
+- `/healthz` makes no upstream request. A 200 proves only that the runtime executed; it does not prove the
+  indexer, Service Binding, Supabase, or Soroban RPC is healthy.
+
+One production trust property remains deliberately unclaimed. The Worker derives downstream
+`cf-connecting-ip` and `x-real-ip` only from Cloudflare's edge-owned incoming `cf-connecting-ip`; it never
+trusts caller forwarding headers. Offline tests prove that transformation, but only a two-client live canary
+can prove how the complete Service Binding path reaches `stellar8004-web`. Otherwise all remote callers could
+collapse onto one upstream rate-limit identity. The deploy is also blocked by a sentinel rate-limit
+namespace. Until both gates are cleared, there is no live remote security or availability claim.
+
+---
+
 ## Threat model
 
-Scoped to a keyless, read-only, stdio server over a permissionless registry. Mapped to OWASP MCP Top-10.
+Scoped to the keyless, read-only stdio server and the implemented-but-not-deployed public Worker over a
+permissionless registry. Mapped to OWASP MCP Top-10.
 
 | # | Threat (OWASP-MCP) | Likelihood × Impact | Posture |
 |---|---|---|---|
 | **T1** | Indirect prompt injection (**MCP06**) | High × High | **Dominant residual risk.** Reduced structurally (typed-only summaries + labeled/sanitized self-declared slots) and honestly (provenance labels), with a containment regression test. Reducible, not eliminable — a read-only server cannot *act* on an injected instruction, but the payload still rides through toward the client's model. |
 | **T2** | Confused deputy → fund theft | Low-Med × High | The keyed actor is a separate human-run script, never a tool. The demo preflight asserts payer ≠ owner; summaries are non-imperative. |
-| **T3** | Supply-chain compromise (**MCP04**) | Low × High | Exact-pinned deps + lockfile + `npm ci`; dependency smoke test (asserts the surface + the mainnet Identity contract address); Actions pinned by SHA; SBOM on release. |
+| **T3** | Supply-chain compromise (**MCP04**) | Med × High | Lockfile + `npm ci`; exact pins for the MCP/Agents runtime; dependency smoke and Worker bundle scans; Actions pinned by commit SHA; checksum-pinned MCP Registry publisher; release CycloneDX SBOM; npm OIDC provenance. Residual risk remains: several ordinary dependencies intentionally use semver ranges and build tools still execute during CI. |
 | **T4** | Tool-contract rug-pull (**MCP03**) | Low × Med | Semver on the tool contract + a "Tool contract changes" changelog section; clean non-imperative tool descriptions. |
 | **T5** | stdout protocol corruption | Med × Med | stderr-only logger + stdout-cleanliness CI test. |
 | **T6** | Upstream outage / rate-limit → hang | Med × Med | SDK backoff + 429 handling; verification degrades **closed** to declared-only; hard page caps; bounded top-K verify. |
@@ -102,12 +151,14 @@ Scoped to a keyless, read-only, stdio server over a permissionless registry. Map
 | **T8** | Context / token DoS | Low × Med | Length/count caps + truncation (same control as T1); `limit` capped at 50. |
 | **T9** | Ranking sybil manipulation | Med × Med | Breadth (unique clients) weighted above raw volume; on-chain verification; `RANK_SCORE_MAX = 100`. |
 | **T10** | Secret exposure (**MCP01**) | Very Low × High | Server holds no secrets; CI greps for signer/secret patterns; `STELLAR_PRIVATE_KEY` ignored if present. |
-| **T11** | AuthN/AuthZ gap (**MCP07**) | N/A over stdio | stdio trust boundary is the OS process; there is no network listener. A future hosted HTTP variant would add RFC 9728 / 8707 (out of current scope). |
+| **T11** | Public endpoint abuse / AuthN expectation (**MCP07**) | Med × Med | stdio is bounded by the local OS process. The remote Worker is intentionally unauthenticated because it exposes public, read-only data; Host/Origin/body/batch/cost/limiter controls reduce abuse but do not identify callers. CORS is not AuthN. OAuth remains a valid future control for durable principal quotas/revocation. No deploy until rate-limit identity is canary-proven. |
 
 ### Honest limits
 
-We verify **provenance, liveness, and on-chain reputation re-derivation**, and the demo **grounds** feedback
-with a payment tx hash + result hash. We do **not** solve **Sybil resistance / proof-of-personhood** —
-`uniqueClients` (breadth) is a thin hedge, not a solution. Do not treat a high score as identity proof.
+We verify registry/transaction provenance and re-derive bounded reputation reads on-chain. We do **not**
+probe or verify agent service-endpoint liveness or protocol conformance. The demo is designed to bind completed
+feedback to validated payment transaction and result hashes, but its first funded, recorded mainnet run is
+still pending. We also do **not** solve **Sybil resistance / proof-of-personhood** — `uniqueClients` (breadth)
+is a thin hedge, not a solution. Do not treat a high score as identity proof.
 
 See [docs/architecture.md](docs/architecture.md) for the full trust architecture and data-precedence rules.

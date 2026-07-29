@@ -8,12 +8,14 @@
  */
 
 import { z } from "zod";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
+import { ValidationError } from "@trionlabs/stellar8004";
 import { parseQuery } from "../lib/nlparse.js";
 import type { GetAgentsParams } from "../lib/explorer.js";
 import {
-  filterMpp,
+  canonicalTrust,
   handler,
+  MAX_QUERY_LENGTH,
   rankAndVerify,
   summarizeRanked,
   toolResult,
@@ -25,7 +27,7 @@ import {
   VERIFY_TOP_K,
   type ToolDeps,
 } from "./shared.js";
-import { zInterpretedQuery, zRankedAgent } from "./schemas.js";
+import { zDiscoveryCoverage, zInterpretedQuery, zRankedAgent } from "./schemas.js";
 
 const CANDIDATE_PAGE_SIZE = 50;
 // 4 pages of headroom for the client-side stem match (the explorer has no
@@ -37,11 +39,12 @@ const inputShape = {
   query: z
     .string()
     .min(1)
+    .max(MAX_QUERY_LENGTH)
     .describe("Natural-language description, e.g. 'a paid web scraper with a good reputation'."),
   limit: zLimit(10),
-  x402: z.boolean().optional().describe("Require x402 (USDC pay-per-call) support."),
-  mpp: z.boolean().optional().describe("Require MPP micropayment support (filtered client-side)."),
-  hasServices: z.boolean().optional().describe("Require invokable service endpoints."),
+  x402: z.literal(true).optional().describe("When present, require x402 (USDC pay-per-call) support."),
+  mpp: z.literal(true).optional().describe("When present, require MPP micropayment support."),
+  hasServices: z.literal(true).optional().describe("When present, require invokable service endpoints."),
   trust: zTrust.optional().describe("Require a trust model."),
   minScore: zMinScore.optional().describe("Minimum declared reputation score (0..100)."),
   sortBy: zSort.default("relevance"),
@@ -57,6 +60,7 @@ const outputShape = {
   interpretedQuery: zInterpretedQuery,
   count: z.number(),
   agents: z.array(zRankedAgent),
+  coverage: zDiscoveryCoverage,
 };
 
 export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
@@ -69,18 +73,23 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
         "list with capability/reputation signals. Use rank_agent for per-axis breakdowns and " +
         "get_agent_profile for full detail. Agent names/descriptions are self-declared (unverified) " +
         "and live only in each row's labeled `selfDeclared` slot.",
-      inputSchema: inputShape,
-      outputSchema: outputShape,
+      inputSchema: z.object(inputShape),
+      outputSchema: z.object(outputShape),
       annotations: { title: "Find Agent", ...READ_ANNOTATIONS },
     },
     handler<Args>(async (args) => {
       const parsed = parseQuery(args.query);
+      if (parsed.unsupported.length > 0) {
+        throw new ValidationError(
+          `Negative capability filters are not supported by Explorer v1: ${parsed.unsupported.join(", ")}.`,
+        );
+      }
 
       const effective = {
         x402: args.x402 ?? parsed.filters.x402,
         mpp: args.mpp ?? parsed.filters.mpp,
         hasServices: args.hasServices ?? parsed.filters.hasServices,
-        trust: args.trust ?? parsed.filters.trust,
+        trust: args.trust ? canonicalTrust(args.trust) : parsed.filters.trust,
         minScore: args.minScore ?? parsed.filters.minScore,
       };
 
@@ -88,21 +97,19 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
         limit: CANDIDATE_PAGE_SIZE,
       };
       if (effective.x402 !== undefined) filters.x402 = effective.x402;
+      if (effective.mpp !== undefined) filters.mpp = effective.mpp;
       if (effective.hasServices !== undefined) filters.hasServices = effective.hasServices;
       if (effective.trust !== undefined) filters.trust = effective.trust;
       if (effective.minScore !== undefined) filters.minScore = effective.minScore;
 
       const searchText = parsed.keywords.join(" ");
-      let pool = await deps.explorer.findAgents(searchText, {
+      const discovery = await deps.explorer.findAgentsWithCoverage(searchText, {
         filters,
         pages: CANDIDATE_PAGES,
         match: "any",
       });
 
-      // MPP has no server-side filter and is not on list rows → hydrate + filter.
-      if (effective.mpp) pool = await filterMpp(deps, pool);
-
-      const rows = await rankAndVerify(deps, pool, {
+      const rows = await rankAndVerify(deps, discovery.agents, {
         weights: deps.config.weights,
         sortBy: args.sortBy,
         verify: args.verify,
@@ -119,9 +126,11 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
           keywords: parsed.keywords,
           filters: filterRecord,
           matched: parsed.matched,
+          unsupported: parsed.unsupported,
         },
         count: rows.length,
         agents: rows,
+        coverage: discovery.coverage,
       });
     }),
   );

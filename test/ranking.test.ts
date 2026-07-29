@@ -7,7 +7,7 @@
  *   volume  = ln1p(fc)      / ln1p(VOL_SAT=50)
  *   breadth = ln1p(uc)      / ln1p(BREADTH_SAT=25)
  *   base    = 0.5*q + 0.2*v + 0.3*b
- *   score   = clamp(base + payment + endpoint + verified bonuses, 0, 1)
+ *   score   = clamp(base + payment + endpoint bonuses, 0, 1)
  *   score100= round(score * 100)
  *
  * These are golden constants, not a re-implementation: if the formula or a
@@ -116,10 +116,10 @@ describe("GOLDEN: Scrapper-like high-reputation agent (avg 96.75, 8 fb, 4 uc)", 
     });
   });
 
-  it("the verified bonus adds exactly P_VERIFIED (82 → 85)", () => {
+  it("full verification is a flag, never a score-inflating bonus", () => {
     const r = scoreAgent({ ...input, verificationStatus: "verified" }, OPTS);
-    expect(r.verifiedBonus).toBe(RANKING.P_VERIFIED);
-    expect(r.score100).toBe(85);
+    expect(r.verifiedBonus).toBe(0);
+    expect(r.score100).toBe(82);
     expect(r.flags.verified).toBe(true);
   });
 

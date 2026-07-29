@@ -12,10 +12,10 @@ startCommand:
         type: string
         enum: ["mainnet", "testnet"]
         default: "mainnet"
-        description: "Stellar network to target."
+        description: "Stellar network to target. 'testnet' also requires EXPLORER_BASE_URL."
       EXPLORER_BASE_URL:
         type: string
-        description: "Override the stellar-8004 explorer API base URL."
+        description: "Override the stellar-8004 explorer API base URL. Required when STELLAR_NETWORK is 'testnet' — the default explorer indexes mainnet only, and the server refuses to start on the mismatched pair."
       STELLAR_RPC_URL:
         type: string
         description: "Override the Soroban RPC URL used for on-chain reputation verification."
@@ -28,7 +28,7 @@ startCommand:
   commandFunction: |
     (config) => ({
       command: "npx",
-      args: ["-y", "stellar-agent-mcp"],
+      args: ["-y", "stellar-agent-mcp@0.1.0", "mcp"],
       env: {
         STELLAR_NETWORK: config.STELLAR_NETWORK || "mainnet",
         ...(config.EXPLORER_BASE_URL ? { EXPLORER_BASE_URL: config.EXPLORER_BASE_URL } : {}),

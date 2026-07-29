@@ -19,17 +19,32 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           # >=22.14 required for npm Trusted Publishing.
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Upgrade npm (Trusted Publishing needs npm >= 11.5.1)
-        run: npm install -g npm@latest
+      - name: Install pinned npm (Trusted Publishing needs npm >= 11.5.1)
+        run: npm install -g npm@11.17.0
+
+      - name: Validate tag and manifest versions
+        shell: bash
+        run: |
+          package_version="$(node -p "require('./package.json').version")"
+          server_version="$(node -p "require('./server.json').version")"
+          package_manifest_version="$(node -p "require('./server.json').packages[0].version")"
+          if [[ "$GITHUB_REF_NAME" != "v${package_version}" ]]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package version ${package_version}."
+            exit 1
+          fi
+          if [[ "$server_version" != "$package_version" || "$package_manifest_version" != "$package_version" ]]; then
+            echo "::error::package.json and both server.json version fields must match."
+            exit 1
+          fi
 
       - name: Install (clean, from lockfile)
         run: npm ci
@@ -40,16 +55,53 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Generate runtime SBOM (CycloneDX)
+        run: npm sbom --omit=dev --sbom-format cyclonedx > stellar-agent-mcp.cdx.json
+
+      - name: Upload release SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: stellar-agent-mcp-${{ github.ref_name }}-sbom
+          path: stellar-agent-mcp.cdx.json
+          if-no-files-found: error
+
+      # A tag workflow can be re-run after npm succeeded but before the MCP
+      # Registry step did. npm versions are immutable, so detect that state and
+      # continue to the registry instead of failing on an impossible republish.
+      - name: Check whether this npm version already exists
+        id: npm-version
+        shell: bash
+        run: |
+          package_name="$(node -p "require('./package.json').name")"
+          package_version="$(node -p "require('./package.json').version")"
+          status="$(curl -sS -o /tmp/npm-version.json -w '%{http_code}' \
+            "https://registry.npmjs.org/${package_name}/${package_version}")"
+          case "$status" in
+            200) echo "exists=true" >> "$GITHUB_OUTPUT" ;;
+            404) echo "exists=false" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::error::npm registry version check returned HTTP ${status}."
+              exit 1
+              ;;
+          esac
+
       # Trusted Publishing: no NODE_AUTH_TOKEN / NPM_TOKEN. npm mints an OIDC
       # token from id-token:write and auto-attaches provenance. Requires the
       # package's Trusted Publisher to be configured on npmjs.com to point at
       # this repo + workflow (.github/workflows/publish.yml).
       - name: Publish to npm (provenance via OIDC)
+        if: steps.npm-version.outputs.exists != 'true'
         run: npm publish
 
-      - name: Install mcp-publisher
+      - name: Install checksum-pinned mcp-publisher
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.0
+          MCP_PUBLISHER_SHA256: 1370446bbe74d562608e8005a6ccce02d146a661fbd78674e11cc70b9618d6cf
         run: |
-          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          archive=mcp-publisher_linux_amd64.tar.gz
+          curl -fsSLo "$archive" "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/${archive}"
+          echo "${MCP_PUBLISHER_SHA256}  ${archive}" | sha256sum -c -
+          tar xzf "$archive" mcp-publisher
           chmod +x ./mcp-publisher
 
       - name: Login to MCP Registry (GitHub OIDC)

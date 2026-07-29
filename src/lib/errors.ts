@@ -22,6 +22,14 @@ import {
 } from "@trionlabs/stellar8004";
 import { toolError, type ToolErrorBody, type ToolResult } from "../types.js";
 
+/** Explorer answered for a different (or unidentifiable) chain/network. */
+export class ExplorerScopeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ExplorerScopeError";
+  }
+}
+
 /** True when `err` is one of the SDK's typed API errors. */
 export function isSdkError(err: unknown): err is ApiError {
   return err instanceof ApiError;
@@ -29,6 +37,9 @@ export function isSdkError(err: unknown): err is ApiError {
 
 /** Classify any thrown value into a stable, typed error body. */
 export function classifyError(err: unknown): ToolErrorBody {
+  if (err instanceof ExplorerScopeError) {
+    return { error: err.message, code: "UPSTREAM_ERROR", detail: "chain/network scope mismatch" };
+  }
   if (err instanceof RateLimitError) {
     return {
       error: "Explorer rate limited — retry shortly.",

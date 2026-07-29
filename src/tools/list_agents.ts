@@ -7,10 +7,10 @@
  */
 
 import { z } from "zod";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import type { GetAgentsParams } from "../lib/explorer.js";
 import {
-  filterMpp,
+  canonicalTrust,
   handler,
   rankAndVerify,
   summarizeRanked,
@@ -26,9 +26,9 @@ import {
 import { zRankedAgent } from "./schemas.js";
 
 const inputShape = {
-  x402: z.boolean().optional(),
-  mpp: z.boolean().optional().describe("Filtered client-side (no server-side MPP filter)."),
-  hasServices: z.boolean().optional(),
+  x402: z.literal(true).optional(),
+  mpp: z.literal(true).optional().describe("When present, require indexed MPP support."),
+  hasServices: z.literal(true).optional(),
   trust: zTrust.optional(),
   minScore: zMinScore.optional(),
   sortBy: zSort.default("score"),
@@ -54,19 +54,19 @@ export function registerListAgents(server: McpServer, deps: ToolDeps): void {
         "Paginated, filterable listing of registered agents, ranked by the 3-axis engine. Filter by " +
         "x402/mpp/hasServices/trust/minScore. Self-declared text lives in each row's labeled " +
         "`selfDeclared` slot.",
-      inputSchema: inputShape,
-      outputSchema: outputShape,
+      inputSchema: z.object(inputShape),
+      outputSchema: z.object(outputShape),
       annotations: { title: "List Agents", ...READ_ANNOTATIONS },
     },
     handler<Args>(async (args) => {
       const params: GetAgentsParams = { page: args.page, limit: args.limit };
       if (args.x402 !== undefined) params.x402 = args.x402;
+      if (args.mpp !== undefined) params.mpp = args.mpp;
       if (args.hasServices !== undefined) params.hasServices = args.hasServices;
-      if (args.trust !== undefined) params.trust = args.trust;
+      if (args.trust !== undefined) params.trust = canonicalTrust(args.trust);
       if (args.minScore !== undefined) params.minScore = args.minScore;
 
-      let agents = (await deps.explorer.getAgents(params)).data ?? [];
-      if (args.mpp) agents = await filterMpp(deps, agents);
+      const agents = (await deps.explorer.getAgents(params)).data ?? [];
 
       const rows = await rankAndVerify(deps, agents, {
         weights: deps.config.weights,

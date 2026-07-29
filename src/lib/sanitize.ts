@@ -32,6 +32,7 @@ export const CAPS = {
   serviceEndpoint: 300,
   serviceVersion: 40,
   serviceDescription: 300,
+  serviceInputExample: 1_000,
   generic: 500,
 } as const;
 
@@ -165,6 +166,8 @@ export function sanitizeService(svc: Partial<ServiceEntry> | undefined | null): 
   if (version) out.version = version;
   const description = sanitizeNullable(svc?.description, CAPS.serviceDescription);
   if (description) out.description = description;
+  const inputExample = sanitizeNullable(svc?.inputExample, CAPS.serviceInputExample);
+  if (inputExample) out.inputExample = inputExample;
   return out;
 }
 

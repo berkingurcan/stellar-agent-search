@@ -1,0 +1,77 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "stellar-agent-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // The landing assets Worker owns the mcp.stellar8004.com custom domain.
+  // Cloudflare's more-specific zone routes below take precedence only for the
+  // two HTTPS-only remote MCP entrypoints, leaving every other path (including
+  // plaintext HTTP) on the landing Worker / zone redirect policy.
+  // DEPLOY ORDER: deploy the landing custom domain/DNS first, then this Worker.
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "https://mcp.stellar8004.com/mcp",
+      "zone_name": "stellar8004.com"
+    },
+    {
+      "pattern": "https://mcp.stellar8004.com/healthz",
+      "zone_name": "stellar8004.com"
+    }
+  ],
+
+  // Keep the indexer's Supabase-backed API behind its existing Worker. This
+  // binding avoids a public network hop and does not duplicate its database.
+  "services": [
+    {
+      "binding": "STELLAR8004_API",
+      "service": "stellar8004-web"
+    }
+  ],
+
+  "ratelimits": [
+    {
+      "name": "MCP_RATE_LIMITER",
+      // POP-local, intentionally best-effort abuse control; never treat this as
+      // a global quota, an authorization check, or an accounting boundary.
+      // DEPLOY BLOCKER: `0` is only a schema-valid dry-run sentinel. Before the
+      // first deploy, replace it with an integer namespace unique within the
+      // Cloudflare account. `npm run deploy` refuses to proceed while it is 0.
+      "namespace_id": "0",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    }
+  ],
+
+  // @trionlabs/stellar8004 imports all three SDK paths. Missing any alias can
+  // silently restore the axios build in the Worker bundle.
+  "alias": {
+    "@stellar/stellar-sdk": "@stellar/stellar-sdk/no-axios",
+    "@stellar/stellar-sdk/contract": "@stellar/stellar-sdk/no-axios/contract",
+    "@stellar/stellar-sdk/rpc": "@stellar/stellar-sdk/no-axios/rpc"
+  },
+
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.1
+    }
+  },
+
+  // Exposed only as an opaque response header on /healthz so a version-
+  // override canary can prove which Worker version actually served it.
+  "version_metadata": {
+    "binding": "CF_VERSION_METADATA"
+  }
+}

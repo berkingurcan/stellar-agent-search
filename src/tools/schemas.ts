@@ -52,16 +52,19 @@ export const zScores = z
 
 export const zVerification = z
   .object({
-    status: z.enum(["verified", "mismatch", "unavailable", "skipped"]),
-    declared: z.record(z.any()),
-    verified: z.record(z.any()).optional(),
-    deltas: z.record(z.any()).optional(),
+    status: z.enum(["verified", "partial", "mismatch", "unavailable", "skipped"]),
+    declared: z.record(z.string(), z.any()),
+    verified: z.record(z.string(), z.any()).optional(),
+    deltas: z.record(z.string(), z.any()).optional(),
     checkedAt: z.string(),
+    reason: z.string().optional(),
+    verifiedFields: z.array(z.string()).optional(),
+    unverifiedFields: z.array(z.string()).optional(),
   })
   .passthrough();
 
 /** Full 3-axis breakdown — permissive record (numbers + nested axes + flags). */
-export const zBreakdown = z.record(z.any());
+export const zBreakdown = z.record(z.string(), z.any());
 
 export const zRankedAgent = z
   .object({
@@ -102,14 +105,28 @@ export const zAgentProfile = z
     createdAt: z.string().nullable(),
     txHash: z.string().nullable(),
     resolveStatus: z.string().nullable(),
-    selfDeclared: z.record(z.any()),
+    selfDeclared: z.record(z.string(), z.any()),
   })
   .passthrough();
 
 export const zInterpretedQuery = z
   .object({
     keywords: z.array(z.string()),
-    filters: z.record(z.any()),
+    filters: z.record(z.string(), z.any()),
     matched: z.array(z.string()),
+    unsupported: z.array(z.string()),
+  })
+  .passthrough();
+
+/** Bounded-discovery coverage; `hasMore` is omitted when the API cannot derive it. */
+export const zDiscoveryCoverage = z
+  .object({
+    coverageComplete: z.boolean(),
+    paginationExhausted: z.boolean(),
+    snapshotConsistent: z.boolean(),
+    pagesScanned: z.number().int().nonnegative(),
+    recordsScanned: z.number().int().nonnegative(),
+    hasMore: z.boolean().optional(),
+    limitations: z.array(z.string()).optional(),
   })
   .passthrough();

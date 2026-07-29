@@ -15,11 +15,14 @@
  */
 
 import type { Network } from "../types.js";
+import { StrKey } from "@stellar/stellar-sdk";
 
 /** Stellar Ed25519 public account address (G...). 56 chars base32. */
 export const G_ADDRESS_RE = /^G[A-Z2-7]{55}$/;
 /** Soroban contract address (C...). 56 chars base32. */
 export const C_ADDRESS_RE = /^C[A-Z2-7]{55}$/;
+/** Identity contract ids are u32. */
+export const MAX_AGENT_ID = 0xffff_ffff;
 /** stellar:{network}:{identity}#{id}. Network accepts mainnet|testnet|pubnet. */
 export const STELLAR_ID_RE = /^stellar:(mainnet|testnet|pubnet):(C[A-Z2-7]{55})#(\d+)$/;
 
@@ -27,6 +30,12 @@ export type ResolvedRef =
   | { kind: "id"; id: number }
   | { kind: "stellarId"; id: number; identity: string; network: Network }
   | { kind: "owner"; address: string };
+
+/** The registry scope against which a full Stellar handle must be validated. */
+export interface AgentRefScope {
+  network: Network;
+  identity: string;
+}
 
 /** Identity network label -> CAIP-2 label. */
 export function caip2Network(network: Network): "pubnet" | "testnet" {
@@ -55,8 +64,8 @@ function parseId(raw: string): number {
   // Digit-only guard first: Number("0x1f")/Number("1e3")/Number("") would all
   // coerce to a plausible-looking integer otherwise. isSafeInteger rejects
   // oversized ids (>2^53) that lose precision.
-  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
-    throw new Error(`Invalid agent id '${raw}' (expected a non-negative integer)`);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) > MAX_AGENT_ID) {
+    throw new Error(`Invalid agent id '${raw}' (expected an unsigned 32-bit integer)`);
   }
   return Number(raw);
 }
@@ -71,7 +80,18 @@ function parseId(raw: string): number {
 export function validWalletOrNull(wallet: unknown): string | null {
   if (typeof wallet !== "string") return null;
   const w = wallet.trim();
-  return G_ADDRESS_RE.test(w) || C_ADDRESS_RE.test(w) ? w : null;
+  if (G_ADDRESS_RE.test(w) && StrKey.isValidEd25519PublicKey(w)) return w;
+  if (C_ADDRESS_RE.test(w) && StrKey.isValidContract(w)) return w;
+  return null;
+}
+
+/** Shape + StrKey checksum validation for owner account inputs. */
+export function isValidOwnerAddress(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    G_ADDRESS_RE.test(value.trim()) &&
+    StrKey.isValidEd25519PublicKey(value.trim())
+  );
 }
 
 /**
@@ -90,6 +110,9 @@ export function parseAgentRef(ref: string | number): ResolvedRef {
 
   const m = STELLAR_ID_RE.exec(s);
   if (m) {
+    if (!StrKey.isValidContract(m[2]!)) {
+      throw new Error(`Invalid Identity contract address in agent reference '${s}'`);
+    }
     return {
       kind: "stellarId",
       id: parseId(m[3]!),
@@ -98,7 +121,9 @@ export function parseAgentRef(ref: string | number): ResolvedRef {
     };
   }
 
-  if (G_ADDRESS_RE.test(s)) return { kind: "owner", address: s };
+  if (isValidOwnerAddress(s)) {
+    return { kind: "owner", address: s };
+  }
 
   throw new Error(
     `Unrecognized agent reference: '${s}'. Expected a numeric id, a ` +
@@ -111,7 +136,23 @@ export function parseAgentRef(ref: string | number): ResolvedRef {
  * stellar identifier). Returns null for an owner address, which requires an
  * explorer lookup to resolve.
  */
-export function resolveAgentId(ref: string | number): number | null {
+export function resolveAgentId(ref: string | number, scope?: AgentRefScope): number | null {
   const parsed = parseAgentRef(ref);
-  return parsed.kind === "owner" ? null : parsed.id;
+  if (parsed.kind === "owner") return null;
+  if (parsed.kind === "stellarId") {
+    if (!scope) {
+      throw new Error("A full Stellar handle requires an expected network and Identity contract");
+    }
+    if (parsed.network !== scope.network) {
+      throw new Error(
+        `Stellar handle network '${parsed.network}' does not match configured network '${scope.network}'`,
+      );
+    }
+    if (parsed.identity !== scope.identity) {
+      throw new Error(
+        `Stellar handle Identity contract '${parsed.identity}' does not match the configured contract`,
+      );
+    }
+  }
+  return parsed.id;
 }

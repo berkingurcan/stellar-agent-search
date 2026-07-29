@@ -22,17 +22,18 @@ export type { StellarConfig } from "@trionlabs/stellar8004";
 /** Identity-layer network label. The x402/MPP layer uses CAIP-2 `pubnet`. */
 export type Network = "mainnet" | "testnet";
 
-/** Trust models tracked by the registry (StatsResponse.trustDistribution). */
-export type TrustModel = "reputation" | "validation" | "tee";
+/** Canonical owner-declared trust tokens accepted by the current Explorer API. */
+export type TrustModel = "reputation" | "validation" | "crypto-economic" | "tee-attestation";
 
 /**
- * Declared-vs-verified reputation outcome (the headline differentiator).
- * - verified:    on-chain get_summary matched declared within tolerance
+ * Field-scoped declared-vs-on-chain reputation outcome.
+ * - verified:    reserved for a future read that covers every declared reputation field
+ * - partial:     current get_summary matched average/count; active uniqueClients is not derivable
  * - mismatch:    declared and on-chain diverged beyond tolerance (flag only)
  * - unavailable: verification attempted but RPC down / simulation rejected
  * - skipped:     verification not attempted (disabled or out of top-K)
  */
-export type VerificationStatus = "verified" | "mismatch" | "unavailable" | "skipped";
+export type VerificationStatus = "verified" | "partial" | "mismatch" | "unavailable" | "skipped";
 
 // ---------------------------------------------------------------------------
 // Services & capabilities
@@ -44,6 +45,8 @@ export interface ServiceEntry {
   endpoint: string;
   version?: string;
   description?: string;
+  /** Untrusted invocation example; surfaced as data only, never executed. */
+  inputExample?: string;
 }
 
 /** Core payment capabilities. */
@@ -78,7 +81,7 @@ export interface AgentFlags {
 }
 
 // ---------------------------------------------------------------------------
-// Ranking (3-axis, on-chain-verified — modules/01 §3)
+// Ranking (3-axis indexed signals + separate on-chain evidence)
 // ---------------------------------------------------------------------------
 
 /** Per-axis breakdown. `raw` is null when the axis has no signal (unrated). */
@@ -101,6 +104,7 @@ export interface RankResult {
   /** additive bonuses (each already scaled to the [0,1] score space) */
   paymentBonus: number;
   endpointBonus: number;
+  /** Always 0: verification is evidence metadata and never inflates rank. */
   verifiedBonus: number;
 
   /** weighted sum of the three axes, [0,1] */
@@ -134,7 +138,8 @@ export interface RankWeights {
 export interface OnchainReputation {
   average: number;
   count: number;
-  uniqueClients: number;
+  /** Not derivable from get_clients_paginated because revoked-only clients remain stored. */
+  uniqueClients: number | null;
 }
 
 /** Reputation as reported by the explorer/indexer (declared). */
@@ -148,7 +153,12 @@ export interface VerificationResult {
   status: VerificationStatus;
   declared: DeclaredReputation;
   verified?: OnchainReputation;
-  deltas?: { average: number; count: number; uniqueClients: number };
+  deltas?: { average: number; count: number; uniqueClients: number | null };
+  /** Why verification was skipped/unavailable (never hidden behind a boolean). */
+  reason?: string;
+  /** Exact declared fields covered by this verification attempt. */
+  verifiedFields?: Array<"average" | "feedbackCount" | "uniqueClients">;
+  unverifiedFields?: Array<"average" | "feedbackCount" | "uniqueClients">;
   /** ISO-8601 timestamp (from the injectable clock) */
   checkedAt: string;
 }

@@ -11,7 +11,7 @@
  *   get_registry_stats, get_registry_health
  */
 
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import type { ToolDeps } from "./shared.js";
 import { createToolDeps } from "./shared.js";
 

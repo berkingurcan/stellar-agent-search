@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.berkingurcan/stellar-agent-mcp",
   "title": "Stellar Agent MCP",
-  "description": "Read-only, keyless MCP server + CLI to discover, rank, and inspect on-chain Stellar 8004 agents (Identity/Reputation/Validation) on Stellar mainnet, with on-chain-verified reputation.",
+  "description": "Discover, rank, and verify Stellar 8004 agents through a read-only, keyless MCP server and CLI.",
   "version": "0.1.0",
   "websiteUrl": "https://github.com/berkingurcan/stellar-agent-mcp",
   "repository": {
@@ -22,7 +22,7 @@
       "environmentVariables": [
         {
           "name": "STELLAR_NETWORK",
-          "description": "Stellar network to target: mainnet | testnet.",
+          "description": "Stellar network to target: mainnet | testnet. testnet also requires EXPLORER_BASE_URL — the default explorer indexes mainnet only, and the server refuses to start on the mismatched pair.",
           "isRequired": false,
           "default": "mainnet"
         },

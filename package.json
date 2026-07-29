@@ -5,19 +5,10 @@
   "type": "module",
   "license": "MIT",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "bin": {
-    "stellar-agent-mcp": "./dist/index.js"
-  },
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
+    "stellar-agent-mcp": "dist/index.js"
   },
   "files": [
     "dist",
@@ -51,26 +42,32 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
+    "validate:release": "node scripts/release/validate-release.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
     "@stellar/stellar-sdk": "^15",
     "@trionlabs/stellar8004": "0.0.11",
     "@x402/core": "~2.20.0",
     "@x402/fetch": "~2.20.0",
     "@x402/stellar": "~2.20.0",
     "dotenv": "^16.6.1",
-    "zod": "^3"
+    "zod": "4.4.3"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@types/node": "^22",
+    "agents": "0.20.1",
+    "ajv": "8.20.0",
     "tsup": "^8",
     "typescript": "^5",
-    "vitest": "^3"
+    "vitest": "^3",
+    "wrangler": "4.115.0"
   },
   "overrides": {
     "axios": "1.18.1",

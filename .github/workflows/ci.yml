@@ -22,14 +22,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        node: ['18', '20', '22']
+        node: ['20', '22', '24']
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Node ${{ matrix.node }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -48,3 +48,94 @@ jobs:
 
       - name: Pack (dry-run — verify publishable tarball)
         run: npm pack --dry-run
+
+  # web/ is a separate npm project on purpose: it is never published (the root
+  # package.json `files` field ships dist/ only), and its toolchain floor is
+  # higher than the package's — the server supports Node 20+, while this job
+  # follows the landing toolchain on Node 22.
+  # So it gets one job on one Node version rather than a slot in the matrix.
+  web:
+    name: landing page
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install (clean, from lockfile)
+        run: npm ci
+        working-directory: web
+
+      - name: Typecheck (svelte-check)
+        run: npm run check
+        working-directory: web
+
+      - name: Build
+        run: npm run build
+        working-directory: web
+
+  worker:
+    name: remote MCP Worker
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # Runtime/business dependencies stay in the root graph so the Agents SDK
+      # and MCP v2 share one physical server/client copy. worker/ deliberately
+      # has no child dependency graph or lockfile.
+      - name: Install root (clean, from lockfile)
+        run: npm ci
+
+      - name: Assert no duplicate MCP runtime under Worker
+        shell: bash
+        run: |
+          if test -d worker/node_modules/agents || test -d worker/node_modules/@modelcontextprotocol; then
+            echo '::error::Worker installed a second Agents/MCP runtime instead of using the root graph.'
+            exit 1
+          fi
+          for package_name in client server sdk; do
+            count="$(find node_modules -type f -path "*/@modelcontextprotocol/${package_name}/package.json" | wc -l | tr -d ' ')"
+            if test "$count" -ne 1; then
+              echo "::error::Expected exactly one @modelcontextprotocol/${package_name} install; found ${count}."
+              exit 1
+            fi
+          done
+
+      - name: Typecheck Worker
+        run: npm --prefix worker run typecheck
+
+      - name: Test Worker
+        run: npm --prefix worker test
+
+      - name: Bundle Worker (Wrangler dry-run only)
+        run: npm --prefix worker run dry-run
+
+      # The no-axios SDK intentionally uses `feaxios`, a fetch-backed API shim,
+      # and its contract client contains latent signAndSend methods. Therefore
+      # scan for the real axios package and concrete signer/key wiring, not broad
+      # substrings that would reject the safe read-only client too.
+      - name: Assert bundle has no axios package or concrete signer wiring
+        shell: bash
+        run: |
+          if rg --glob '*.js' \
+            'node_modules[/\\]axios[/\\]|wrapBasicSigner|createClients|giveFeedback|FreighterSigner|WalletSigner|Keypair\.fromSecret|Keypair\.random' \
+            worker/.wrangler-ci; then
+            echo '::error::Worker bundle contains the axios package or concrete signer/key wiring.'
+            exit 1
+          fi

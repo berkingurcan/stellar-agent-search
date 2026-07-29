@@ -2,7 +2,7 @@
  * index.ts — the single `stellar-agent-mcp` bin entry (shebang injected by tsup).
  *
  * Dual CLI + MCP dispatch (research/B §3.4):
- *   - A known CLI subcommand (find/profile/rank/services/doctor) → human CLI.
+ *   - A known CLI subcommand (find/profile/rank/services/doctor/setup) → human CLI.
  *   - `serve` / `mcp` / `--stdio`                                → explicit MCP stdio server.
  *   - No args on a TTY                                           → friendly help.
  *   - No args on a non-TTY (how every MCP client launches us)    → MCP stdio server.
@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { parseFlags, runCli, startMcpServer, printHelp, type CliFlags } from "./cli/index.js";
 import { DEFAULT_SERVER_VERSION } from "./server.js";
+import { ConfigError } from "./config.js";
 
 /** Resolve the package version from the on-disk package.json (dist/.. or src/..). */
 function getVersion(): string {
@@ -33,7 +34,7 @@ function getVersion(): string {
 /** Commands that mean "start the MCP server", not "run a CLI subcommand". */
 const SERVE_COMMANDS = new Set(["serve", "mcp"]);
 /** Human CLI subcommands. */
-const CLI_COMMANDS = new Set(["find", "rank", "profile", "services", "doctor"]);
+const CLI_COMMANDS = new Set(["find", "rank", "profile", "services", "doctor", "setup"]);
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
@@ -93,6 +94,12 @@ process.on("uncaughtException", (err) => {
 });
 
 main().catch((e) => {
+  // A refused launch is the operator's misconfiguration, not a crash: print the
+  // message alone and exit 2, the same shape parseFlags uses for a bad flag.
+  if (e instanceof ConfigError) {
+    process.stderr.write(`error: ${e.message}\n`);
+    process.exit(2);
+  }
   process.stderr.write(`fatal: ${(e as Error).stack ?? String(e)}\n`);
   process.exit(1);
 });
