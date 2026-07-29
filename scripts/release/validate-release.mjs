@@ -41,6 +41,11 @@ for (const field of ["main", "module", "types", "typings", "exports"]) {
   check(!(field in pkg), `package.json is bin-only and must not declare ${field}`);
 }
 check(pkg.files?.includes("dist"), "the npm tarball must include dist/");
+check(pkg.publishConfig?.access === "public", "the npm package must publish with public access");
+check(
+  pkg.scripts?.prepublishOnly === "npm run validate:release",
+  "prepublishOnly must run the release metadata validator",
+);
 check(pkg.mcpName === server.name, "package.json mcpName must match server.json name");
 check(pkg.version === server.version, "package.json and server.json versions must match");
 check(serverPackage?.identifier === pkg.name, "server.json must reference this npm package");
@@ -48,8 +53,16 @@ check(serverPackage?.version === pkg.version, "server.json package version must 
 check(serverPackage?.registryType === "npm", "server.json package must use the npm registry");
 check(serverPackage?.transport?.type === "stdio", "server.json package transport must be stdio");
 check(
-  typeof server.description === "string" && [...server.description].length <= 100,
+  typeof server.description === "string" &&
+    server.description.trim().length > 0 &&
+    [...server.description].length <= 100,
   "server.json description must be 1-100 characters",
+);
+
+const publishWorkflow = read(".github/workflows/publish.yml");
+check(
+  publishWorkflow.includes("environment: npm-production"),
+  ".github/workflows/publish.yml must use the npm-production protected environment",
 );
 
 const expectedRuntime = `stellar-agent-mcp@${pkg.version}`;
@@ -72,11 +85,11 @@ const persistentDocs = [
 for (const path of persistentDocs) {
   const contents = read(path);
   check(
-    !contents.includes("-- npx -y stellar-agent-mcp mcp"),
-    `${path} contains an unpinned persistent npx MCP launch`,
+    !/npx\s+(?:--yes|-y)\s+stellar-agent-mcp(?=[\s"'`]|$)/.test(contents),
+    `${path} contains an unpinned persistent npx launch`,
   );
   check(
-    !contents.includes("npm i -g stellar-agent-mcp\n"),
+    !/npm\s+(?:i|install)\s+(?:-g\s+)?stellar-agent-mcp(?=[\s"'`]|$)/.test(contents),
     `${path} contains an unpinned persistent global install`,
   );
 }
