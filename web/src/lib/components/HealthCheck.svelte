@@ -24,7 +24,7 @@
 		use:reveal
 	>
 		{#each checks as check (check.label)}
-			<div class="bg-surface p-4 space-y-2">
+			<div class="bg-surface p-3 space-y-1.5 sm:p-4 sm:space-y-2">
 				<div class="flex items-center gap-2">
 					<svg
 						class="h-3.5 w-3.5 text-positive"
