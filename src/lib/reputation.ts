@@ -1,6 +1,6 @@
 /**
- * reputation.ts — ReputationVerifier: trust-minimized, on-chain re-derivation
- * of an agent's reputation and a field-scoped declared-vs-on-chain diff.
+ * reputation.ts — ReputationVerifier: bounded on-chain comparison of an
+ * agent's indexed reputation and a field-scoped declared-vs-chain diff.
  *
  * This is READ-ONLY. It uses the generated contract spec on a fetch-only SDK
  * build (see `soroban.ts` for why), which
@@ -14,8 +14,9 @@
  *      set is small enough for the contract's five-client summary cap.
  *   2. get_summary(agent_id, client_addresses, "", "") → WAD-normalized average
  *      across those clients: average = summary_value / 10^summary_value_decimals.
- *   3. diff vs the explorer's DECLARED {average, feedbackCount, uniqueClients}
- *      within tolerance → VerificationStatus.
+ *   3. compare average + active feedbackCount with the explorer. Active
+ *      uniqueClients cannot be derived from the append-only contract client
+ *      list and remains explicitly unverified.
  *
  * DEGRADE-CLOSED: any RPC failure, simulation rejection, contract error, a
  * truncated (capped) client set, or an out-of-range unit maps to null →
@@ -188,7 +189,7 @@ export class ReputationVerifier {
    * Re-derive reputation directly from the contract. Returns null on ANY
    * failure/degradation (disabled, RPC down, contract error, truncated client
    * set, or an out-of-range unit) so callers fall back to declared-only.
-   * Bounded + cached (10 min for a value, 60 s for a null).
+   * Bounded + cached (60 s for either a value or a degraded result).
    */
   async verify(agentId: number): Promise<OnchainReputation | null> {
     if (!this.isEnabled) return null;

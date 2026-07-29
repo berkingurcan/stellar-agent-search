@@ -1,171 +1,140 @@
 # Publishing `stellar-agent-mcp`
 
-Operational runbook for the first release and every one after it.
+Operational runbook for the one-time npm name reservation and every real release after it. The blocking work
+is tracked in [`issues/`](issues/); this file is the ordered procedure.
 
-The repo already tracks the *why* for the blocking items in [`issues/`](issues/) — this file is the
-ordered sequence and the checks that tell you a step actually worked. Where an issue covers a step,
-it is linked rather than restated.
+**State verified 29 July 2026:** the npm name is unclaimed and the repository must become public before a
+provenance-backed release. Public onboarding therefore stays disabled, and every prepared launch remains
+exact-version pinned.
 
-**State verified 29 July 2026:**
+## Release model
 
-| | |
-|---|---|
-| npm package | **does not exist** — `npm view stellar-agent-mcp` → 404 |
-| GitHub repo | **private** — `gh repo view --json visibility` → `PRIVATE` |
-| Current branch | `fix/issues-sweep` (default branch is `main`) |
-| Working tree | dirty, including dependency changes (`zod ^3→^4`, MCP SDK `2.0.0`, `engines >=18→>=20`) |
-| Tests | 203 passing across 17 files |
-| Version | `0.1.0`, consistent in `package.json` and `server.json` (both the top-level and `packages[0]` fields) |
+Only the inert `0.0.0` name reservation is manual. It contains no executable code and is published under the
+non-default `bootstrap` dist-tag. The real `0.1.0` and every later release are tag-driven through
+`.github/workflows/publish.yml` using npm Trusted Publishing (GitHub OIDC, no long-lived npm token).
 
-Everything on the landing page and in the README — `npx -y stellar-agent-mcp …` — fails until step 3
-completes.
-
----
-
-## The shape of this
-
-Releases are **tag-driven**. `.github/workflows/publish.yml` fires on any `v*` tag and does the whole
-job: `npm ci` → build → test → `npm publish` → publish the manifest to the MCP Registry.
-
-It authenticates with **npm Trusted Publishing** (OIDC), so there is no `NPM_TOKEN` anywhere. That is
-also why the first release cannot use it: a Trusted Publisher is configured in a package's settings
-page on npmjs.com, and the package has to exist before it has a settings page.
-
-So the first release is manual, and it exists to create the name. Every release after it is a tag.
-
----
+The workflow accepts only a tag whose commit is already on `origin/main`. It validates metadata against the
+checksum-pinned MCP schema, typechecks, tests, builds, installs the exact tarball in a clean consumer, executes
+its bin, generates the consumer SBOM, and verifies npm ownership, tarball integrity, and SLSA provenance. Only
+then does it publish or verify the immutable MCP Registry version.
 
 ## 1. Make the repository public
 
-Settings → General → Danger Zone → Change visibility → Public.
+GitHub → Settings → General → Danger Zone → Change visibility → Public.
 
-This is not cosmetic and it is not optional-for-now. npm's own documentation:
-
-> Provenance is not generated for packages in private repositories, even when using trusted
-> publishing. This limitation applies whether the package itself is public or private.
-
-Publish while private and the package ships with no provenance attestation, which is one of the
-things a reviewer is asked to check.
-
-[`issues/P0-01-make-repository-public.md`](issues/P0-01-make-repository-public.md) lists the three
-`docs/evidence.md` edits that become false the moment visibility flips. Do them in the same pass.
-
-**Check:** open `https://raw.githubusercontent.com/berkingurcan/stellar-agent-mcp/main/skills/mcp/SKILL.md`
-in a private window. It must return the file, not a 404. Until it does,
-`npx skills add berkingurcan/stellar-agent-mcp --skill mcp` cannot resolve either.
-
-## 2. Get `main` into a releasable state
-
-The tag has to point at the commit you actually want published, and CI runs from the tag — not from
-your working tree.
+This is a release gate: npm does not generate provenance for a public package built from a private repository,
+and MCP Registry GitHub OIDC ownership must resolve the public repository. In a logged-out session, confirm:
 
 ```bash
-git status --short                 # must be empty
-npm ci                             # clean install from the lockfile, as CI does
-npm run typecheck && npm test      # 203 tests
+curl -fsS https://raw.githubusercontent.com/berkingurcan/stellar-agent-mcp/main/skills/mcp/SKILL.md >/dev/null
+```
+
+## 2. Prepare a green release commit on `main`
+
+Start from a clean checkout. Keep the release version synchronized in `package.json`, both `server.json`
+version fields, and `skills/mcp/SKILL.md`'s `metadata.version`. Update `smithery.yaml` and every persistent
+onboarding example to the same exact `stellar-agent-mcp@X.Y.Z` pin; never persist an unversioned npm launch.
+
+```bash
+npm ci
+npm run validate:release
+npm run typecheck
+npm test
 npm run build
+npm pack --dry-run
 ```
 
-The working tree currently carries in-flight dependency changes. `npm ci` installs from
-`package-lock.json`, so if the lockfile and `package.json` disagree it fails outright — fix that
-before tagging rather than discovering it in the workflow.
+Date the changelog, merge the reviewed release commit to `main`, and wait for required CI. Do not tag a feature
+branch or a dirty working tree.
 
-Then set the release date. `CHANGELOG.md` line 107 reads `## [0.1.0] — unreleased`; replace
-`unreleased` with the date, and fold anything still sitting under `## [Unreleased]` into it.
-
-Merge to `main` and confirm you are on it — a tag on `fix/issues-sweep` publishes that branch's code.
+For a later version bump, avoid `npm version`'s automatic tag until every manifest is synchronized:
 
 ```bash
-git branch --show-current          # main
+npm version patch --no-git-tag-version  # or minor / major
+# Update server.json, skill metadata, Smithery, pinned docs/web examples, and CHANGELOG.md.
+npm run validate:release && npm run typecheck && npm test && npm run build
+# Review and commit the complete release diff; create the tag only after it is green on main.
 ```
 
-**Version consistency.** Three fields must match or the MCP Registry rejects the manifest:
+## 3. Reserve the npm name once
+
+Do not rewrite the real package to `0.0.0`. Generate the repository-provided inert reservation in an empty
+temporary directory:
 
 ```bash
-node -p "require('./package.json').version"
-node -p "require('./server.json').version"
-node -p "require('./server.json').packages[0].version"
-```
-
-## 3. First publish — manual, once
-
-```bash
+bootstrap_dir="$(mktemp -d)"
+node scripts/release/create-bootstrap-package.mjs "$bootstrap_dir"
+npm pack --dry-run "$bootstrap_dir"
 npm login
-npm publish --access public
+npm publish "$bootstrap_dir" --access public --tag bootstrap
+npm view stellar-agent-mcp dist-tags --json
 ```
 
-`prepack` runs the build for you, so `dist/` is rebuilt from the committed source rather than
-whatever was last in your working tree.
+The dry run must contain exactly `package.json`, `README.md`, and `LICENSE`; it must contain no `bin`, scripts,
+or dependencies. The dist-tags response must show `"bootstrap": "0.0.0"` and must not contain `latest`.
+Delete the temporary directory. Never manually publish `0.1.0`.
 
-Before you run it, `npm publish --dry-run` prints the tarball. It should be **6 files, ~147 kB**:
-`LICENSE`, `README.md`, `package.json`, `dist/index.js`, `dist/index.js.map`, `dist/index.d.ts`.
-The `files` field restricts the package to `dist/`, `README.md` and `LICENSE`, so `web/`, `test/`,
-`examples/`, `issues/` and `docs/` are correctly absent.
+## 4. Configure both protection layers
 
-The dry-run must print **no** `npm warn publish` lines. It used to emit:
+Create a GitHub environment named **`npm-production`**. Require a second reviewer, prevent self-review, allow
+only selected tags matching `v*`, and disable administrator bypass. A workflow's `environment:` field alone
+does not configure any of these rules.
 
-```
-npm warn publish "bin[stellar-agent-mcp]" script name dist/index.js was invalid and removed
-```
+On npmjs.com → package → Settings → Trusted Publisher, set:
 
-`bin` is the entire product — if npm drops it, `npx -y stellar-agent-mcp` resolves to nothing. Fixed
-by writing the path without the `./` prefix (`"dist/index.js"`, what `npm pkg fix` produces); the
-warning is gone and the packed tarball keeps both `bin` and the `#!/usr/bin/env node` shebang. If the
-warning ever comes back, stop and fix it before publishing.
+- provider: **GitHub Actions**;
+- organization/user: `berkingurcan`;
+- repository: `stellar-agent-mcp`;
+- workflow filename: **`publish.yml`** (filename only, not `.github/workflows/publish.yml`);
+- environment name: **`npm-production`**;
+- allowed action: **`npm publish`** only.
 
-**Check:**
+Set the GitHub Actions repository variable `NPM_PACKAGE_OWNERS` to the exact comma-separated npm maintainer
+allowlist. The release fails if the variable is empty, an unexpected maintainer appears, or any existing npm
+version points at another repository/MCP name.
+
+After the first OIDC release succeeds, configure npm to require 2FA and disallow tokens, and revoke obsolete
+automation tokens. Trusted Publishing continues to work through its short-lived OIDC credential.
+
+## 5. Publish the real release by tag
+
+Create the tag only on the reviewed commit already present on `main`:
 
 ```bash
-npm view stellar-agent-mcp version
-cd /tmp && npx -y stellar-agent-mcp doctor
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
-`doctor` is the right smoke test: it reports Node version, network, and the read-only/keyless
-invariant, so a green run proves the binary resolved *and* the environment is sane.
+The tag must equal `v` plus the package/server version. The protected environment approval happens before the
+job receives permission to publish. A rerun may skip an immutable npm version only after proving that its
+owners, exact tarball integrity, Trusted Publisher, workflow/ref/commit, and Sigstore attestations match this
+release. It never treats a bare `HTTP 200` as ownership.
 
-## 4. Configure the Trusted Publisher
+The MCP Registry step performs the same fail-closed check: an existing exact version is accepted only when its
+`server` object exactly equals local `server.json`.
 
-On npmjs.com → the package → Settings → Trusted Publisher:
-
-- Provider: **GitHub Actions**
-- Organization / user: `berkingurcan`
-- Repository: `stellar-agent-mcp`
-- Workflow filename: `.github/workflows/publish.yml`
-
-A package can hold only one trusted publisher at a time. Once this is set, no long-lived token is
-needed and provenance is attached automatically on every subsequent release.
-
-Covered by [`issues/P0-03-first-npm-publish.md`](issues/P0-03-first-npm-publish.md).
-
-## 5. Every release after this one
+## 6. Verify, then expose onboarding
 
 ```bash
-# bump package.json + server.json (×2) to the new version, date the CHANGELOG section, commit
-git tag v0.1.1
-git push origin v0.1.1
+npm view stellar-agent-mcp@0.1.0 version dist.integrity repository --json
+npm view stellar-agent-mcp dist-tags --json
+curl -fsS 'https://registry.modelcontextprotocol.io/v0.1/servers/io.github.berkingurcan%2Fstellar-agent-mcp/versions/0.1.0'
 ```
 
-The workflow needs `id-token: write` for **both** npm Trusted Publishing and the MCP Registry's
-GitHub OIDC login — it is already set at the job level; do not narrow it.
+On npm, verify that the provenance badge resolves to this repository, `.github/workflows/publish.yml`, the
+release tag, and the tagged commit. Confirm the MCP Registry response matches `server.json`.
 
-**Check:** the npm page shows the repository link and a **provenance** badge, and the run's
-`mcp-publisher publish` step succeeds. The MCP Registry entry is keyed on
-`io.github.berkingurcan/stellar-agent-mcp` and points at the npm package by `identifier` +
-`version` — which is why the version fields in step 2 have to agree.
+Only after both checks pass, make a reviewed follow-up that changes `PACKAGE_PUBLISHED` in
+`web/src/lib/surface.ts` from `false` to `true`, removes the dated unclaimed-package warnings, and deploys the
+assets-only landing Worker. Canary every copy button. Persistent configs must stay pinned to
+`stellar-agent-mcp@0.1.0`; do not replace them with mutable `latest` launches.
 
----
+## Non-negotiable stop conditions
 
-## Things worth knowing before you press publish
-
-**Publishing a name is close to permanent.** Unpublishing is only allowed within 72 hours, and the
-name stays reserved afterwards. Publish `0.1.0` only when it is the thing you want people to install.
-
-**Node version.** Trusted Publishing needs Node ≥ 22.14 and npm ≥ 11.5.1. The workflow pins Node 22
-and upgrades npm before publishing. Your local Node only matters for step 3.
-
-**`npm publish --dry-run` does not exercise provenance generation.** A missing or malformed
-`repository.url` surfaces only on a real publish, which is another reason the first one is manual
-and attended.
-
-**The landing page is already live** at <https://mcp.stellar8004.com> and advertises the install
-command. It went out before the package did, so the gap between now and step 3 is publicly visible.
+- The repository is private or the tag commit is not on `main`.
+- The `npm-production` environment is missing any protection rule.
+- npm Trusted Publisher uses a full path instead of filename `publish.yml`, omits the environment, or allows
+  an action other than the intended `npm publish`.
+- The bootstrap package contains executable code or creates `latest`.
+- Any owner, integrity, provenance, registry object, or version check differs from the local gated release.
+- The workflow proposes a manual real-version publish, an npm token, or an unversioned persistent `npx` command.

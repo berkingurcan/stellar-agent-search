@@ -110,9 +110,10 @@ score = clamp(base + paymentBonus + endpointBonus, 0, 1)
 score100 = round(score · 100)                            # the displayed 0..100 score
 ```
 
-Bonuses (already scaled into the `[0,1]` score space): x402 **+0.05**, mpp **+0.03**, hasServices **+0.03**,
-on-chain-**verified** **+0.03**. Weights are env-overridable (`RANK_W_*`) or per-call (`rank_agent.weights`),
-always re-normalized to sum 1.
+Bonuses (already scaled into the `[0,1]` score space): x402 **+0.05**, mpp **+0.03**, and hasServices
+**+0.03**. Verification evidence never changes the score; the retained `verifiedBonus` response field is
+always `0` for pre-release schema continuity. Weights are env-overridable (`RANK_W_*`) or per-call
+(`rank_agent.weights`), always re-normalized to sum 1.
 
 **Why breadth > volume:** unique clients (breadth) are hard to fake; raw feedback count (volume) is cheap to
 fake. Weighting breadth above volume is a Sybil-cost hedge, not Sybil-resistance or proof of personhood.
@@ -136,14 +137,17 @@ explorer's declared numbers, producing a `VerificationResult`:
 
 | `status` | Meaning |
 |---|---|
-| `verified` | on-chain summary matched declared within tolerance |
-| `mismatch` | declared and on-chain diverged beyond tolerance (flag only, no penalty) |
-| `unavailable` | verification attempted but the RPC was down / the simulation was rejected |
+| `verified` | reserved for a future comparison that covers every declared reputation field |
+| `partial` | bounded on-chain average and active-count comparison matched; active unique clients remain unverified |
+| `mismatch` | a compared field diverged beyond tolerance; unversioned snapshots mean this is not proof of manipulation |
+| `unavailable` | comparison attempted but the RPC failed, the client set exceeded the five-client cap, or the simulation was rejected |
 | `skipped` | not attempted (disabled via `VERIFY_ONCHAIN=false`/`--no-verify`, or outside the top-K) |
 
-Verification is **bounded**: only the top-K returned rows are verified (default K = 5 for discovery; up to
-the request `limit`, capped at 25, for explicit `rank_agent`). It **degrades closed** — if the RPC fails,
-the row falls back to declared-only with `status: "unavailable"` rather than erroring the whole call.
+Comparison is **bounded twice**: only the top-K returned rows are checked, and the current contract summary is
+usable only when the complete comparable client set is at most five. The explorer and RPC also lack a shared
+ledger-bound snapshot. Healthy current results are therefore `partial`, never full `verified`. The path
+**degrades closed** — if completeness or RPC evidence is missing, the row falls back to declared-only with
+`status: "unavailable"` rather than erroring the whole call or manufacturing certainty.
 
 ## Explorer access notes (`lib/explorer.ts`)
 

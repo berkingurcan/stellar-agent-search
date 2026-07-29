@@ -1,6 +1,7 @@
 /**
- * get_agents_by_owner — every agent registered by a given owner G-address,
- * ranked client-side. Useful for provenance / "show me this operator's fleet".
+ * get_agents_by_owner — the current owner API page (up to 20 agents) for a
+ * given owner G-address, ranked client-side. Coverage says whether more rows
+ * may exist.
  */
 
 import { z } from "zod";

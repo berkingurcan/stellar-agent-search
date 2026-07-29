@@ -1,8 +1,8 @@
 /**
  * resolve_agent — turn any agent reference (numeric id, numeric string, full
  * stellar:{network}:{identity}#{id} handle, or owner G-address) into the
- * canonical typed identifiers. Owner addresses expand to every agent they own
- * (needs an explorer lookup); all other kinds resolve without I/O.
+ * canonical typed identifiers. Owner addresses expand to the current owner API
+ * page (up to 20, with explicit coverage); all other kinds resolve without I/O.
  */
 
 import { z } from "zod";

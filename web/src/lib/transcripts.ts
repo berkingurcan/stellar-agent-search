@@ -63,7 +63,7 @@ export const PROFILE = {
  * it is not a simplification: src/lib/reputation.ts truncates the declared average to
  * the chain's precision when the on-chain average is an integer, because the
  * contract truncates the mean and the fractional part is not independently
- * verifiable against it. Tolerance is 0.5 on the average and 1 on feedback count.
+	 * verifiable against it. Tolerance is 0.5 on the average and exact (0) on feedback count.
  * Active unique clients remain explicitly unverified by this contract read.
  *
  * Every field below names which side it came from. On a page about the gap
@@ -77,7 +77,7 @@ export const SAMPLE = {
 	declaredSource: 'explorer indexer',
 	onchain: '96',
 	onchainSource: 'Reputation contract',
-	note: 'Average and active feedback count agree at the contract\'s precision. Active unique clients are not derivable from the append-only client list, so this is partial—not fully verified.',
+	note: 'Average and active feedback count agree in two unversioned observations. Explorer and Soroban do not share a snapshot; active unique clients are not derivable from the append-only client list, so this is partial—not fully verified.',
 	/** Read from the contract, via doctor's sampled verification of agent 10. */
 	onchainFeedback: 8,
 	onchainClientCoverage: 'active unique clients not derived',
@@ -96,12 +96,12 @@ export const VERDICTS = [
 	{
 		key: 'partial',
 		tone: 'accent',
-		meaning: 'On-chain average and feedback count match; active unique clients remain unverified.'
+		meaning: 'Bounded observations agree for average and count; there is no common snapshot, and active unique clients remain unverified.'
 	},
 	{
 		key: 'mismatch',
 		tone: 'warning',
-		meaning: 'Declared and on-chain diverged beyond tolerance. Flagged, never silently corrected.'
+		meaning: 'Unversioned Explorer and Soroban observations differ beyond tolerance; this is not proof of manipulation.'
 	},
 	{
 		key: 'unavailable',

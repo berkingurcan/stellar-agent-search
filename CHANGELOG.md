@@ -66,7 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is still patched rather than excused as unreachable.
 - GitHub Actions are pinned to commit SHAs in CI and release workflows rather than mutable major-version tags.
 - The release workflow checksum-pins `mcp-publisher` `v1.8.0` instead of downloading `latest`, and generates a
-  runtime CycloneDX SBOM as a release-workflow artifact before publishing.
+  CycloneDX SBOM from a clean consumer install of the exact packed artifact before publishing.
 - The Trusted Publishing workflow installs exact `npm@11.17.0` rather than executing a moving `npm@latest`.
 - Persistent MCP client registrations created by `setup` pin the exact running package version instead of
   executing a mutable npm `latest` tag on every launch. The public landing withholds copyable install commands
@@ -86,8 +86,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - README and the getting-started guide now use the canonical `stellar-agent-mcp setup` bootstrap instead of
   hand-written client registration commands, and the guide documents the optional skill install it had been
   missing.
-- The tag release workflow now rejects tag/package/server version drift and can resume the MCP Registry phase
-  after npm publication already succeeded, rather than attempting to republish an immutable npm version.
+- The tag release workflow now rejects tag/package/server version drift and resumes after npm publication only
+  when the immutable version's owners, exact tarball integrity, Trusted Publisher identity, and GitHub SLSA
+  source all match the locally gated release.
 - The npm artifact is explicitly bin-only. The old `main`/`module`/`types`/`exports` fields pointed imports at
   the CLI entry, whose top-level dispatch starts a process instead of exposing a library API. SDK ownership
   remains with `@trionlabs/stellar8004`; this package now advertises only the executable it actually supports.
