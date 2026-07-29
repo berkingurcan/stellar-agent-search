@@ -20,7 +20,7 @@ import { safe, sanitizeText, serverText } from "../lib/sanitize.js";
 
 const inputShape = {
   ref: z
-    .union([z.number().int().nonnegative().max(MAX_AGENT_ID), z.string().min(1)])
+    .union([z.number().int().nonnegative().max(MAX_AGENT_ID), z.string().min(1).max(256)])
     .describe("Agent id, numeric string, stellar:{network}:{identity}#{id} handle, or owner G-address."),
 };
 

@@ -71,6 +71,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Persistent MCP client registrations created by `setup` pin the exact running package version instead of
   executing a mutable npm `latest` tag on every launch. The public landing withholds copyable install commands
   while the npm name remains unclaimed.
+- Release publishing now requires main-branch ancestry, the exact npm maintainer allowlist, a schema-valid MCP
+  manifest, and one packed tarball shared by consumer-SBOM generation and `npm publish`. A published version is
+  skipped only when its integrity and GitHub OIDC/SLSA provenance match the tagged commit; immutable MCP
+  Registry versions receive the same exact-metadata precheck. Publisher credentials are removed on every exit.
 
 ### Changed
 
@@ -84,6 +88,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   missing.
 - The tag release workflow now rejects tag/package/server version drift and can resume the MCP Registry phase
   after npm publication already succeeded, rather than attempting to republish an immutable npm version.
+- The npm artifact is explicitly bin-only. The old `main`/`module`/`types`/`exports` fields pointed imports at
+  the CLI entry, whose top-level dispatch starts a process instead of exposing a library API. SDK ownership
+  remains with `@trionlabs/stellar8004`; this package now advertises only the executable it actually supports.
 
 ### Fixed
 
@@ -128,7 +135,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tarball (it does not — `files` excludes `skills/`, deliberately), that one-command skill acquisition was
   already verifiable (it needs the repo public and `main` as the default branch), and the automated test count.
 
-## [0.1.0] — unreleased
+## [0.1.0] — 2026-07-29
 
 First public release: a read-only, keyless MCP server and CLI over the on-chain stellar-8004 agent registry on
 Stellar mainnet.

@@ -52,10 +52,10 @@ export function registerPrompts(server: McpServer, deps: PromptDeps = {}): void 
       description:
         "Discover agents, re-check the contract-verifiable reputation fields, and recommend one.",
       argsSchema: z.object({
-        task: z.string().min(1).describe("What you need an agent to do (natural language)."),
-        budget: z.string().optional().describe("Optional budget hint, e.g. '0.10 USDC/call'."),
-        require_x402: z.string().optional().describe("'true' to require x402 (pay-per-call) support."),
-        min_score: z.string().optional().describe("Optional minimum score 0-100."),
+        task: z.string().min(1).max(512).describe("What you need an agent to do (natural language)."),
+        budget: z.string().max(120).optional().describe("Optional budget hint, e.g. '0.10 USDC/call'."),
+        require_x402: z.string().max(16).optional().describe("'true' to require x402 (pay-per-call) support."),
+        min_score: z.string().max(16).optional().describe("Optional minimum score 0-100."),
       }),
     },
     (args) => {
@@ -108,6 +108,7 @@ export function registerPrompts(server: McpServer, deps: PromptDeps = {}): void 
         agent: z
           .string()
           .min(1)
+          .max(256)
           .describe("Agent id, stellar:{network}:{identity}#{id} handle, or owner G-address."),
       }),
     },
@@ -136,9 +137,9 @@ export function registerPrompts(server: McpServer, deps: PromptDeps = {}): void 
       description:
         "Compare 2-3 agents across quality/volume/breadth, verification, x402, and services, then recommend one.",
       argsSchema: z.object({
-        agent_a: z.string().min(1).describe("First agent (id, stellar:…#id, or G-address)."),
-        agent_b: z.string().min(1).describe("Second agent."),
-        agent_c: z.string().optional().describe("Optional third agent."),
+        agent_a: z.string().min(1).max(256).describe("First agent (id, stellar:…#id, or G-address)."),
+        agent_b: z.string().min(1).max(256).describe("Second agent."),
+        agent_c: z.string().max(256).optional().describe("Optional third agent."),
       }),
     },
     (args) => {
@@ -172,8 +173,8 @@ export function registerPrompts(server: McpServer, deps: PromptDeps = {}): void 
       description:
         "Lay out the exact x402 pay-per-call steps for an agent's service endpoint and STOP before signing — this server is keyless.",
       argsSchema: z.object({
-        agent: z.string().min(1).describe("Agent id, stellar:…#id handle, or owner G-address."),
-        task: z.string().optional().describe("Optional description of the call you want to make."),
+        agent: z.string().min(1).max(256).describe("Agent id, stellar:…#id handle, or owner G-address."),
+        task: z.string().max(512).optional().describe("Optional description of the call you want to make."),
       }),
     },
     (args) => {
@@ -216,6 +217,7 @@ export function registerPrompts(server: McpServer, deps: PromptDeps = {}): void 
       argsSchema: z.object({
         focus: z
           .string()
+          .max(120)
           .optional()
           .describe("Optional angle, e.g. 'x402 services' or 'reputation'."),
       }),

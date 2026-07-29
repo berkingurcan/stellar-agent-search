@@ -6,6 +6,8 @@ const EXPECTED_ROUTES = new Set([
   "https://mcp.stellar8004.com/mcp",
   "https://mcp.stellar8004.com/healthz",
 ]);
+const EXPECTED_RATE_LIMIT = 30;
+const EXPECTED_RATE_PERIOD = 60;
 
 const REQUIRED_ALIASES = {
   "@stellar/stellar-sdk": "@stellar/stellar-sdk/no-axios",
@@ -176,8 +178,13 @@ export function validateDeployConfig(rawConfig) {
     );
   }
   const simple = objectValue(limiter.simple, "MCP_RATE_LIMITER.simple");
-  positiveInteger(simple.limit, "MCP_RATE_LIMITER.simple.limit");
-  positiveInteger(simple.period, "MCP_RATE_LIMITER.simple.period");
+  const rateLimit = positiveInteger(simple.limit, "MCP_RATE_LIMITER.simple.limit");
+  const ratePeriod = positiveInteger(simple.period, "MCP_RATE_LIMITER.simple.period");
+  if (rateLimit !== EXPECTED_RATE_LIMIT || ratePeriod !== EXPECTED_RATE_PERIOD) {
+    deployError(
+      `MCP_RATE_LIMITER.simple must remain ${EXPECTED_RATE_LIMIT} requests per ${EXPECTED_RATE_PERIOD} seconds`,
+    );
+  }
 
   const aliases = objectValue(config.alias, "alias");
   for (const [name, target] of Object.entries(REQUIRED_ALIASES)) {
@@ -186,8 +193,8 @@ export function validateDeployConfig(rawConfig) {
 
   return {
     namespaceId: limiter.namespace_id,
-    rateLimit: simple.limit,
-    ratePeriod: simple.period,
+    rateLimit,
+    ratePeriod,
     routes: [...seenRoutes].sort(),
   };
 }

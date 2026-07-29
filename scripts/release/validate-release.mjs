@@ -91,6 +91,11 @@ if (schemaPath) {
   const ajv = new Ajv({
     allErrors: true,
     strict: true,
+    // The official draft-07 document carries the non-validation `example`
+    // annotation and composes one required field through `allOf`. Keep strict
+    // type checking while accepting those two upstream schema conventions.
+    strictSchema: false,
+    strictRequired: false,
     formats: {
       uri(value) {
         try {

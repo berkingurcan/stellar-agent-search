@@ -54,6 +54,12 @@ describe("capability triggers", () => {
     expect(mpp.filters.mpp).toBeUndefined();
     expect(mpp.unsupported).toContain("negative-filter:mpp");
   });
+
+  it("recognizes common Turkish capability and quality phrases", () => {
+    const q = parseQuery("iyi itibarlı ücretli çeviri servisi");
+    expect(q.filters).toMatchObject({ x402: true, hasServices: true, minScore: 70 });
+    expect(q.keywords).toEqual(["ceviri"]);
+  });
 });
 
 describe("trust models (reputation-as-trust needs explicit phrasing)", () => {
@@ -133,7 +139,7 @@ describe("residual keyword extraction", () => {
   });
 
   it("preserves international words and folds accents deterministically", () => {
-    expect(residualKeywords("Türkçe çeviri ve veri")).toEqual(["turkce", "ceviri", "ve", "veri"]);
+    expect(residualKeywords("Türkçe çeviri ve veri")).toEqual(["turkce", "ceviri", "veri"]);
     expect(residualKeywords("中文 翻译")).toEqual(["中文", "翻译"]);
   });
 

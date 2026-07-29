@@ -78,5 +78,26 @@ describe("MCP v2 server contract", () => {
     expect(result.isError).toBeFalsy();
     expect(calls).toEqual([{ page: 1, limit: 20, mpp: true }]);
     expect(result.structuredContent).toMatchObject({ count: 1, page: 1 });
+
+    const falseRequirement = await client.callTool({
+      name: "list_agents",
+      arguments: { mpp: false },
+    });
+    expect(falseRequirement.isError).toBe(true);
+    expect(calls).toHaveLength(1);
+
+    const oversizedQuery = await client.callTool({
+      name: "find_agent",
+      arguments: { query: "q".repeat(257) },
+    });
+    expect(oversizedQuery.isError).toBe(true);
+    expect(calls).toHaveLength(1);
+
+    const negatedRequirement = await client.callTool({
+      name: "find_agent",
+      arguments: { query: "a scraper without x402" },
+    });
+    expect(negatedRequirement.isError).toBe(true);
+    expect(calls).toHaveLength(1);
   });
 });

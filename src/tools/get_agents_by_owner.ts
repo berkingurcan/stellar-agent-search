@@ -22,6 +22,7 @@ import { zRankedAgent } from "./schemas.js";
 const inputShape = {
   owner: z
     .string()
+    .max(56)
     .describe("Owner account (Stellar G-address).")
     .refine((s) => isValidOwnerAddress(s), "must be a checksum-valid Stellar G-address"),
   limit: zLimit(20, 20),

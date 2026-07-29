@@ -14,7 +14,7 @@ it is linked rather than restated.
 | GitHub repo | **private** — `gh repo view --json visibility` → `PRIVATE` |
 | Current branch | `fix/issues-sweep` (default branch is `main`) |
 | Working tree | dirty, including dependency changes (`zod ^3→^4`, MCP SDK `2.0.0`, `engines >=18→>=20`) |
-| Tests | 161 passing across 15 files |
+| Tests | 203 passing across 17 files |
 | Version | `0.1.0`, consistent in `package.json` and `server.json` (both the top-level and `packages[0]` fields) |
 
 Everything on the landing page and in the README — `npx -y stellar-agent-mcp …` — fails until step 3
@@ -62,7 +62,7 @@ your working tree.
 ```bash
 git status --short                 # must be empty
 npm ci                             # clean install from the lockfile, as CI does
-npm run typecheck && npm test      # 161 tests
+npm run typecheck && npm test      # 203 tests
 npm run build
 ```
 
