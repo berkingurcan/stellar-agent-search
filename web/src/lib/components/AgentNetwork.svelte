@@ -2,22 +2,20 @@
 	import { onMount } from 'svelte';
 
 	let svg = $state<SVGSVGElement>();
-	let ready = $state(false);
 	let raf = 0;
 	let mouse = { x: -9999, y: -9999 };
 	let smooth = { x: -9999, y: -9999 };
-	const GLOW = 160;
+	const GLOW = 180;
 	const GLOW_SQ = GLOW * GLOW;
 	const LERP = 0.08;
 
-	const COLS = 6;
-	const ROWS = 6;
-	const TILE = 52;
+	const COLS = 7;
+	const ROWS = 7;
+	const TILE = 48;
 	const ISO_X = 0.866;
 	const ISO_Y = 0.5;
 
 	type Node = {
-		id: number;
 		ix: number;
 		iy: number;
 		sx: number;
@@ -28,8 +26,8 @@
 	};
 	type Edge = { a: Node; b: Node; el: SVGLineElement | null };
 
-	let nodes = $state<Node[]>([]);
-	let edges = $state<Edge[]>([]);
+	let nodes: Node[] = [];
+	let edges: Edge[] = [];
 
 	function isoX(col: number, row: number) {
 		return (col - row) * TILE * ISO_X;
@@ -41,19 +39,17 @@
 	function build() {
 		nodes = [];
 		edges = [];
-		let id = 0;
 		for (let row = 0; row < ROWS; row++) {
 			for (let col = 0; col < COLS; col++) {
-				const r = 1.5 + Math.random() * 2;
+				const r = 1.8 + Math.random() * 2.2;
 				nodes.push({
-					id: id++,
 					ix: col,
 					iy: row,
 					sx: isoX(col, row),
 					sy: isoY(col, row),
 					r,
 					el: null,
-					baseOpacity: 0.08 + Math.random() * 0.06
+					baseOpacity: 0.12 + Math.random() * 0.08
 				});
 			}
 		}
@@ -65,6 +61,9 @@
 			if (down) edges.push({ a: n, b: down, el: null });
 		}
 	}
+
+	// Pre-build for SSR render
+	build();
 
 	function tick() {
 		if (!svg) {
@@ -91,9 +90,8 @@
 
 			if (distSq < GLOW_SQ) {
 				const prox = 1 - Math.sqrt(distSq) / GLOW;
-				const opacity = node.baseOpacity + prox * 0.5;
-				node.el.setAttribute('opacity', String(opacity));
-				node.el.setAttribute('r', String(node.r + prox * 1.5));
+				node.el.setAttribute('opacity', String(node.baseOpacity + prox * 0.6));
+				node.el.setAttribute('r', String(node.r + prox * 2));
 			} else {
 				node.el.setAttribute('opacity', String(node.baseOpacity));
 				node.el.setAttribute('r', String(node.r));
@@ -102,12 +100,8 @@
 
 		for (const edge of edges) {
 			if (!edge.el) continue;
-			const ax = edge.a.sx;
-			const ay = edge.a.sy;
-			const bx = edge.b.sx;
-			const by = edge.b.sy;
-			const mx = (ax + bx) / 2;
-			const my = (ay + by) / 2;
+			const mx = (edge.a.sx + edge.b.sx) / 2;
+			const my = (edge.a.sy + edge.b.sy) / 2;
 			const cx = rect.left + rect.width / 2 + mx;
 			const cy = rect.top + rect.height / 2 + my;
 			const ddx = cx - smooth.x;
@@ -116,16 +110,14 @@
 
 			if (distSq < GLOW_SQ) {
 				const prox = 1 - Math.sqrt(distSq) / GLOW;
-				edge.el.setAttribute('opacity', String(0.04 + prox * 0.2));
-				edge.el.setAttribute('stroke-width', String(0.5 + prox * 0.8));
+				edge.el.setAttribute('opacity', String(0.08 + prox * 0.3));
+				edge.el.setAttribute('stroke-width', String(0.6 + prox * 1));
 			} else {
-				edge.el.setAttribute('opacity', '0.04');
-				edge.el.setAttribute('stroke-width', '0.5');
+				edge.el.setAttribute('opacity', '0.08');
+				edge.el.setAttribute('stroke-width', '0.6');
 			}
 		}
 
-		// Stay completely idle when the cursor is stationary. A decorative
-		// background must not consume a permanent 60 fps loop.
 		raf = moving ? requestAnimationFrame(tick) : 0;
 	}
 
@@ -137,57 +129,57 @@
 
 	onMount(() => {
 		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-		build();
-		ready = true;
+		if (!svg) return;
 
-		// Wait one frame for the client-only SVG to render before capturing refs.
-		const setupRaf = requestAnimationFrame(() => {
-			if (!svg) return;
-			nodes = nodes.map((n, i) => ({ ...n, el: svg?.querySelector(`[data-node="${i}"]`) ?? null }));
-			edges = edges.map((e, i) => ({ ...e, el: svg?.querySelector(`[data-edge="${i}"]`) ?? null }));
-			window.addEventListener('mousemove', onMove, { passive: true });
-		});
+		// Capture element refs
+		nodes = nodes.map((n, i) => ({
+			...n,
+			el: svg?.querySelector(`[data-node="${i}"]`) ?? null
+		}));
+		edges = edges.map((e, i) => ({
+			...e,
+			el: svg?.querySelector(`[data-edge="${i}"]`) ?? null
+		}));
+
+		window.addEventListener('mousemove', onMove, { passive: true });
 
 		return () => {
-			cancelAnimationFrame(setupRaf);
 			window.removeEventListener('mousemove', onMove);
 			cancelAnimationFrame(raf);
 		};
 	});
 </script>
 
-{#if ready}
-	<svg
-		bind:this={svg}
-		class="pointer-events-none absolute inset-0 h-full w-full"
-		viewBox="-200 -120 400 240"
-		preserveAspectRatio="xMidYMid slice"
-		aria-hidden="true"
-		style="opacity: 0.6;"
-	>
-		<g transform="translate(0, -20)">
-			{#each edges as edge, i (i)}
-				<line
-					data-edge={i}
-					x1={edge.a.sx}
-					y1={edge.a.sy}
-					x2={edge.b.sx}
-					y2={edge.b.sy}
-					stroke="var(--color-text-dim)"
-					stroke-width="0.5"
-					opacity="0.04"
-				/>
-			{/each}
-			{#each nodes as node, i (i)}
-				<circle
-					data-node={i}
-					cx={node.sx}
-					cy={node.sy}
-					r={node.r}
-					fill="var(--color-text-dim)"
-					opacity={node.baseOpacity}
-				/>
-			{/each}
-		</g>
-	</svg>
-{/if}
+<svg
+	bind:this={svg}
+	class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+	viewBox="-260 -160 520 320"
+	preserveAspectRatio="xMidYMid slice"
+	aria-hidden="true"
+	style="opacity: 0.7;"
+>
+	<g transform="translate(0, -30)">
+		{#each edges as edge, i (i)}
+			<line
+				data-edge={i}
+				x1={edge.a.sx}
+				y1={edge.a.sy}
+				x2={edge.b.sx}
+				y2={edge.b.sy}
+				stroke="var(--color-text-dim)"
+				stroke-width="0.6"
+				opacity="0.08"
+			/>
+		{/each}
+		{#each nodes as node, i (i)}
+			<circle
+				data-node={i}
+				cx={node.sx}
+				cy={node.sy}
+				r={node.r}
+				fill="var(--color-text-dim)"
+				opacity={node.baseOpacity}
+			/>
+		{/each}
+	</g>
+</svg>
