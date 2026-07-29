@@ -10,11 +10,11 @@ export const TIER0: Tool[] = [
 	{ name: 'find_agent', what: 'Natural-language discovery → ranked candidates' },
 	{
 		name: 'rank_agent',
-		what: 'Rank an explicit id set or a query, full 3-axis breakdown + on-chain verify'
+		what: 'Rank an explicit id set or a query, full 3-axis breakdown + bounded on-chain evidence'
 	},
 	{
 		name: 'get_agent_profile',
-		what: 'Deep profile: identity, capabilities, declared-vs-verified reputation, recent feedback, unverified derived A2A-shaped projection'
+		what: 'Deep profile: identity, capabilities, declared-vs-chain evidence, recent feedback, unverified derived A2A-shaped projection'
 	},
 	{ name: 'list_services', what: 'Catalog of self-declared x402/MPP endpoint candidates' }
 ];
@@ -29,7 +29,7 @@ export const TIER1: Tool[] = [
 	},
 	{ name: 'get_agents_by_owner', what: 'Current owner page, with explicit continuation coverage' },
 	{ name: 'get_agent_feedback', what: 'Recent on-chain reviews (sanitized, labeled)' },
-	{ name: 'verify_reputation', what: 'Standalone declared-vs-on-chain reputation check' },
+	{ name: 'verify_reputation', what: 'Standalone bounded declared-vs-chain reputation check' },
 	{
 		name: 'get_agent_card',
 		what: 'Unverified derived A2A-shaped projection + x402 hint; not protocol-conformance proof'
@@ -105,7 +105,7 @@ export const INVARIANTS = [
 	},
 	{
 		title: 'Degrade closed',
-		body: 'Data precedence is explorer → on-chain verify → declared-only. When the chain read fails, the result is labeled unavailable rather than quietly presented as verified.'
+		body: 'Data precedence is explorer → bounded on-chain comparison → declared-only. Missing completeness or RPC evidence is labeled unavailable; matching average/count is partial while active unique clients remain unverified.'
 	}
 ];
 

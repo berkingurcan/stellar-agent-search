@@ -6,7 +6,7 @@
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen.svg)](https://nodejs.org)
 [![MCP](https://img.shields.io/badge/MCP-SDK%20v2-6E56CF.svg)](https://modelcontextprotocol.io)
 
-> **A read-only ERC-8004 discovery and verification layer for Stellar mainnet. The funded x402 + feedback proof is implemented but still pending its first recorded mainnet run.**
+> **A read-only ERC-8004 discovery layer with bounded on-chain reputation evidence for Stellar mainnet. The funded x402 + feedback proof is implemented but still pending its first recorded mainnet run.**
 
 > **Pre-release security gate (29 July 2026):** the `stellar-agent-mcp` npm name is still unclaimed. Do not
 > run the `npx` commands below until the [official npm page](https://www.npmjs.com/package/stellar-agent-mcp)
@@ -26,7 +26,7 @@ npx -y stellar-agent-mcp@0.1.0 find "a paid web scraper with a good reputation"
 
 ---
 
-## Why this exists: declared vs. verified
+## Why this exists: declared data vs. bounded chain evidence
 
 Off-chain agent directories (A2A cards, the MCP Registry, OASF, NANDA) list **self-declared** agents. That is
 exactly where the trust gap lives. A 2026 study of the ERC-8004 ecosystem (arXiv 2606.26028) found that only
@@ -36,15 +36,17 @@ stellar-8004 is the only non-EVM ERC-8004 implementation **we are aware of** run
 Stellar mainnet as of July 2026; `get_registry_stats` returns the current count). No published survey
 enumerates non-EVM deployments — the study above restricts itself to Ethereum, BSC and Base, "the three chains
 with the highest registration and feedback volume" — so read that as unrefuted, not as proven. This server
-is built around the one thing a directory listing cannot give you: it **re-derives each agent's reputation
-directly from the on-chain Reputation contract** (`get_summary` + `get_clients_paginated`) and reports it as a
-**declared-vs-verified** diff — `verified | mismatch | unavailable | skipped`. Self-declared marketing text
-(name, description, service labels, feedback tags) is treated as **untrusted data**, never as instructions
-(see [Security](#security)).
+adds something a directory listing cannot give you: a **bounded, field-scoped comparison** against the
+on-chain Reputation contract (`get_summary` + `get_clients_paginated`). The current contract summary supports
+at most five comparable clients; it can compare average and active feedback count, but not active unique
+clients. Explorer and RPC reads also lack a shared ledger-bound snapshot. Healthy current results are therefore
+`partial`; `verified` is reserved for future complete-field evidence. The full status set is
+`verified | partial | mismatch | unavailable | skipped`. Self-declared marketing text (name, description,
+service labels, feedback tags) remains **untrusted data**, never instructions (see [Security](#security)).
 
-That verification overlay — plus a **Sybil-cost-aware heuristic** that weights unique clients (breadth, more
-expensive to fake) above raw feedback volume (cheap to fake) — is the product. Breadth raises the cost of
-manipulation; it is not proof of personhood and does not make the ranking Sybil-resistant.
+That bounded evidence overlay — plus a **Sybil-cost-aware heuristic** that weights indexer-declared unique
+clients (breadth, more expensive to fake) above raw feedback volume (cheap to fake) — is the product. Breadth
+raises the cost of manipulation; it is not chain-verified, proof of personhood, or a Sybil-resistant ranking.
 
 ---
 
@@ -57,15 +59,15 @@ All three MCP primitives, all read-only:
 | Tier | Tool | What it does |
 |---|---|---|
 | **0 · SOW** | `find_agent` | Natural-language discovery → ranked candidates |
-| | `rank_agent` | Rank an explicit id set or a query, full 3-axis breakdown + on-chain verify |
-| | `get_agent_profile` | Deep profile: identity, capabilities, declared-vs-verified reputation, recent feedback, unverified A2A projection |
-| | `list_services` | Catalog of invokable x402/MPP service endpoints |
+| | `rank_agent` | Rank an explicit id set or a query, full 3-axis breakdown + bounded chain comparison |
+| | `get_agent_profile` | Deep profile: identity, capabilities, declared-vs-chain reputation evidence, recent feedback, unverified A2A projection |
+| | `list_services` | Self-declared x402/MPP endpoint candidates; liveness, ownership, conformance, and payment stay unverified |
 | **1 · complete-core** | `list_agents` | Paginated, filterable listing, ranked |
 | | `leaderboard` | Top agents in a bounded scan (client-side 3-axis rank + coverage) |
 | | `resolve_agent` | Any handle (id / stellar:…#id / owner G-address) → canonical identifiers |
-| | `get_agents_by_owner` | Every agent an owner operates |
+| | `get_agents_by_owner` | Current owner API page (up to 20 agents) with explicit continuation coverage |
 | | `get_agent_feedback` | Recent on-chain reviews (sanitized, labeled) |
-| | `verify_reputation` | Standalone declared-vs-on-chain reputation check |
+| | `verify_reputation` | Standalone bounded average/count comparison against the Reputation contract |
 | | `get_agent_card` | Derived, unverified A2A-shaped projection + x402 hint; not protocol-conformance proof |
 | | `get_registry_stats` | Exact-count queries + capped sampled metrics, with definitions and coverage |
 | | `get_registry_health` | Per-registry indexer staleness |
@@ -111,9 +113,9 @@ npx skills add berkingurcan/stellar-agent-mcp --skill mcp
 ```bash
 npx -y stellar-agent-mcp@0.1.0 find "web scraper" --x402       # discover
 npx -y stellar-agent-mcp@0.1.0 profile 10                       # full profile for agent 10
-npx -y stellar-agent-mcp@0.1.0 rank "scraping agents" --json    # rank + verify, machine-readable
-npx -y stellar-agent-mcp@0.1.0 services --x402                  # callable paid endpoints
-npx -y stellar-agent-mcp@0.1.0 doctor                           # self-check: env, explorer, RPC, verify
+npx -y stellar-agent-mcp@0.1.0 rank "scraping agents" --json    # rank + bounded chain evidence, machine-readable
+npx -y stellar-agent-mcp@0.1.0 services --x402                  # declared paid-endpoint candidates
+npx -y stellar-agent-mcp@0.1.0 doctor                           # self-check: env, explorer, RPC, bounded read path
 npx -y stellar-agent-mcp@0.1.0 setup --client cursor --scope project --dry-run  # preview client config
 ```
 
@@ -145,9 +147,9 @@ All configuration is via environment variables (canonical for MCP mode); CLI fla
 |---|---|---|
 | `STELLAR_NETWORK` | `mainnet` | `mainnet` or `testnet` — `testnet` also requires `EXPLORER_BASE_URL`, see below |
 | `EXPLORER_BASE_URL` | `https://stellar8004.com` | Explorer HTTP API base. **Indexes mainnet only** |
-| `STELLAR_RPC_URL` | `https://mainnet.sorobanrpc.com` | Soroban RPC for on-chain verification |
+| `STELLAR_RPC_URL` | `https://mainnet.sorobanrpc.com` | Soroban RPC for bounded Reputation-contract reads |
 | `VERIFY_ONCHAIN` | `true` | Set `false` to skip Soroban reads (declared-only) |
-| `RANK_SCORE_MAX` | `100` | Feedback score scale (values are 0..100 ints) |
+| `RANK_SCORE_MAX` | `100` | Normalization scale for the displayed ranking quality axis; raw averages may be fractional |
 | `RANK_W_QUALITY` / `RANK_W_VOLUME` / `RANK_W_BREADTH` | `0.5` / `0.2` / `0.3` | 3-axis weights (re-normalized to sum 1) |
 
 `STELLAR_PRIVATE_KEY` is **intentionally ignored** if present (and warned about on stderr) — this server is
@@ -182,12 +184,13 @@ Full threat model + disclosure policy: **[SECURITY.md](SECURITY.md)** and
 ## How it works
 
 Local MCP client (or terminal) → **one Node binary** → `ExplorerService` (stellar8004 HTTP API, primary
-data) + `ReputationVerifier` (Soroban RPC, on-chain verify) → canonical stellar-8004 contracts on mainnet.
-Data precedence is always **explorer → on-chain verify → degrade-closed to declared-only**.
+data) + `ReputationVerifier` (Soroban RPC, bounded average/count comparison) → canonical stellar-8004
+contracts on mainnet. Data precedence is always **explorer → bounded chain evidence → degrade-closed to
+declared-only**.
 
 The not-yet-live hosted path adds only an edge adapter: remote client → stateless Cloudflare Worker →
 existing `stellar8004-web` service → its canonical Supabase-backed index. The Worker never reads Supabase
-directly and never owns indexer credentials. It still uses Soroban RPC for bounded on-chain verification.
+directly and never owns indexer credentials. It still uses Soroban RPC for the bounded comparison overlay.
 Architecture, ranking formula, cache boundaries, and the upstream discovery contract are documented in
 **[docs/architecture.md](docs/architecture.md)**.
 

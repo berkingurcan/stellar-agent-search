@@ -11,8 +11,8 @@
 - **Client bootstrap** — the idempotent `setup` command registers that server with Claude Code, Cursor, or Codex.
 - **Human CLI** — subcommands (`find`, `rank`, `profile`, `services`, `doctor`) for a plain terminal.
 
-It is **read-only and keyless**: it reads the stellar-8004 explorer API and simulates Soroban view calls to
-verify reputation on-chain. It never signs, never writes, and holds no private keys.
+It is **read-only and keyless**: it reads the stellar-8004 explorer API and simulates bounded Soroban view
+calls that compare average and active feedback count. It never signs, never writes, and holds no private keys.
 
 ## Requirements
 
@@ -29,14 +29,14 @@ npx -y stellar-agent-mcp@0.1.0 find "a paid web scraper with a good reputation"
 # Only agents that accept x402 (USDC pay-per-call)
 npx -y stellar-agent-mcp@0.1.0 find "scraper" --x402
 
-# Full profile for a specific agent (declared-vs-verified reputation, capabilities, services)
+# Full profile for a specific agent (declared vs bounded chain evidence, capabilities, services)
 npx -y stellar-agent-mcp@0.1.0 profile 10
 
-# Rank a query's candidates or an explicit id set, with on-chain verification on
+# Rank a query's candidates or an explicit id set, with bounded chain comparison on
 npx -y stellar-agent-mcp@0.1.0 rank "scraping agents"
 npx -y stellar-agent-mcp@0.1.0 rank 10 12 15
 
-# Catalog of callable service endpoints
+# Catalog of self-declared service endpoint candidates
 npx -y stellar-agent-mcp@0.1.0 services --x402
 
 # Machine-readable output for any command
@@ -58,7 +58,7 @@ does not work:
 ✔ read-only keyless (no signer, no writes)
 ✔ explorer  https://stellar8004.com  status=healthy  identity ledger 63,699,173 (fresh)
 ✔ soroban   https://mainnet.sorobanrpc.com  healthy
-✔ verify    on-chain reputation read OK (sampled agent #10: avg 96, 8 feedback, 4 clients)
+✔ verify    on-chain reputation read OK (sampled agent #10: avg 96, 8 comparable feedback; active unique clients are not derived by this read)
 ✔ tools     find_agent, rank_agent, get_agent_profile, list_services (+ list_agents, leaderboard)
 ℹ server    stellar-agent-mcp  ·  @modelcontextprotocol/server 2.0.0  ·  spec 2025-11-25
 ```
@@ -100,7 +100,7 @@ does not expose a project-scoped MCP add operation. Asking for `--client codex -
 exits non-zero, and prints the exact `[mcp_servers.stellar-agent]` TOML to merge into `.codex/config.toml`.
 
 Optionally install the **skill** as well. It is the usage guide your agent reads before it calls anything —
-which tools exist, when to verify on-chain, how to read a declared-vs-verified mismatch:
+which tools exist, when to request bounded chain evidence, and how to read a snapshot-unversioned mismatch:
 
 ```bash
 npx skills add berkingurcan/stellar-agent-mcp --skill mcp
@@ -129,7 +129,9 @@ request, cache, trust, and rollout boundaries.
 ### First things to try in-client
 
 1. Run the flagship prompt **`/find-and-vet-agent`** with a task like "scrape a website and return JSON".
-2. Ask the model to **rank** the candidates and **verify** the top one's reputation on-chain.
+2. Ask the model to **rank** the candidates and compare the top one's average/count with the bounded
+   Reputation-contract read. A healthy result is `partial`, with `snapshotComparable: false`; it does not
+   verify `uniqueClients`.
 3. Pin **`@stellar-agent:stellar8004://leaderboard`** to keep the current top agents in context.
 
 ## Optional install (faster cold start)

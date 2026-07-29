@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const GENERATOR = join(ROOT, "scripts", "release", "create-bootstrap-package.mjs");
+const read = (...parts: string[]) => readFileSync(join(ROOT, ...parts), "utf8");
 
 describe("npm bootstrap name reservation", () => {
   it("generates only an inert 0.0.0 package outside the repository", () => {
@@ -71,5 +72,47 @@ describe("npm bootstrap name reservation", () => {
     } finally {
       rmSync(nonEmpty, { recursive: true, force: true });
     }
+  });
+});
+
+describe("real release fail-closed gates", () => {
+  it("keeps the package bin-only and validates before any direct publish", () => {
+    const pkg = JSON.parse(read("package.json")) as Record<string, unknown> & {
+      scripts: Record<string, string>;
+    };
+    expect(pkg.scripts.prepublishOnly).toBe("npm run validate:release");
+    expect(pkg.bin).toEqual({ "stellar-agent-mcp": "dist/index.js" });
+    for (const field of ["main", "module", "types", "typings", "exports"]) {
+      expect(pkg).not.toHaveProperty(field);
+    }
+
+    const server = JSON.parse(read("server.json")) as { description: string };
+    const descriptionLength = [...server.description].length;
+    expect(descriptionLength).toBeGreaterThan(0);
+    expect(descriptionLength).toBeLessThanOrEqual(100);
+  });
+
+  it("protects OIDC publication and reuses the exact consumer-tested tarball", () => {
+    const workflow = read(".github", "workflows", "publish.yml");
+    expect(workflow).toContain("environment: npm-production");
+    expect(workflow).toContain("git merge-base --is-ancestor");
+    expect(workflow).toContain("npm run typecheck");
+    expect(workflow).toContain("NPM_PACKAGE_OWNERS");
+    expect(workflow).toContain("verify-npm-release.mjs preflight");
+    expect(workflow).toContain("verify-npm-release.mjs published");
+    expect(workflow).toContain("npm pack --json --ignore-scripts --pack-destination");
+    expect(workflow).toContain('npm install --ignore-scripts --no-audit --no-fund --save-exact "${{ steps.pack.outputs.path }}"');
+    expect(workflow).toContain("npm sbom --omit=dev --sbom-format cyclonedx");
+    expect(workflow).toContain('npm publish "${{ steps.pack.outputs.path }}" --ignore-scripts --access public');
+    expect(workflow).toContain("/v0.1/servers/$encoded_name/versions/$encoded_version");
+    expect(workflow).toContain("verify-mcp-registry.mjs");
+  });
+
+  it("documents the exact npm publisher filename, environment, and post-publish landing gate", () => {
+    const runbook = read("instruction.md");
+    expect(runbook).toContain("workflow filename: **`publish.yml`**");
+    expect(runbook).toContain("environment name: **`npm-production`**");
+    expect(runbook).toContain("`PACKAGE_PUBLISHED`");
+    expect(runbook).toContain("Never manually publish `0.1.0`");
   });
 });

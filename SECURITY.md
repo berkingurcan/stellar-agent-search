@@ -77,9 +77,10 @@ defense is structural, not a blocklist:
   | services per agent | 25 |
 
   These caps bound both the injection surface and token/cost DoS.
-- **Provenance is a first-class field.** `verification.status ∈ {verified, mismatch, unavailable, skipped}`
-  is present on every reputation output, so the model is always told which fields are unverified
-  self-declared data.
+- **Provenance is a first-class field.**
+  `verification.status ∈ {verified, partial, mismatch, unavailable, skipped}` is present on every reputation
+  output. Healthy current comparisons are `partial`: average and active feedback count were compared within a
+  five-client bound, `snapshotComparable` is `false`, and `uniqueClients` remains indexer-declared.
 - **Summaries stay descriptive, never imperative.** The server never emits text that tells the user or model
   to pay or to give feedback — severing any injection → keyed-action path.
 
@@ -107,10 +108,10 @@ misrepresented as authentication:
   non-browser MCP clients. **CORS restricts browsers; it neither authenticates callers nor blocks direct HTTP
   clients.**
 - A Cloudflare rate-limit binding keys an IP + user-agent hash and charges estimated work, configured for 30
-  units/minute. The limiter is PoP-local, approximate, and fails open if the platform binding fails. It is
-  best-effort DoS friction, not a global quota, billing ledger, authorization rule, or Sybil defense. User-agent
-  rotation can fragment a caller's buckets, and unrelated clients behind the same NAT/user-agent can share a
-  bucket.
+  units/minute. The limiter is PoP-local and approximate, but a binding exception fails closed with 503 rather
+  than admitting unmetered work. It is best-effort DoS friction, not a global quota, billing ledger,
+  authorization rule, or Sybil defense. User-agent rotation can fragment a caller's buckets, and unrelated
+  clients behind the same NAT/user-agent can share a bucket.
 - Explorer egress is limited to `GET` on the configured base's `/api/v1` and `/api/v2` paths, then rewritten
   to `STELLAR8004_API`. Caller authorization, cookies, MCP headers, forwarding headers, bodies, and arbitrary
   headers are not forwarded. The Worker never fetches an agent-declared endpoint, so registry metadata cannot
@@ -149,16 +150,18 @@ permissionless registry. Mapped to OWASP MCP Top-10.
 | **T6** | Upstream outage / rate-limit → hang | Med × Med | SDK backoff + 429 handling; verification degrades **closed** to declared-only; hard page caps; bounded top-K verify. |
 | **T7** | SSRF via endpoint probes (**MCP05-adj**) | Med × High *if built* | The probe tools (`agent_health`, `x402_compliance_scan`) that would fetch attacker-declared endpoints are **deferred from v0.1**. This server makes no requests to agent-declared URLs. |
 | **T8** | Context / token DoS | Low × Med | Length/count caps + truncation (same control as T1); `limit` capped at 50. |
-| **T9** | Ranking sybil manipulation | Med × Med | Breadth (unique clients) weighted above raw volume; on-chain verification; `RANK_SCORE_MAX = 100`. |
+| **T9** | Ranking sybil manipulation | Med × Med | Indexer-declared breadth is weighted above raw volume, while bounded chain reads compare only average and active count. Breadth is not chain-verified; `RANK_SCORE_MAX = 100`. |
 | **T10** | Secret exposure (**MCP01**) | Very Low × High | Server holds no secrets; CI greps for signer/secret patterns; `STELLAR_PRIVATE_KEY` ignored if present. |
 | **T11** | Public endpoint abuse / AuthN expectation (**MCP07**) | Med × Med | stdio is bounded by the local OS process. The remote Worker is intentionally unauthenticated because it exposes public, read-only data; Host/Origin/body/batch/cost/limiter controls reduce abuse but do not identify callers. CORS is not AuthN. OAuth remains a valid future control for durable principal quotas/revocation. No deploy until rate-limit identity is canary-proven. |
 
 ### Honest limits
 
-We verify registry/transaction provenance and re-derive bounded reputation reads on-chain. We do **not**
-probe or verify agent service-endpoint liveness or protocol conformance. The demo is designed to bind completed
-feedback to validated payment transaction and result hashes, but its first funded, recorded mainnet run is
-still pending. We also do **not** solve **Sybil resistance / proof-of-personhood** — `uniqueClients` (breadth)
-is a thin hedge, not a solution. Do not treat a high score as identity proof.
+We surface indexed registry/transaction provenance and re-derive bounded reputation reads on-chain. We do
+**not** verify active `uniqueClients`, a synchronized explorer/RPC snapshot, or an agent service endpoint's
+liveness, ownership, protocol conformance, or payment behavior. The demo separately pins one endpoint/payment
+policy and is designed to bind completed feedback to validated payment transaction and result hashes, but its
+first funded, recorded mainnet run is still pending. We also do **not** solve **Sybil resistance /
+proof-of-personhood** — `uniqueClients` (breadth) is a thin, indexer-declared hedge, not a solution. Do not
+treat a high score as identity proof.
 
 See [docs/architecture.md](docs/architecture.md) for the full trust architecture and data-precedence rules.

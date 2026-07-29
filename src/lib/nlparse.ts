@@ -85,18 +85,26 @@ const RE_X402 =
 const RE_PAY = /\bpay\b/;
 // MPP / streaming micropayment channel.
 const RE_MPP = /\b(mpp|streaming\s+pay\w*|streaming\s+micropayments?|payment\s+streaming)\b/;
-// Invokable service endpoints.
+// User language that requests agents with declared service endpoint candidates.
 const RE_SERVICES = /\b(invoke|invocable|invokable|callable|endpoints?|apis?|service|services|servis\w*|hizmet\w*|cagrilabilir)\b/;
 
 // The upstream v1 booleans are positive requirements, not true/false filters:
 // serialising `false` is silently ignored. Detect common negative requests so
 // callers can reject them instead of returning the opposite of what was asked.
 const RE_NEGATED_X402 =
-  /\b(?:no|not|without|exclude|excluding)\b(?:\s+\w+){0,3}\s+(?:x402|paid|payments?|usdc|micropayments?)\b|\bx402\s+(?:olmadan|olmayan|istemiyorum)\b/u;
+  /\b(?:no|not|without|exclude|excluding|free\s+of)\b(?:\s+[\p{L}\p{N}-]+){0,3}\s+(?:x402|paid|payments?|usdc|micropayments?)\b|\b(?:non[- ]?(?:x402|paid|payments?|usdc|micropayments?)|unpaid|x402[- ]?free|payment[- ]?free|payments?[- ]?free|odemesiz|ucretsiz)\b|\b(?:x402|odeme|odemeler|ucret)\s+(?:olmadan|olmayan|istemiyorum|siz)\b/u;
 const RE_NEGATED_MPP =
-  /\b(?:no|not|without|exclude|excluding)\b(?:\s+\w+){0,3}\s+(?:mpp|streaming\s+(?:payments?|micropayments?))\b|\bmpp\s+(?:olmadan|olmayan|istemiyorum)\b/u;
+  /\b(?:no|not|without|exclude|excluding|free\s+of)\b(?:\s+[\p{L}\p{N}-]+){0,3}\s+(?:mpp|streaming\s+(?:payments?|micropayments?))\b|\b(?:non[- ]?mpp|mpp[- ]?free)\b|\bmpp\s+(?:olmadan|olmayan|istemiyorum|siz)\b/u;
 const RE_NEGATED_SERVICES =
-  /\b(?:no|not|without|exclude|excluding)\b(?:\s+\w+){0,3}\s+(?:services?|apis?|endpoints?|callable|invokable)\b|\bservis\s+(?:olmadan|olmayan|istemiyorum)\b/u;
+  /\b(?:no|not|without|exclude|excluding|free\s+of)\b(?:\s+[\p{L}\p{N}-]+){0,3}\s+(?:services?|apis?|endpoints?|callable|invokable)\b|\b(?:non[- ]?(?:service|api)|service[- ]?free|api[- ]?free)\b|\b(?:servis|hizmet)\s+(?:olmadan|olmayan|istemiyorum|siz)\b/u;
+
+// Trust and score filters are also positive-only. Negated/upper-bound phrases
+// must be rejected before the positive trigger regexes run, otherwise
+// "without TEE" becomes trust=tee and "score below 50" becomes minScore=50.
+const RE_NEGATED_TRUST =
+  /\b(?:no|not|without|exclude|excluding|free\s+of)\b(?:\s+[\p{L}\p{N}-]+){0,3}\s+(?:tee|enclaves?|attest\w*|validation|validated|validators?|reputation(?:[- ]based|\s+trust|\s+model)?|trust(?:\s+model)?)\b|\b(?:non[- ]?(?:tee|validation|validated|attested|reputation)|unvalidated|unattested|tee[- ]?free|validation[- ]?free|reputation[- ]?free)\b|\b(?:tee|dogrulama|itibar|guven)\s+(?:olmadan|olmayan|istemiyorum|siz)\b/u;
+const RE_NEGATED_SCORE =
+  /\b(?:score|rating|rated|reputation|puan|itibar)\b[^\d]{0,24}\b(?:below|under|lower\s+than|less\s+than|at\s+most|no\s+more\s+than|no\s+higher\s+than|cannot\s+exceed|up\s+to|max(?:imum)?|altinda|alti|en\s+fazla)\s*\d{1,3}\b|\b(?:below|under|lower\s+than|less\s+than|at\s+most|no\s+more\s+than|no\s+higher\s+than|up\s+to|max(?:imum)?|en\s+fazla)\s+\d{1,3}\b|\b(?:max(?:imum)?|en\s+fazla)\s+(?:score|rating|puan)[^\d]{0,12}\d{1,3}\b|\b\d{1,3}\s+(?:ve\s+)?alti\b|\b(?:not|without|exclude|excluding)\b(?:\s+[\p{L}\p{N}-]+){0,3}\s+(?:top[- ]?rated|highly\s+rated|well[- ]?reviewed|reputable|trusted|good\s+reputation|high\s+reputation)\b|\b(?:unrated|low[- ]?rated|poor\s+reputation|bad\s+reputation|dusuk\s+puan(?:li)?)\b/u;
 
 // Trust models. Reputation-as-trust needs explicit trust-model phrasing so the
 // common "good reputation" (a quality phrase) does NOT become a trust filter.
@@ -134,9 +142,13 @@ export function parseQuery(raw: string): ParsedQuery {
   const negatedX402 = RE_NEGATED_X402.test(text);
   const negatedMpp = RE_NEGATED_MPP.test(text);
   const negatedServices = RE_NEGATED_SERVICES.test(text);
+  const negatedTrust = RE_NEGATED_TRUST.test(text);
+  const negatedScore = RE_NEGATED_SCORE.test(text);
   if (negatedX402) unsupported.push("negative-filter:x402");
   if (negatedMpp) unsupported.push("negative-filter:mpp");
   if (negatedServices) unsupported.push("negative-filter:hasServices");
+  if (negatedTrust) unsupported.push("negative-filter:trust");
+  if (negatedScore) unsupported.push("negative-filter:minScore");
 
   if (!negatedX402 && (RE_X402.test(text) || RE_PAY.test(text))) {
     filters.x402 = true;
@@ -153,26 +165,26 @@ export function parseQuery(raw: string): ParsedQuery {
 
   // 2. Trust model (first match wins; validation/tee take a bare keyword,
   //    reputation requires explicit trust-model phrasing).
-  if (RE_TRUST_REPUTATION.test(text)) {
+  if (!negatedTrust && RE_TRUST_REPUTATION.test(text)) {
     filters.trust = "reputation";
     matched.push("trust:reputation");
-  } else if (RE_TRUST_VALIDATION.test(text)) {
+  } else if (!negatedTrust && RE_TRUST_VALIDATION.test(text)) {
     filters.trust = "validation";
     matched.push("trust:validation");
-  } else if (RE_TRUST_TEE.test(text)) {
+  } else if (!negatedTrust && RE_TRUST_TEE.test(text)) {
     filters.trust = "tee-attestation";
     matched.push("trust:tee-attestation");
   }
 
   // 3. minScore — explicit number wins, then qualitative phrases.
   const numMatch = text.match(RE_SCORE_NUM) ?? text.match(RE_SCORE_ABOVE);
-  if (numMatch && numMatch[1] !== undefined) {
+  if (!negatedScore && numMatch && numMatch[1] !== undefined) {
     filters.minScore = clampScore(Number(numMatch[1]));
     matched.push(`minScore:${filters.minScore}`);
-  } else if (RE_SCORE_TOP.test(text)) {
+  } else if (!negatedScore && RE_SCORE_TOP.test(text)) {
     filters.minScore = 80;
     matched.push("minScore:80");
-  } else if (RE_SCORE_HIGH.test(text)) {
+  } else if (!negatedScore && RE_SCORE_HIGH.test(text)) {
     filters.minScore = 70;
     matched.push("minScore:70");
   }

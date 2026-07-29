@@ -10,8 +10,8 @@
  * simulation origin. (modules/01 §2.4.2 + §3.4.)
  *
  * Flow per agent:
- *   1. get_clients_paginated(agent_id, start, limit) → prove that the client
- *      set is small enough for the contract's five-client summary cap.
+ *   1. get_clients_paginated(agent_id, start, limit) → inspect a bounded client
+ *      window and refuse an observed overflow beyond the five-client summary cap.
  *   2. get_summary(agent_id, client_addresses, "", "") → WAD-normalized average
  *      across those clients: average = summary_value / 10^summary_value_decimals.
  *   3. compare average + active feedbackCount with the explorer. Active
@@ -96,6 +96,11 @@ export const DEFAULT_TOLERANCE: VerifyTolerance = {
 const UNVERSIONED_SNAPSHOT_LIMITATION =
   "Explorer and Soroban reads do not share a common revision or ledger-bound snapshot; " +
   "matching or differing values are observational and are not proof of synchronized parity or manipulation.";
+const CLIENT_INDEX_LIMITATION =
+  "The contract exposes no client-count/cursor proof and expired ClientAtIndex entries can create holes; " +
+  "the bounded scan cannot prove exhaustive client history, so only the returned average/count observation is compared.";
+const UNIQUE_CLIENT_LIMITATION =
+  "Active unique-client breadth is not derivable from the contract's append-only client list.";
 
 type SnapshotAwareVerificationResult = VerificationResult & {
   snapshotComparable: false;
@@ -108,7 +113,11 @@ function snapshotContext(): Pick<
 > {
   return {
     snapshotComparable: false,
-    limitations: [UNVERSIONED_SNAPSHOT_LIMITATION],
+    limitations: [
+      UNVERSIONED_SNAPSHOT_LIMITATION,
+      CLIENT_INDEX_LIMITATION,
+      UNIQUE_CLIENT_LIMITATION,
+    ],
   };
 }
 
@@ -298,13 +307,15 @@ export class ReputationVerifier {
     const first = firstTx.result ?? [];
     const raw = first.slice(0, CLIENT_SCAN_PAGE);
 
-    // Always probe the next storage index. The contract compacts its returned
-    // vector by skipping missing/expired ClientAtIndex keys, so a short first
-    // vector does NOT prove that later indices are absent.
+    // Always probe a second bounded index range. The contract compacts its
+    // returned vector by skipping missing/expired ClientAtIndex keys, so a
+    // short first vector does NOT prove that later indices are absent. Scanning
+    // six more indices catches holes at the cap boundary without making an
+    // attacker-controlled, unbounded Soroban simulation.
     const boundaryTx = await client.get_clients_paginated({
       agent_id: agentId,
       start: CLIENT_SCAN_PAGE,
-      limit: 1,
+      limit: CLIENT_SCAN_PAGE,
     });
     if ((boundaryTx.result ?? []).length > 0) {
       return { clients: [], truncated: true };
@@ -431,7 +442,7 @@ export class ReputationVerifier {
       verified: onchain,
       deltas: { average: dAvg, count: dCount, uniqueClients: dUnique },
       reason: within
-        ? "unique-clients-not-contract-verifiable"
+        ? "bounded-average-count-agreement-unversioned-snapshots"
         : "declared-onchain-diff-unversioned-snapshots",
       verifiedFields: ["average", "feedbackCount"],
       unverifiedFields: ["uniqueClients"],

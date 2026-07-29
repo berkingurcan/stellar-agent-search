@@ -13,8 +13,9 @@ It composes the three pillars of the project:
   `get_agent_profile` to resolve the scrapper agent's x402 endpoint and capabilities.
 - **x402 (payment)** — the manual HTTP-402 flow (`@x402/fetch` + `@x402/stellar`) settles real USDC.
   The challenge's `payTo` is accepted only when it matches the reviewed, source-pinned Scrapper payee.
-- **stellar-8004 (reputation)** — `@trionlabs/stellar8004` `give_feedback` writes on-chain reputation, so the
-  *next* agent's discovery query sees an updated, verifiable score.
+- **stellar-8004 (reputation)** — `@trionlabs/stellar8004` `give_feedback` writes on-chain reputation for the
+  canonical indexer to project. This MCP can later compare bounded average/count fields; it does not turn the
+  indexer-declared active-client breadth or the service endpoint into verified facts.
 
 ## Security boundary (non-negotiable)
 

@@ -57,7 +57,7 @@ core, the other nine are supporting reads over the same registry.
 | `find_agent` | ✅ | Natural-language query → ranked candidates |
 | `rank_agent` | ✅ | 3-axis reputation ranking + payment method + endpoint, with per-axis breakdown |
 | `get_agent_profile` | ✅ | Full metadata: identity, services, scores, recent feedback |
-| `list_services` | ✅ | Catalog of x402 / MPP-enabled agent endpoints |
+| `list_services` | ✅ | Catalog of self-declared x402 / MPP endpoint candidates; no liveness, ownership, conformance, or payment proof |
 
 Additional: `list_agents`, `leaderboard`, `resolve_agent`, `get_agents_by_owner`, `get_agent_feedback`,
 `verify_reputation`, `get_agent_card`, `get_registry_stats`, `get_registry_health`. Plus 8 MCP **resources**
@@ -77,7 +77,7 @@ Reviewer check, on agent 10 (confirmed against mainnet on 2026-07-28):
 |---|---|---|---|
 | Explorer (declared) | 96.75 | 8 | 4 |
 | Reputation contract (bounded read) | 96 | 8 | not derivable |
-| Result | **`partial`** | average + count compared | unique clients unverified |
+| Result | **`partial`** | average + count compared | unique clients remain indexer-declared; `snapshotComparable: false` |
 
 This is independently reproducible without our code. Simulate two read calls against the Reputation contract
 `CBOIAIMMWAXI57OATLX6BWVDQLCC4YU55HV6MZXFRP6CBSGAMXSTEPPA` on `https://mainnet.sorobanrpc.com`:
@@ -98,9 +98,9 @@ proof of a synchronized snapshot or Sybil resistance.
 ### How to verify yourself
 
 ```bash
-npx -y stellar-agent-mcp@0.1.0 doctor              # self-check: environment, explorer, RPC, on-chain verification
+npx -y stellar-agent-mcp@0.1.0 doctor              # self-check: environment, explorer, RPC, bounded chain read
 npx -y stellar-agent-mcp@0.1.0 find "web scraper"  # the find_agent tool from the terminal
-npx -y stellar-agent-mcp@0.1.0 profile 10          # full profile incl. declared-vs-verified block
+npx -y stellar-agent-mcp@0.1.0 profile 10          # full profile incl. declared-vs-bounded-chain block
 ```
 
 Inside an MCP client, install with one line and call the tools directly:
@@ -131,7 +131,8 @@ run procedure.
 ### What the script does, in order
 
 1. **Discover** — calls the MCP server's discovery path to find the Scrapper agent (id 10) by capability.
-2. **Vet** — verifies its reputation against the Reputation contract before spending anything.
+2. **Vet** — compares bounded average/count evidence from the Reputation contract before spending anything;
+   it does not verify active unique clients or endpoint behavior.
 3. **Call** — requests the agent's endpoint; receives HTTP **402 Payment Required** with a payment challenge.
 4. **Pay** — checks the untrusted challenge against a reviewed exact tuple, signs once, never auto-retries,
    then independently verifies finality and the exact USDC transfer through Stellar RPC.
@@ -282,8 +283,8 @@ has the shot-by-shot scripts.
 
 Known engineering work that does **not** block SOW delivery — including one defect that reaches users of the
 published package — is tracked in the same place: see [`issues/README.md`](../issues/README.md). It is listed
-openly rather than omitted, on the same principle as the declared-vs-verified reporting this server is built
-around.
+openly rather than omitted, on the same principle as the declared-vs-bounded-evidence reporting this server is
+built around.
 
 ---
 

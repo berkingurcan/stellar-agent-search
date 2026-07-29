@@ -75,11 +75,12 @@ HTTP lives in `worker/` as a separately built and deployed Cloudflare adapter.
 
 The cross-registry join produced for one agent (`src/types.ts`):
 
-- **Verified / typed identity** — `id`, `stellarId` (`stellar:{network}:{identity}#{id}`), `caip2Id`
-  (`stellar:{pubnet|testnet}:…` for the x402/MPP layer), `network`, `owner`, `wallet`, `agentUri`.
+- **Typed indexed identity** — `id`, `stellarId` (`stellar:{network}:{identity}#{id}`), `caip2Id`
+  (`stellar:{pubnet|testnet}:…` for the x402/MPP layer), `network`, `owner`, `wallet`, `agentUri`. These fields
+  do not prove control of a service endpoint or payment recipient.
 - **Capabilities** — `x402`, `mpp`, `hasServices`, `supportedTrust[]`.
-- **Reputation** — `scores` (declared) + `verification` (declared-vs-on-chain) + `verified` (convenience
-  boolean).
+- **Reputation** — `scores` (declared) + bounded `verification` evidence + `verified` (a convenience boolean
+  reserved for future complete-field status; current healthy checks are `partial`).
 - **Rank** — the full `RankResult` breakdown + `flags`.
 - **Provenance** — `createdAt`, `txHash`, `resolveStatus`.
 - **`selfDeclared`** — the **only** slot holding untrusted agent free text (name/description/image/
@@ -88,8 +89,8 @@ The cross-registry join produced for one agent (`src/types.ts`):
 The identifiers surface both the identity-network form and the CAIP-2 form. `get_agent_profile` also emits an
 explicitly **unverified, derived A2A-shaped projection** inside a labeled self-declared slot. It does not fetch
 an agent-published card, promote registry endpoints into invokable A2A URLs, synthesize payment requirements,
-or claim protocol/endpoint conformance. Its `x-stellar8004.verified` flag is scoped to reputation-summary
-re-derivation only.
+or claim protocol/endpoint conformance. Its `x-stellar8004.verified` flag can only mirror a future full
+reputation check; `verificationStatus` and `verificationScope` expose today's partial scope.
 
 ## The 3-axis ranking engine (`lib/ranking.ts`)
 
@@ -99,7 +100,7 @@ byte-identical output. Three orthogonal axes, each normalized to `[0, 1]`:
 ```
 quality = clamp(avg / RANK_SCORE_MAX, 0, 1)              # null/0 when unrated
 volume  = clamp(ln(1+feedbackCount)  / ln(1+50), 0, 1)   # log-saturating
-breadth = clamp(ln(1+uniqueClients)  / ln(1+25), 0, 1)   # Sybil-cost-aware heuristic
+breadth = clamp(ln(1+uniqueClients)  / ln(1+25), 0, 1)   # indexer-declared Sybil-cost heuristic
 ```
 
 Weighted base + additive bonuses:
@@ -115,8 +116,9 @@ Bonuses (already scaled into the `[0,1]` score space): x402 **+0.05**, mpp **+0.
 always `0` for pre-release schema continuity. Weights are env-overridable (`RANK_W_*`) or per-call
 (`rank_agent.weights`), always re-normalized to sum 1.
 
-**Why breadth > volume:** unique clients (breadth) are hard to fake; raw feedback count (volume) is cheap to
-fake. Weighting breadth above volume is a Sybil-cost hedge, not Sybil-resistance or proof of personhood.
+**Why breadth > volume:** indexer-declared unique clients (breadth) are harder to fake than raw feedback
+volume. Weighting breadth above volume is a Sybil-cost hedge, not a chain-verified breadth claim,
+Sybil-resistance, or proof of personhood.
 
 **Two separated scores:** the displayed `score` is honest (an unrated agent contributes 0 on quality and is
 flagged `unrated`), while an ordering-only `sortScore` applies a `0.15` novelty floor so a capable-but-unrated
@@ -131,21 +133,22 @@ desc, then id asc — fully deterministic.
 
 ## The verification overlay (`lib/reputation.ts`)
 
-`ReputationVerifier.verifyAgainst(id, declared)` re-derives reputation directly from the on-chain Reputation
-contract (`get_clients_paginated` + `get_summary`, via Soroban simulation) and diffs it against the
-explorer's declared numbers, producing a `VerificationResult`:
+`ReputationVerifier.verifyAgainst(id, declared)` re-derives bounded average/count observations from the
+on-chain Reputation contract (`get_clients_paginated` + `get_summary`, via Soroban simulation) and diffs them
+against the explorer's declared numbers, producing a `VerificationResult`:
 
 | `status` | Meaning |
 |---|---|
 | `verified` | reserved for a future comparison that covers every declared reputation field |
-| `partial` | bounded on-chain average and active-count comparison matched; active unique clients remain unverified |
+| `partial` | bounded on-chain average and active-count comparison matched; active unique clients remain indexer-declared |
 | `mismatch` | a compared field diverged beyond tolerance; unversioned snapshots mean this is not proof of manipulation |
 | `unavailable` | comparison attempted but the RPC failed, the client set exceeded the five-client cap, or the simulation was rejected |
 | `skipped` | not attempted (disabled via `VERIFY_ONCHAIN=false`/`--no-verify`, or outside the top-K) |
 
 Comparison is **bounded twice**: only the top-K returned rows are checked, and the current contract summary is
 usable only when the complete comparable client set is at most five. The explorer and RPC also lack a shared
-ledger-bound snapshot. Healthy current results are therefore `partial`, never full `verified`. The path
+ledger-bound snapshot, so every result reports `snapshotComparable: false`. Healthy current results are
+therefore `partial`, never full `verified`. The path
 **degrades closed** — if completeness or RPC evidence is missing, the row falls back to declared-only with
 `status: "unavailable"` rather than erroring the whole call or manufacturing certainty.
 
@@ -216,11 +219,11 @@ public registry/on-chain data. That is not the same as being unguarded:
   separately bounded and cached; it is not charged to this Service Binding counter. The estimate is an
   admission heuristic, not exact billing or proof that a dependency can never change its call pattern.
 - A keyed rate-limit binding debits an IP + user-agent hash, weighted by estimated cost, at a configured
-  30 units/minute. Cloudflare's limiter is PoP-local and approximate, and limiter failure currently fails
-  open. It is best-effort abuse friction — **not** a global quota, authorization check, fairness guarantee, or
-  accounting boundary. A caller can rotate user-agent values to fragment its bucket, while unrelated users
-  behind the same NAT and user-agent can share one; durable principal-level quotas would require an identity
-  layer such as OAuth.
+  30 units/minute. Cloudflare's limiter is PoP-local and approximate, but a binding exception fails closed
+  with 503 instead of admitting unmetered work. It is best-effort abuse friction — **not** a global quota,
+  authorization check, fairness guarantee, or accounting boundary. A caller can rotate user-agent values to
+  fragment its bucket, while unrelated users behind the same NAT and user-agent can share one; durable
+  principal-level quotas would require an identity layer such as OAuth.
 - Explorer egress accepts only `GET` to the configured base's `/api/v1` or `/api/v2` paths, rewrites that
   request to `STELLAR8004_API`, and strips caller `Authorization`, `Cookie`, MCP, forwarding, and arbitrary
   headers. It forwards only a bounded `Accept`; when Cloudflare supplied a syntactically valid
@@ -249,8 +252,8 @@ Explorer data gets two actor-neutral, best-effort cache layers in the Worker:
 A separate bounded isolate-local verifier cache (200 entries per network/RPC tuple) reuses Soroban reputation
 reads across fresh per-request servers. It is also evictable and best effort. None of these caches is a
 correctness source, global freshness guarantee, authorization boundary, billing ledger, or replacement for
-the canonical index. Soroban verification still provides the bounded declared-vs-on-chain overlay; cache
-reuse does not upgrade declared data to verified data.
+the canonical index. Soroban reads still provide the bounded average/count overlay; cache reuse does not
+upgrade declared data to verified data.
 
 ### Deployment gates
 
@@ -286,11 +289,13 @@ posture are in **[../SECURITY.md](../SECURITY.md)**.
 
 ### Honest limits
 
-This server verifies registry/transaction provenance and re-derives bounded reputation reads on-chain. It
-does **not** probe or verify agent service-endpoint liveness or protocol conformance. The demo is designed to
-bind completed feedback to validated payment transaction and result hashes, but its first funded, recorded
-mainnet run is still pending. It also does **not** solve **Sybil resistance / proof-of-personhood**;
-`uniqueClients` (breadth) is a thin hedge, not a solution.
+This server surfaces indexed registry/transaction provenance and re-derives bounded reputation reads
+on-chain. It does **not** verify active `uniqueClients`, a synchronized explorer/RPC snapshot, or a service
+endpoint's liveness, ownership, protocol conformance, or payment behavior. The demo separately pins one
+endpoint/payment policy and is designed to bind completed feedback to validated payment transaction and
+result hashes, but its first funded, recorded mainnet run is still pending. It also does **not** solve
+**Sybil resistance / proof-of-personhood**; `uniqueClients` (breadth) is a thin, indexer-declared hedge, not a
+solution.
 
 ## Multi-chain readiness
 

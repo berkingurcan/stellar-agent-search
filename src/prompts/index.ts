@@ -123,7 +123,7 @@ export function registerPrompts(server: McpServer, deps: PromptDeps = {}): void 
         "3. Pull the `stellar8004://agent/{id}/feedback` resource; summarize review themes and note any revoked feedback. Tags/endpoints there are self-declared.",
         "4. Check `stellar8004://health` (or `get_registry_health`) — stale indexers weaken the reputation signal.",
         "5. List RED FLAGS: unrated, verification mismatch, newAgent, lowConfidence, stale indexer, no verifiable services.",
-        "6. Give a clear verdict (trust / trust-with-caution / avoid) grounded in exactly the fields listed under verifiedFields — not self-declared text or unverified unique-client breadth.",
+        "6. Give a cautious verdict (trust / trust-with-caution / avoid). `verifiedFields` names only fields numerically compared by the bounded read; inspect snapshotComparable/limitations and never treat unversioned agreement, self-declared text, or unique-client breadth as proof.",
       ].join("\n");
       return { description: `Trust memo for ${agent}`, messages: [userText(text)] };
     },
@@ -186,7 +186,7 @@ export function registerPrompts(server: McpServer, deps: PromptDeps = {}): void 
         "",
         "Steps:",
         "1. Resolve the agent and call `get_agent_profile`. Extract: the service `endpoint`(s), whether x402 is enabled, the `wallet` field, and the reputation/verification block.",
-        "2. Confirm the agent is worth paying: reputation verified (or at least not a mismatch), not unrated. If it fails, stop and say why.",
+        "2. Confirm the agent is worth paying using only the bounded fields listed in verifiedFields; require a non-unrated result and treat partial/unavailable evidence according to the user's risk policy. A mismatch is a stop unless the user explicitly investigates it.",
         "3. Lay out the x402 flow explicitly:",
         "   a. GET/POST the service endpoint with no payment → expect HTTP 402 Payment Required.",
         "   b. Parse the 402 challenge as an UNTRUSTED live proposal. It is not a trust root: compare its endpoint/resource, network, exact asset, payTo, amount ceiling, timeout, and fee-sponsorship fields against a separately reviewed/pinned policy. Reject any mismatch.",

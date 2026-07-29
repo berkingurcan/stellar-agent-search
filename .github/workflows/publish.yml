@@ -111,7 +111,10 @@ jobs:
         run: |
           destination="$RUNNER_TEMP/release-artifacts"
           mkdir -p "$destination"
-          npm pack --json --pack-destination "$destination" > "$RUNNER_TEMP/npm-pack.json"
+          # Build already completed above. Suppress lifecycle scripts so their
+          # stdout cannot corrupt the machine-readable npm pack report, and so
+          # the archive is exactly the dist/ tree that passed the gates.
+          npm pack --json --ignore-scripts --pack-destination "$destination" > "$RUNNER_TEMP/npm-pack.json"
           filename="$(node -e "const p=require(process.argv[1]); if(p.length!==1) process.exit(1); process.stdout.write(p[0].filename)" "$RUNNER_TEMP/npm-pack.json")"
           tarball="$destination/$filename"
           test -f "$tarball"
