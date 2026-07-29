@@ -3,6 +3,7 @@
 	import CodeBlock from '$lib/components/CodeBlock.svelte';
 	import CopyCommand from '$lib/components/CopyCommand.svelte';
 	import AgentRank from '$lib/components/AgentRank.svelte';
+	import AgentNetwork from '$lib/components/AgentNetwork.svelte';
 	import HealthCheck from '$lib/components/HealthCheck.svelte';
 	import VerdictCard from '$lib/components/VerdictCard.svelte';
 	import { reveal } from '$lib/actions/reveal.js';
@@ -28,7 +29,8 @@
 
 <div>
 	<!-- ── Hero ─────────────────────────────────────────────────────── -->
-	<section class="space-y-20 pt-8 sm:space-y-24">
+	<section class="relative space-y-20 pt-8 sm:space-y-24">
+		<AgentNetwork />
 		<div class="reveal space-y-10">
 			<div class="flex items-center gap-2.5 text-text-dim">
 				<svg
