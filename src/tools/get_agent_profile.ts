@@ -31,8 +31,8 @@ const inputShape = {
   agent: z
     .union([
       z.number().int().nonnegative().max(MAX_AGENT_ID),
-      z.string().regex(STELLAR_ID_RE, "stellar:{network}:{identity}#{id}"),
-      z.string().regex(/^\d+$/, "numeric agent id"),
+      z.string().max(256).regex(STELLAR_ID_RE, "stellar:{network}:{identity}#{id}"),
+      z.string().max(256).regex(/^\d+$/, "numeric agent id"),
     ])
     .describe("Numeric agent id, numeric string, or a full stellar:{network}:{identity}#{id} handle."),
   feedbackLimit: z.number().int().min(0).max(50).default(5),

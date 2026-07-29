@@ -67,6 +67,11 @@ const STOPWORDS = new Set<string>([
   "score", "scored", "rated", "rating", "reputable", "highly", "well",
   "reviewed", "review", "reviews", "high", "top", "best", "excellent", "great",
   "good", "quality", "above", "over", "least", "minimum", "min", "than", "more",
+  // common Turkish framing/trigger words (normalization removes diacritics)
+  "bir", "bu", "ve", "veya", "icin", "ile", "olan", "bana", "bul", "goster",
+  "listele", "istiyorum", "lazim", "ajan", "ajanlar", "servis", "servisi", "hizmet", "hizmeti",
+  "ucretli", "odemeli", "odeme", "odemeler", "ucuz", "cagrilabilir", "itibar",
+  "puan", "puanli", "yuksek", "iyi", "itibarli", "dogrulama", "dogrulanmis",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -75,13 +80,13 @@ const STOPWORDS = new Set<string>([
 
 // Payment / x402. "cheap" & "micropayment" map to x402 per the module spec.
 const RE_X402 =
-  /\b(x402|paid|pay[- ]?per[- ]?\w+|payments?|usdc|monetiz\w*|cheap\w*|affordable|micropayments?|microtransactions?)\b/;
+  /\b(x402|paid|pay[- ]?per[- ]?\w+|payments?|usdc|monetiz\w*|cheap\w*|affordable|micropayments?|microtransactions?|ucretli|odemeli|odemeler?|ucuz)\b/;
 // Bare "pay" as a whole word (not caught by the pay-per group above).
 const RE_PAY = /\bpay\b/;
 // MPP / streaming micropayment channel.
 const RE_MPP = /\b(mpp|streaming\s+pay\w*|streaming\s+micropayments?|payment\s+streaming)\b/;
 // Invokable service endpoints.
-const RE_SERVICES = /\b(invoke|invocable|invokable|callable|endpoints?|apis?|service|services)\b/;
+const RE_SERVICES = /\b(invoke|invocable|invokable|callable|endpoints?|apis?|service|services|servis\w*|hizmet\w*|cagrilabilir)\b/;
 
 // The upstream v1 booleans are positive requirements, not true/false filters:
 // serialising `false` is silently ignored. Detect common negative requests so
@@ -97,7 +102,7 @@ const RE_NEGATED_SERVICES =
 // common "good reputation" (a quality phrase) does NOT become a trust filter.
 const RE_TRUST_REPUTATION =
   /\b(reputation[- ]based|reputation\s+trust|trust\s+model\s+reputation|reputation\s+model)\b/;
-const RE_TRUST_VALIDATION = /\b(validation|validated|validator[s]?)\b/;
+const RE_TRUST_VALIDATION = /\b(validation|validated|validator[s]?|dogrulama|dogrulanmis)\b/;
 const RE_TRUST_TEE = /\b(tee|enclave|attest\w*)\b/;
 
 // Numeric score: "score/rated/rating ... N" or "above/over/at least N".
@@ -109,7 +114,7 @@ const RE_SCORE_ABOVE = /\b(?:above|over|at\s+least|minimum|min)\s+(\d{1,3})\b/;
 // Qualitative reputation phrases → implied minScore.
 const RE_SCORE_TOP = /\b(top[- ]?rated|best|excellent|highest[- ]?rated)\b/;
 const RE_SCORE_HIGH =
-  /\b(highly\s+rated|well[- ]?reviewed|reputable|trusted|good\s+reputation|high\s+reputation|strong\s+reputation|great\s+reputation)\b/;
+  /\b(highly\s+rated|well[- ]?reviewed|reputable|trusted|good\s+reputation|high\s+reputation|strong\s+reputation|great\s+reputation|iyi\s+itibar\w*|yuksek\s+puanli?)\b/;
 
 // ---------------------------------------------------------------------------
 // Parser
@@ -120,7 +125,7 @@ const RE_SCORE_HIGH =
  * keywords. Deterministic and side-effect free.
  */
 export function parseQuery(raw: string): ParsedQuery {
-  const text = (raw ?? "").toLowerCase();
+  const text = normalizeSearchText(raw ?? "");
   const filters: ParsedFilters = {};
   const matched: string[] = [];
   const unsupported: string[] = [];
@@ -213,5 +218,6 @@ export function normalizeSearchText(text: string): string {
   return (text ?? "")
     .normalize("NFKD")
     .replace(/\p{M}+/gu, "")
+    .replace(/ı/g, "i")
     .toLowerCase();
 }

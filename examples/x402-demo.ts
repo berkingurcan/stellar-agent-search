@@ -86,6 +86,8 @@ const USDC_ISSUER_TESTNET = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZL
 const USDC_DECIMALS = 7;
 /** Keep signed authorization lifetime narrow enough for a deliberate one-shot call. */
 const MAX_CHALLENGE_TIMEOUT_SECONDS = 300;
+/** A paid endpoint is still untrusted; never buffer an unlimited response. */
+const MAX_PAID_RESULT_BYTES = 1_048_576;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -869,7 +871,33 @@ export function assertResultHash(hash: unknown): string {
 }
 
 export async function readPaidResult(res: Response): Promise<{ result: unknown; resultHash: string }> {
-  const bytes = Buffer.from(await res.arrayBuffer());
+  const declaredLength = res.headers.get("content-length");
+  if (declaredLength !== null) {
+    if (!/^\d+$/.test(declaredLength)) throw new Error("paid service returned an invalid Content-Length");
+    if (BigInt(declaredLength) > BigInt(MAX_PAID_RESULT_BYTES)) {
+      await res.body?.cancel().catch(() => undefined);
+      throw new Error(`paid service response exceeds ${MAX_PAID_RESULT_BYTES} bytes`);
+    }
+  }
+  if (!res.body) throw new Error("paid service returned an empty response body");
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_PAID_RESULT_BYTES) {
+        await reader.cancel("paid result too large").catch(() => undefined);
+        throw new Error(`paid service response exceeds ${MAX_PAID_RESULT_BYTES} bytes`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), total);
   if (bytes.length === 0) throw new Error("paid service returned an empty response body");
   const resultHash = assertResultHash(createHash("sha256").update(bytes).digest("hex"));
   const text = bytes.toString("utf8");
@@ -907,11 +935,12 @@ export function isSuccessfulResult(result: unknown): boolean {
   return keys
     .filter((k) => !["success", "ok", "status", "message"].includes(k))
     .some((k) => {
-    const v = r[k];
-    if (v == null) return false;
-    if (typeof v === "string") return v.trim().length > 0;
-    if (Array.isArray(v)) return v.length > 0;
-    return true;
+      const v = r[k];
+      if (v == null) return false;
+      if (typeof v === "string") return v.trim().length > 0;
+      if (Array.isArray(v)) return v.length > 0;
+      if (typeof v === "object") return Object.keys(v as Record<string, unknown>).length > 0;
+      return true;
     });
 }
 

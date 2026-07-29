@@ -160,6 +160,14 @@ describe("x402 evidence integrity", () => {
     expect(parsed.result).toEqual({ ok: true, data: [1] });
     expect(parsed.resultHash).toBe(createHash("sha256").update(Buffer.from(body)).digest("hex"));
     await expect(readPaidResult(new Response("", { status: 200 }))).rejects.toThrow(/empty response body/);
+    await expect(
+      readPaidResult(
+        new Response("small", { headers: { "content-length": String(1_048_577) } }),
+      ),
+    ).rejects.toThrow(/exceeds 1048576 bytes/);
+    await expect(
+      readPaidResult(new Response(new Uint8Array(1_048_577))),
+    ).rejects.toThrow(/exceeds 1048576 bytes/);
   });
 
   it("requires a successful settlement response with the expected payer/network/amount", () => {
@@ -233,6 +241,7 @@ describe("x402 evidence integrity", () => {
     expect(isSuccessfulResult({ ok: false, data: [1] })).toBe(false);
     expect(isSuccessfulResult({ status: "error", data: [1] })).toBe(false);
     expect(isSuccessfulResult({ ok: true })).toBe(false);
+    expect(isSuccessfulResult({ ok: true, data: {} })).toBe(false);
     expect(isSuccessfulResult({ ok: true, data: [1] })).toBe(true);
   });
 

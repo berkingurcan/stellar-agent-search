@@ -46,6 +46,16 @@ describe("fail-closed Worker deploy config validation", () => {
     },
   );
 
+  it("rejects accidental weakening of the reviewed limiter policy", () => {
+    const tooHigh = deployableConfig();
+    tooHigh.ratelimits[0].simple.limit = 30000;
+    expect(() => validateDeployConfig(tooHigh)).toThrow(/30 requests per 60 seconds/);
+
+    const wrongPeriod = deployableConfig();
+    wrongPeriod.ratelimits[0].simple.period = 600;
+    expect(() => validateDeployConfig(wrongPeriod)).toThrow(/30 requests per 60 seconds/);
+  });
+
   it("rejects missing and duplicate limiter bindings", () => {
     const missing = deployableConfig();
     missing.ratelimits = [];
