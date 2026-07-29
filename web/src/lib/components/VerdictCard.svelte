@@ -2,9 +2,9 @@
 	import { SAMPLE } from '$lib/transcripts.js';
 </script>
 
-<figure class="m-0 border-y border-border py-10">
-	<div class="grid grid-cols-1 gap-8 sm:grid-cols-[1fr_1px_1fr] sm:gap-10">
-		<div class="space-y-3">
+<figure class="m-0 border-y border-border py-8 sm:py-10">
+	<div class="grid grid-cols-1 gap-6 sm:grid-cols-[1fr_1px_1fr] sm:gap-10">
+		<div class="space-y-2 sm:space-y-3">
 			<p class="text-[10px] tracking-[0.18em] text-text-dim uppercase">
 				<span
 					class="tip"
@@ -14,7 +14,7 @@
 					aria-label="Declared — the reputation figure from the Explorer; self-declared, not checked.">Declared</span
 				>
 			</p>
-			<p class="text-[3rem] leading-none font-light tabular-nums text-text sm:text-[3.5rem]">
+			<p class="text-[2.25rem] leading-none font-light tabular-nums text-text sm:text-[3.5rem]">
 				{SAMPLE.declared}
 			</p>
 			<p class="text-[11px] text-text-dim">
@@ -30,7 +30,7 @@
 
 		<div class="hidden bg-border sm:block"></div>
 
-		<div class="space-y-3">
+		<div class="space-y-2 sm:space-y-3">
 			<p class="text-[10px] tracking-[0.18em] text-text-dim uppercase">
 				<span
 					class="tip"
@@ -40,7 +40,7 @@
 					aria-label="Contract probe — a bounded read of the Reputation contract; 'reachable' means it answered.">Contract probe</span
 				>
 			</p>
-			<p class="text-[2rem] leading-none font-light text-text sm:text-[2.4rem]">{SAMPLE.onchain}</p>
+			<p class="text-[1.5rem] leading-none font-light text-text sm:text-[2.4rem]">{SAMPLE.onchain}</p>
 			<p class="text-[11px] text-text-dim">{SAMPLE.onchainSource}</p>
 		</div>
 	</div>

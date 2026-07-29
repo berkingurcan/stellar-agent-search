@@ -33,27 +33,27 @@
 	{#each agents as agent, i (agent.id)}
 		<div
 			use:reveal={i * 100}
-			class="rounded-md border border-border bg-surface-raised p-5"
+			class="rounded-md border border-border bg-surface-raised p-4 sm:p-5"
 		>
-			<div class="flex items-center justify-between gap-4">
-				<div class="flex items-center gap-3 min-w-0">
-					<span class="text-[1.75rem] leading-none font-light tabular-nums text-text-dim">
+			<div class="flex items-center justify-between gap-3">
+				<div class="flex items-center gap-2.5 min-w-0 sm:gap-3">
+					<span class="text-[1.5rem] leading-none font-light tabular-nums text-text-dim sm:text-[1.75rem]">
 						{agent.rank}
 					</span>
 					<div class="min-w-0">
-						<p class="text-[14px] font-medium text-text truncate">{agent.name}</p>
-						<p class="text-[11px] text-text-dim">#{agent.id} · self-declared</p>
+						<p class="text-[13px] font-medium text-text truncate sm:text-[14px]">{agent.name}</p>
+						<p class="text-[10px] text-text-dim sm:text-[11px]">#{agent.id} · self-declared</p>
 					</div>
 				</div>
-				<div class="flex items-center gap-3 shrink-0">
+				<div class="flex items-center gap-2 shrink-0 sm:gap-3">
 					{#if agent.x402}
-						<span class="rounded border border-border-subtle px-2 py-0.5 text-[10px] font-medium text-text-muted">
+						<span class="rounded border border-border-subtle px-1.5 py-0.5 text-[9px] font-medium text-text-muted sm:px-2 sm:text-[10px]">
 							x402
 						</span>
 					{/if}
-					<span class="text-[1.5rem] leading-none font-light tabular-nums text-text">
+					<span class="text-[1.25rem] leading-none font-light tabular-nums text-text sm:text-[1.5rem]">
 						{agent.score}
-						<span class="text-[1rem] text-text-dim">/100</span>
+						<span class="text-[0.85rem] text-text-dim sm:text-[1rem]">/100</span>
 					</span>
 				</div>
 			</div>

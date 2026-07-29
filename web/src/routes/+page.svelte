@@ -29,9 +29,9 @@
 
 <div>
 	<!-- ── Hero ─────────────────────────────────────────────────────── -->
-	<section class="relative space-y-20 pt-8 sm:space-y-24">
+	<section class="relative space-y-12 pt-4 sm:space-y-24 sm:pt-8">
 		<AgentNetwork />
-		<div class="reveal space-y-10">
+		<div class="reveal space-y-6 sm:space-y-10">
 			<div class="flex items-center gap-2.5 text-text-dim">
 				<svg
 					class="h-3.5 w-3.5"
@@ -67,12 +67,12 @@
 			</div>
 
 			<h1
-				class="max-w-3xl text-[3rem] leading-[1.02] font-light tracking-[-0.04em] text-text sm:text-[4.75rem]"
+				class="max-w-3xl text-[2.25rem] leading-[1.05] font-light tracking-[-0.035em] text-text sm:text-[4.75rem] sm:leading-[1.02] sm:tracking-[-0.04em]"
 			>
 				Find the right<br />payment agent.
 			</h1>
 
-			<p class="max-w-lg text-[16px] leading-[1.6] text-text-muted">
+			<p class="max-w-lg text-[15px] leading-[1.6] text-text-muted sm:text-[16px]">
 				Plug an
 				<a
 					href={MCP_SPEC}
@@ -150,13 +150,13 @@
 	</section>
 
 	<!-- ── Evidence ─────────────────────────────────────────────────── -->
-	<section id="why" class="mt-40 scroll-mt-24 border-t border-border pt-32 space-y-20">
-		<div class="space-y-6" use:reveal>
+	<section id="why" class="mt-20 scroll-mt-24 border-t border-border pt-16 space-y-12 sm:mt-40 sm:pt-32 sm:space-y-20">
+		<div class="space-y-4 sm:space-y-6" use:reveal>
 			<span class="text-[11px] tracking-[0.2em] text-text-dim uppercase">
 				The trust gap
 			</span>
 			<h2
-				class="max-w-2xl text-[2rem] leading-[1.1] font-light tracking-[-0.03em] text-text sm:text-[2.75rem]"
+				class="max-w-2xl text-[1.5rem] leading-[1.15] font-light tracking-[-0.025em] text-text sm:text-[2.75rem] sm:leading-[1.1] sm:tracking-[-0.03em]"
 			>
 				59–91% of agent reviewers are
 				<span
@@ -167,7 +167,7 @@
 					aria-label="Sybils — reviewers that aren't distinct humans; one operator creating fake identities.">Sybils</span
 				>.
 			</h2>
-			<p class="max-w-xl text-[16px] leading-[1.6] text-text-muted">
+			<p class="max-w-xl text-[15px] leading-[1.6] text-text-muted sm:text-[16px]">
 				Agent directories list self-declared reputations for payment agents on Stellar. This server
 				ranks them — then probes the on-chain
 				<span
@@ -182,10 +182,10 @@
 		</div>
 
 		<div
-			class="grid gap-px overflow-hidden rounded-md border border-border bg-border sm:grid-cols-3"
+			class="grid grid-cols-1 gap-px overflow-hidden rounded-md border border-border bg-border sm:grid-cols-3"
 			use:reveal
 		>
-			<div class="bg-surface p-8 space-y-8">
+			<div class="bg-surface p-5 space-y-6 sm:p-8 sm:space-y-8">
 				<svg
 					class="h-5 w-5 text-text-dim"
 					fill="none"
@@ -200,8 +200,8 @@
 					<line x1="12" y1="9" x2="12" y2="13" />
 					<line x1="12" y1="17" x2="12.01" y2="17" />
 				</svg>
-				<div class="space-y-3">
-					<p class="text-[3rem] leading-none font-light tabular-nums text-text">
+				<div class="space-y-2 sm:space-y-3">
+					<p class="text-[2.25rem] leading-none font-light tabular-nums text-text sm:text-[3rem]">
 						59<span class="text-text-dim">–91%</span>
 					</p>
 					<p class="text-[10px] tracking-[0.15em] text-text-dim uppercase">
@@ -210,7 +210,7 @@
 				</div>
 			</div>
 
-			<div class="bg-surface p-8 space-y-8">
+			<div class="bg-surface p-5 space-y-6 sm:p-8 sm:space-y-8">
 				<svg
 					class="h-5 w-5 text-text-dim"
 					fill="none"
@@ -225,8 +225,8 @@
 					<path d="M15 7h2a5 5 0 0 1 0 10h-2" />
 					<line x1="2" y1="2" x2="22" y2="22" />
 				</svg>
-				<div class="space-y-3">
-					<p class="text-[3rem] leading-none font-light tabular-nums text-text">
+				<div class="space-y-2 sm:space-y-3">
+					<p class="text-[2.25rem] leading-none font-light tabular-nums text-text sm:text-[3rem]">
 						3<span class="text-text-dim">–15%</span>
 					</p>
 					<p class="text-[10px] tracking-[0.15em] text-text-dim uppercase">
@@ -235,7 +235,7 @@
 				</div>
 			</div>
 
-			<div class="bg-surface p-8 space-y-8">
+			<div class="bg-surface p-5 space-y-6 sm:p-8 sm:space-y-8">
 				<svg
 					class="h-5 w-5 text-text-dim"
 					fill="none"
@@ -249,8 +249,8 @@
 					<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
 					<line x1="2" y1="2" x2="22" y2="22" />
 				</svg>
-				<div class="space-y-3">
-					<p class="text-[3rem] leading-none font-light tabular-nums text-text">0</p>
+				<div class="space-y-2 sm:space-y-3">
+					<p class="text-[2.25rem] leading-none font-light tabular-nums text-text sm:text-[3rem]">0</p>
 					<p class="text-[10px] tracking-[0.15em] text-text-dim uppercase">
 						Fields verified
 					</p>
@@ -323,14 +323,14 @@
 	<section
 		id="guarantees"
 		use:reveal
-		class="mt-40 scroll-mt-24 border-t border-border pt-32 space-y-16"
+		class="mt-20 scroll-mt-24 border-t border-border pt-16 space-y-10 sm:mt-40 sm:pt-32 sm:space-y-16"
 	>
-		<div class="space-y-6">
+		<div class="space-y-4 sm:space-y-6">
 			<span class="text-[11px] tracking-[0.2em] text-text-dim uppercase">
 				Guarantees
 			</span>
 			<h2
-				class="max-w-2xl text-[2rem] leading-[1.1] font-light tracking-[-0.03em] text-text sm:text-[2.75rem]"
+				class="max-w-2xl text-[1.5rem] leading-[1.15] font-light tracking-[-0.025em] text-text sm:text-[2.75rem] sm:leading-[1.1] sm:tracking-[-0.03em]"
 			>
 				Read-only.
 				<span
@@ -347,7 +347,7 @@
 			<div
 				class="grid gap-px overflow-hidden rounded-md border border-border bg-border sm:grid-cols-2"
 			>
-				<div class="bg-surface p-8">
+				<div class="bg-surface p-5 sm:p-8">
 					<svg
 						class="h-5 w-5 text-text-muted"
 						fill="none"
@@ -381,7 +381,7 @@
 					</details>
 				</div>
 
-				<div class="bg-surface p-8">
+				<div class="bg-surface p-5 sm:p-8">
 					<svg
 						class="h-5 w-5 text-text-muted"
 						fill="none"
@@ -407,7 +407,7 @@
 					</details>
 				</div>
 
-				<div class="bg-surface p-8">
+				<div class="bg-surface p-5 sm:p-8">
 					<svg
 						class="h-5 w-5 text-text-muted"
 						fill="none"
@@ -435,7 +435,7 @@
 					</details>
 				</div>
 
-				<div class="bg-surface p-8">
+				<div class="bg-surface p-5 sm:p-8">
 					<svg
 						class="h-5 w-5 text-text-muted"
 						fill="none"
@@ -488,18 +488,18 @@
 	<section
 		id={PACKAGE_PUBLISHED ? 'install' : 'release-status'}
 		use:reveal
-		class="mt-40 scroll-mt-24 border-t border-border pt-32 space-y-16"
+		class="mt-20 scroll-mt-24 border-t border-border pt-16 space-y-10 sm:mt-40 sm:pt-32 sm:space-y-16"
 	>
-		<div class="space-y-6">
+		<div class="space-y-4 sm:space-y-6">
 			<span class="text-[11px] tracking-[0.2em] text-text-dim uppercase">
 				{PACKAGE_PUBLISHED ? 'Quick start' : 'Release status'}
 			</span>
 			<h2
-				class="max-w-2xl text-[2rem] leading-[1.1] font-light tracking-[-0.03em] text-text sm:text-[2.75rem]"
+				class="max-w-2xl text-[1.5rem] leading-[1.15] font-light tracking-[-0.025em] text-text sm:text-[2.75rem] sm:leading-[1.1] sm:tracking-[-0.03em]"
 			>
 				{PACKAGE_PUBLISHED ? 'One command. Any MCP client.' : 'Source first. Install after ownership.'}
 			</h2>
-			<p class="max-w-xl text-[16px] leading-[1.6] text-text-muted">
+			<p class="max-w-xl text-[15px] leading-[1.6] text-text-muted sm:text-[16px]">
 				{#if PACKAGE_PUBLISHED}
 					Speaks
 					<a
@@ -542,14 +542,14 @@
 	</section>
 
 	<!-- ── Closing ─────────────────────────────────────────────────── -->
-	<section use:reveal class="mt-48 border-t border-border pt-40 pb-32">
-		<div class="space-y-12">
+	<section use:reveal class="mt-24 border-t border-border pt-16 pb-16 sm:mt-48 sm:pt-40 sm:pb-32">
+		<div class="space-y-8 sm:space-y-12">
 			<h2
-				class="max-w-2xl text-[3rem] leading-[1.02] font-light tracking-[-0.04em] text-text sm:text-[4.5rem]"
+				class="max-w-2xl text-[2rem] leading-[1.05] font-light tracking-[-0.03em] text-text sm:text-[4.5rem] sm:leading-[1.02] sm:tracking-[-0.04em]"
 			>
 				Find the right agent.
 			</h2>
-			<p class="max-w-md text-[16px] leading-[1.6] text-text-muted">
+			<p class="max-w-md text-[15px] leading-[1.6] text-text-muted sm:text-[16px]">
 				{#if PACKAGE_PUBLISHED}
 					MCP for discovery. Canonical SDK for writes.
 				{:else}

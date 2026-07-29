@@ -59,7 +59,7 @@
 		</nav>
 	</header>
 
-	<main class="relative z-10 mx-auto w-full max-w-4xl flex-1 px-6 pt-28 pb-32">
+	<main class="relative z-10 mx-auto w-full max-w-4xl flex-1 px-5 pt-20 pb-20 sm:px-6 sm:pt-28 sm:pb-32">
 		{@render children()}
 	</main>
 
