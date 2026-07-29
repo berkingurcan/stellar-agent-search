@@ -26,17 +26,17 @@ const LS = String.fromCharCode(0x2028); // LINE SEPARATOR
 const PS = String.fromCharCode(0x2029); // PARAGRAPH SEPARATOR
 
 describe("nlparse: RE_SCORE_NUM word boundaries (find-#3)", () => {
-  it("does NOT extract a minScore from words that merely contain 'rated'", () => {
+  it("does NOT extract a minExplorerScore from words that merely contain 'rated'", () => {
     // "curated"/"operated"/"generated" all contain "rated"; without \b anchors
-    // they injected a spurious minScore that silently emptied discovery.
-    expect(parseQuery("a curated feed of 100 sources").filters.minScore).toBeUndefined();
-    expect(parseQuery("operated 24/7 monitoring").filters.minScore).toBeUndefined();
-    expect(parseQuery("generated 3d art").filters.minScore).toBeUndefined();
+    // they injected a spurious minimum that silently emptied discovery.
+    expect(parseQuery("a curated feed of 100 sources").filters.minExplorerScore).toBeUndefined();
+    expect(parseQuery("operated 24/7 monitoring").filters.minExplorerScore).toBeUndefined();
+    expect(parseQuery("generated 3d art").filters.minExplorerScore).toBeUndefined();
   });
 
   it("still extracts a real 'score/rated N' filter", () => {
-    expect(parseQuery("agents with score above 90").filters.minScore).toBe(90);
-    expect(parseQuery("rated 85 or higher").filters.minScore).toBe(85);
+    expect(parseQuery("agents with score above 90").filters.minExplorerScore).toBe(90);
+    expect(parseQuery("rated 85 or higher").filters.minExplorerScore).toBe(85);
   });
 });
 
@@ -112,14 +112,14 @@ describe("parseId: hex/exponent/oversized rejection (resource-#10 variant)", () 
   });
 });
 
-describe("loadConfig rejects mistyped safety overrides", () => {
-  it("fails closed for invalid booleans, score scale, and weights", () => {
+describe("loadConfig rejects mistyped or retired safety overrides", () => {
+  it("fails closed for invalid booleans, score scale, and any legacy weight", () => {
     expect(() => loadConfig({ VERIFY_ONCHAIN: "flase" })).toThrow(/VERIFY_ONCHAIN/);
     expect(() => loadConfig({ RANK_SCORE_MAX: "0" })).toThrow(/greater than zero/);
     expect(() => loadConfig({ RANK_W_QUALITY: "NaN" })).toThrow(/RANK_W_QUALITY/);
     expect(() =>
       loadConfig({ RANK_W_QUALITY: "0", RANK_W_VOLUME: "0", RANK_W_BREADTH: "0" }),
-    ).toThrow(/at least one/);
+    ).toThrow(/no longer supported.*fixed evidence weights/);
   });
 });
 
@@ -159,7 +159,7 @@ describe("toAgentCard: registry endpoints remain unverified candidates (card tru
         checkedAt: "2026-01-01T00:00:00.000Z",
       },
       verified: false,
-      flags: { unrated: true, newAgent: false, lowConfidence: true, verified: false, verificationMismatch: false },
+      flags: { unrated: true, newAgent: false, lowEvidence: true, lowConfidence: true, verified: false, verificationMismatch: false },
       createdAt: null,
       txHash: null,
       resolveStatus: null,

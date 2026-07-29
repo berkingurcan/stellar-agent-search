@@ -3,9 +3,10 @@
 Operational runbook for the one-time npm name reservation and every real release after it. The blocking work
 is tracked in [`issues/`](issues/); this file is the ordered procedure.
 
-**State verified 29 July 2026:** the npm name is unclaimed and the repository must become public before a
-provenance-backed release. Public onboarding therefore stays disabled, and every prepared launch remains
-exact-version pinned.
+**State verified 29 July 2026:** the npm name is unclaimed and the repository is private. Finalize the
+canonical GitHub owner and reserve the npm name with the inert bootstrap **before** making source files with
+prepared commands public. The repository must then be public before the provenance-backed real release.
+Public onboarding stays disabled until both real registries are verified.
 
 ## Release model
 
@@ -18,16 +19,12 @@ checksum-pinned MCP schema, typechecks, tests, builds, installs the exact tarbal
 its bin, generates the consumer SBOM, and verifies npm ownership, tarball integrity, and SLSA provenance. Only
 then does it publish or verify the immutable MCP Registry version.
 
-## 1. Make the repository public
+## 1. Finalize repository identity while it is still private
 
-GitHub → Settings → General → Danger Zone → Change visibility → Public.
-
-This is a release gate: npm does not generate provenance for a public package built from a private repository,
-and MCP Registry GitHub OIDC ownership must resolve the public repository. In a logged-out session, confirm:
-
-```bash
-curl -fsS https://raw.githubusercontent.com/berkingurcan/stellar-agent-mcp/main/skills/mcp/SKILL.md >/dev/null
-```
+Choose the permanent owner (`trionlabs` is recommended; retaining `berkingurcan` is the explicit fallback).
+If transferring, do it while the repository is private, then update every repository/MCP/npm identity and run
+the owner-string audit in [P0-01](issues/P0-01-make-repository-public.md). Do not expose the repository yet:
+the npm name is still unclaimed and the prepared documentation contains exact future commands.
 
 ## 2. Prepare a green release commit on `main`
 
@@ -56,7 +53,7 @@ npm run validate:release && npm run typecheck && npm test && npm run build
 # Review and commit the complete release diff; create the tag only after it is green on main.
 ```
 
-## 3. Reserve the npm name once
+## 3. Reserve the npm name once — before public visibility
 
 Do not rewrite the real package to `0.0.0`. Generate the repository-provided inert reservation in an empty
 temporary directory:
@@ -72,9 +69,26 @@ npm view stellar-agent-mcp dist-tags --json
 
 The dry run must contain exactly `package.json`, `README.md`, and `LICENSE`; it must contain no `bin`, scripts,
 or dependencies. The dist-tags response must show `"bootstrap": "0.0.0"` and must not contain `latest`.
-Delete the temporary directory. Never manually publish `0.1.0`.
+Delete the temporary directory. Never manually publish `0.1.0`. Do not make the repository public until this
+reservation is independently visible under the intended npm owner; otherwise the public command strings
+advertise an unclaimed executable namespace.
 
-## 4. Configure both protection layers
+## 4. Make the canonical repository public
+
+GitHub → Settings → General → Danger Zone → Change visibility → Public. This external identity change needs
+the repository/organization owner's explicit action; it is not automated by this runbook.
+
+The real public release requires public source for npm provenance and MCP Registry GitHub OIDC ownership. In a
+logged-out session, confirm the canonical path selected in step 1:
+
+```bash
+curl -fsS https://raw.githubusercontent.com/berkingurcan/stellar-agent-mcp/main/skills/mcp/SKILL.md >/dev/null
+```
+
+Also re-check that `npm view stellar-agent-mcp dist-tags --json` still shows only the owned bootstrap and no
+unexpected `latest` release.
+
+## 5. Configure both protection layers
 
 Create a GitHub environment named **`npm-production`**. Require a second reviewer, prevent self-review, allow
 only selected tags matching `v*`, and disable administrator bypass. A workflow's `environment:` field alone
@@ -96,7 +110,7 @@ version points at another repository/MCP name.
 After the first OIDC release succeeds, configure npm to require 2FA and disallow tokens, and revoke obsolete
 automation tokens. Trusted Publishing continues to work through its short-lived OIDC credential.
 
-## 5. Publish the real release by tag
+## 6. Publish the real release by tag
 
 Create the tag only on the reviewed commit already present on `main`:
 
@@ -113,7 +127,7 @@ release. It never treats a bare `HTTP 200` as ownership.
 The MCP Registry step performs the same fail-closed check: an existing exact version is accepted only when its
 `server` object exactly equals local `server.json`.
 
-## 6. Verify, then expose onboarding
+## 7. Verify, then expose onboarding
 
 ```bash
 npm view stellar-agent-mcp@0.1.0 version dist.integrity repository --json
@@ -124,14 +138,17 @@ curl -fsS 'https://registry.modelcontextprotocol.io/v0.1/servers/io.github.berki
 On npm, verify that the provenance badge resolves to this repository, `.github/workflows/publish.yml`, the
 release tag, and the tagged commit. Confirm the MCP Registry response matches `server.json`.
 
-Only after both checks pass, make a reviewed follow-up that changes `PACKAGE_PUBLISHED` in
-`web/src/lib/surface.ts` from `false` to `true`, removes the dated unclaimed-package warnings, and deploys the
-assets-only landing Worker. Canary every copy button. Persistent configs must stay pinned to
+Only after both checks pass, make a reviewed follow-up that changes the single re-export in
+`web/src/lib/install.ts` from `install-pending.js` to `install-published.js`, builds the site, runs
+`npm --prefix web run check:release-surface`, and deploys the assets-only landing Worker. The pre-release
+module graph contains no executable package commands; the published module supplies them only after this switch.
+Canary every copy button. Persistent configs must stay pinned to
 `stellar-agent-mcp@0.1.0`; do not replace them with mutable `latest` launches.
 
 ## Non-negotiable stop conditions
 
 - The repository is private or the tag commit is not on `main`.
+- The repository is about to become public while the npm name is still unclaimed.
 - The `npm-production` environment is missing any protection rule.
 - npm Trusted Publisher uses a full path instead of filename `publish.yml`, omits the environment, or allows
   an action other than the intended `npm publish`.

@@ -62,7 +62,7 @@ describe("feedback resource precision and coverage", () => {
   const coverage = {
     coverageComplete: false,
     paginationExhausted: false,
-    snapshotConsistent: true,
+    snapshotConsistent: false,
     pagesScanned: 1,
     recordsScanned: 1,
     hasMore: true,
@@ -83,6 +83,7 @@ describe("feedback resource precision and coverage", () => {
       "-100000000000000000001",
     );
     expect(feedbackValueOrNull(Number.MAX_SAFE_INTEGER + 1)).toBeNull();
+    expect(feedbackValueOrNull("170141183460469231731687303715884105728")).toBeNull();
 
     const json = buildFeedbackJson(1, [item], coverage, {
       page: 1,
@@ -136,10 +137,44 @@ describe("discovery output honesty", () => {
     expect(result.structuredContent.coverage).toEqual({
       coverageComplete: false,
       paginationExhausted: false,
-      snapshotConsistent: true,
+      snapshotConsistent: false,
       pagesScanned: 1,
       recordsScanned: 1,
       hasMore: true,
+      limitations: ["v1-unversioned-offset-pagination"],
+    });
+  });
+
+  it("never calls a final offset page globally complete when prior pages were not scanned", async () => {
+    const explorer = {
+      getAgents: async () => ({
+        data: [agent(21)],
+        meta: {
+          chain: "stellar",
+          network: "mainnet",
+          pagination: { page: 2, limit: 20, total: 21, hasMore: false },
+        },
+      }),
+    };
+    const { handler } = capture(registerListAgents, "list_agents", baseDeps(explorer));
+    const result = await handler({
+      limit: 20,
+      page: 2,
+      sortBy: "score",
+      verify: false,
+    });
+
+    expect(result.structuredContent.coverage).toEqual({
+      coverageComplete: false,
+      paginationExhausted: true,
+      snapshotConsistent: false,
+      pagesScanned: 1,
+      recordsScanned: 1,
+      hasMore: false,
+      limitations: [
+        "v1-unversioned-offset-pagination",
+        "prior-pages-not-scanned",
+      ],
     });
   });
 
@@ -174,6 +209,8 @@ describe("discovery output honesty", () => {
     expect(definition.description).not.toMatch(/callable|invokable/i);
     expect(result.isError).toBeFalsy();
     expect(result.structuredContent.services[0]).toMatchObject({
+      capabilitiesVerified: false,
+      trustVerified: false,
       endpointVerified: false,
       livenessVerified: false,
       protocolConformanceVerified: false,

@@ -34,7 +34,9 @@ const inputShape = {
   verify: z
     .boolean()
     .default(false)
-    .describe("On-chain-verify only the reputation summary (does not verify A2A conformance or endpoints)."),
+    .describe(
+      "Attempt the bounded Reputation-contract reachability probe; it does not verify reputation fields, A2A conformance, or endpoints.",
+    ),
 };
 
 type Args = z.infer<z.ZodObject<typeof inputShape>>;
@@ -43,7 +45,7 @@ const NOTE =
   "UNVERIFIED DERIVED PROJECTION, not an agent-published or protocol-conformant A2A AgentCard. " +
   "No A2A document, endpoint ownership, transport, skill, or payment requirement was verified. " +
   "All agent-authored metadata and service candidates live only under `card.selfDeclared`. " +
-  "`x-stellar8004.verified` is scoped exclusively to the reputation summary.";
+  "`x-stellar8004.verificationScope` is reachability-only; current reputation fields remain Explorer-declared.";
 
 const outputShape = {
   // The derived A2A-shaped object (see lib/agentcard.ts for the exact shape).

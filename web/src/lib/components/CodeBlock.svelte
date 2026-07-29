@@ -32,7 +32,7 @@
 </script>
 
 <div
-	class="overflow-x-auto rounded-lg border border-border bg-code p-3.5 font-mono text-[11.5px] leading-relaxed {className}"
+	class="overflow-x-auto rounded-md border border-border bg-code p-3.5 font-mono text-[11.5px] leading-relaxed {className}"
 >
 	{#if html}
 		{@html html}

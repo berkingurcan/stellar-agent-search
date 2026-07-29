@@ -8,6 +8,7 @@
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
+import { ValidationError } from "@trionlabs/stellar8004";
 import type { GetAgentsParams } from "../lib/explorer.js";
 import {
   canonicalTrust,
@@ -16,7 +17,8 @@ import {
   summarizeRanked,
   toolResult,
   zLimit,
-  zMinScore,
+  zLegacyMinScore,
+  zMinExplorerScore,
   zTrust,
   READ_ANNOTATIONS,
   VERIFY_TOP_K,
@@ -33,8 +35,16 @@ const inputShape = {
   mpp: z.literal(true).optional().describe("When present, require indexed MPP support."),
   hasServices: z.literal(true).optional(),
   trust: zTrust.optional(),
-  minScore: zMinScore.optional(),
-  verify: z.boolean().default(false).describe("On-chain-verify the top results (slower)."),
+  minExplorerScore: zMinExplorerScore.optional().describe(
+    "Minimum upstream v1 Explorer total_score in protocol units; not local rank.",
+  ),
+  minScore: zLegacyMinScore
+    .optional()
+    .describe("Deprecated ambiguous input; rejected. Use minExplorerScore."),
+  verify: z
+    .boolean()
+    .default(false)
+    .describe("Probe the Reputation contract for the top results; current probe verifies no reputation fields."),
 };
 
 type Args = z.infer<z.ZodObject<typeof inputShape>>;
@@ -60,6 +70,11 @@ export function registerLeaderboard(server: McpServer, deps: ToolDeps): void {
       annotations: { title: "Leaderboard", ...READ_ANNOTATIONS },
     },
     handler<Args>(async (args) => {
+      if (args.minScore !== undefined) {
+        throw new ValidationError(
+          "minScore is ambiguous and no longer supported; use minExplorerScore for the upstream v1 Explorer total_score filter.",
+        );
+      }
       const filters: Omit<NonNullable<GetAgentsParams>, "search" | "page"> = {
         limit: POOL_PAGE_SIZE,
       };
@@ -67,7 +82,7 @@ export function registerLeaderboard(server: McpServer, deps: ToolDeps): void {
       if (args.mpp !== undefined) filters.mpp = args.mpp;
       if (args.hasServices !== undefined) filters.hasServices = args.hasServices;
       if (args.trust !== undefined) filters.trust = canonicalTrust(args.trust);
-      if (args.minScore !== undefined) filters.minScore = args.minScore;
+      if (args.minExplorerScore !== undefined) filters.minScore = args.minExplorerScore;
 
       const discovery = await deps.explorer.findAgentsWithCoverage("", {
         filters,
@@ -75,7 +90,6 @@ export function registerLeaderboard(server: McpServer, deps: ToolDeps): void {
       });
 
       const rows = await rankAndVerify(deps, discovery.agents, {
-        weights: deps.config.weights,
         sortBy: "score",
         verify: args.verify,
         verifyTopK: VERIFY_TOP_K,

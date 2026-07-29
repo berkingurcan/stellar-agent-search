@@ -1,24 +1,25 @@
 /**
- * ranking.ts — the deterministic 3-axis ranking heuristic.
+ * ranking.ts — the deterministic declared-reputation ordering heuristic.
  *
- * Formula frozen by modules/01 §3 + INFRA-BLUEPRINT:
+ * Local policy version: stellar-agent-mcp-declared-evidence-v1.
  *
- *   quality = clamp(avg / scoreMax, 0, 1)            (null / 0 when unrated)
- *   volume  = clamp(ln1p(fc) / ln1p(VOL_SAT), 0, 1)  (log-saturating)
- *   breadth = clamp(ln1p(uc) / ln1p(BREADTH_SAT),0,1)(declared Sybil-cost proxy)
+ *   q       = clamp(avg / scoreMax, 0, 1) (0 when unrated)
+ *   effUc   = min(validSafeInt(uc), validSafeInt(fc))
+ *   b       = clamp(ln1p(effUc) / ln1p(BREADTH_SAT),0,1)
+ *   effFc   = min(fc, effUc * MAX_FEEDBACK_PER_CLIENT_EVIDENCE)
+ *   v       = clamp(ln1p(effFc) / ln1p(VOL_SAT),0,1)
  *
- *   base  = wQ*quality + wV*volume + wB*breadth      (weights sum to 1 ⇒ [0,1])
- *   score = clamp(base + paymentBonus + endpointBonus, 0, 1)
+ *   evidenceStrength = 0.4*v + 0.6*b
+ *   score            = q * evidenceStrength
  *
- * Default weights 0.5 / 0.2 / 0.3 put breadth (unique clients — hard to fake)
- * above volume (raw count — cheap to fake) as a Sybil-cost hedge. Neither
- * field proves personhood or makes the result Sybil-resistant.
+ * Evidence quantity can support an observed rating but can never manufacture
+ * positive reputation when q=0. Repeated rows from one address are capped by a
+ * deliberately conservative aggregate proxy. This is not per-client
+ * winsorization, personhood, or Sybil resistance. x402/MPP/service claims are
+ * owner-controlled metadata and never affect the score.
  *
- * Two separated scores:
- *   - `score`     — honest displayed score (unrated ⇒ quality contributes 0).
- *   - `sortScore` — ordering-only, novelty-floored so a capable-but-unrated
- *                   agent is ordered-not-buried, while its displayed score and
- *                   `flags.unrated` stay honest.
+ * `sortScore` intentionally equals `score`. Exploration is an explicit `newest`
+ * sort policy, never a hidden trust-order boost for an unrated agent.
  *
  * Every function here is PURE and fully deterministic: given the same inputs
  * (and an explicit `now` for the newAgent flag) it yields byte-identical output.
@@ -28,33 +29,34 @@ import type {
   AgentFlags,
   RankAxis,
   RankResult,
-  RankWeights,
   VerificationStatus,
 } from "../types.js";
-import { DEFAULT_WEIGHTS, RANK_SCORE_MAX } from "../config.js";
+import { RANK_SCORE_MAX } from "../config.js";
 
 // ---------------------------------------------------------------------------
 // Tunable constants (modules/01 §3 DEFAULTS). Exported for tests + docs.
 // ---------------------------------------------------------------------------
 
 export const RANKING = {
+  VERSION: "stellar-agent-mcp-declared-evidence-v1",
   /** feedbackCount at which the volume axis ≈ 1 (log saturation). */
   VOL_SAT: 50,
   /** uniqueClients at which the breadth axis ≈ 1 (log saturation). */
   BREADTH_SAT: 25,
-  /** additive bonuses (already scaled into the [0,1] score space). */
-  P_X402: 0.05,
-  P_MPP: 0.03,
-  P_SERVICES: 0.03,
+  /** Retained response constants; owner-declared capabilities never affect score. */
+  P_X402: 0,
+  P_MPP: 0,
+  P_SERVICES: 0,
+  /** At most this many feedback rows per distinct client count toward volume. */
+  MAX_FEEDBACK_PER_CLIENT_EVIDENCE: 3,
   /** an agent created within this many days is flagged `newAgent`. */
   NEW_AGENT_DAYS: 14,
-  /** feedbackCount below this is flagged `lowConfidence`. */
-  MIN_FEEDBACK_FOR_CONFIDENCE: 3,
-  /** sort-only floor so capable-but-unrated agents are not buried. */
-  NOVELTY_FLOOR: 0.15,
-  /** confidence axis mix (evidence proxy, independent of quality). */
-  CONF_VOLUME: 0.6,
-  CONF_BREADTH: 0.4,
+  /** Both feedback rows and distinct clients must reach this low-evidence floor. */
+  MIN_FEEDBACK_FOR_EVIDENCE: 3,
+  MIN_UNIQUE_CLIENTS_FOR_EVIDENCE: 3,
+  /** Fixed evidence mix. It is an index, not a calibrated probability. */
+  EVIDENCE_VOLUME_WEIGHT: 0.4,
+  EVIDENCE_BREADTH_WEIGHT: 0.6,
 } as const;
 
 const MS_PER_DAY = 86_400_000;
@@ -95,16 +97,6 @@ export function breadthNorm(uniqueClients: number): number {
   return clamp(Math.log1p(uc) / Math.log1p(RANKING.BREADTH_SAT), 0, 1);
 }
 
-/** Re-normalize arbitrary non-negative weights so the three sum to 1. */
-export function normalizeWeights(w: RankWeights): RankWeights {
-  const q = Math.max(0, w.quality);
-  const v = Math.max(0, w.volume);
-  const b = Math.max(0, w.breadth);
-  const sum = q + v + b;
-  if (sum <= 0) return { ...DEFAULT_WEIGHTS };
-  return { quality: q / sum, volume: v / sum, breadth: b / sum };
-}
-
 // ---------------------------------------------------------------------------
 // Scoring input / options
 // ---------------------------------------------------------------------------
@@ -112,7 +104,7 @@ export function normalizeWeights(w: RankWeights): RankWeights {
 /** Everything the deterministic scorer needs about a single agent. */
 export interface RankInput {
   id: number;
-  /** declared average feedback value (0..scoreMax) or null when unrated. */
+  /** declared average feedback value; normalized against local scoreMax policy. */
   avg: number | null;
   feedbackCount: number;
   uniqueClients: number;
@@ -120,7 +112,7 @@ export interface RankInput {
   mpp: boolean;
   hasServices: boolean;
   /**
-   * Bounded comparison outcome. It affects evidence flags only; it never adds
+   * Bounded contract-probe outcome. It affects evidence flags only; it never adds
    * to or subtracts from the ranking score. Omitted means not checked.
    */
   verificationStatus?: VerificationStatus;
@@ -129,15 +121,13 @@ export interface RankInput {
 }
 
 export interface ScoreOptions {
-  /** Custom weights (re-normalized to sum 1). Defaults to DEFAULT_WEIGHTS. */
-  weights?: RankWeights;
   /** Feedback score scale for the quality axis. Defaults to RANK_SCORE_MAX. */
   scoreMax?: number;
   /** Epoch ms "now" for the `newAgent` flag. Defaults to Date.now(). */
   now?: number;
 }
 
-export type SortMode = "relevance" | "score" | "confidence" | "newest";
+export type SortMode = "relevance" | "score" | "evidence" | "confidence" | "newest";
 
 export interface RankOptions extends ScoreOptions {
   /** Ordering strategy. Defaults to "relevance" (uses sortScore). */
@@ -167,75 +157,93 @@ function parseCreatedAt(createdAt: string | number | null | undefined): number |
  * an explicit `now`) always yields identical output.
  */
 export function scoreAgent(input: RankInput, opts: ScoreOptions = {}): RankResult {
-  const weights = normalizeWeights(opts.weights ?? DEFAULT_WEIGHTS);
   const scoreMax = opts.scoreMax ?? RANK_SCORE_MAX;
   const now = opts.now ?? Date.now();
 
-  const fc = input.feedbackCount > 0 ? input.feedbackCount : 0;
-  const uc = input.uniqueClients > 0 ? input.uniqueClients : 0;
+  const validCount = (value: number): number =>
+    Number.isSafeInteger(value) && value > 0 ? value : 0;
+  const fc = validCount(input.feedbackCount);
+  const declaredUc = validCount(input.uniqueClients);
+  // A distinct active client cannot exceed the number of active feedback rows.
+  // Preserve the declared raw value below, but never let an impossible tuple buy
+  // breadth, quality, volume, or evidence strength.
+  const effectiveUniqueClients = Math.min(declaredUc, fc);
 
   // --- axes ---
   const qn = qualityNorm(input.avg, fc, scoreMax); // null when unrated
-  const qNorm = qn ?? 0; // unrated contributes 0 (honest)
-  const vNorm = volumeNorm(fc);
-  const bNorm = breadthNorm(uc);
+  const qNorm = qn ?? 0;
+  const bNorm = breadthNorm(effectiveUniqueClients);
+  const effectiveFeedbackCount = Math.min(
+    fc,
+    effectiveUniqueClients * RANKING.MAX_FEEDBACK_PER_CLIENT_EVIDENCE,
+  );
+  const vNorm = volumeNorm(effectiveFeedbackCount);
 
   const quality: RankAxis = {
     raw: qn === null ? null : input.avg,
     norm: qNorm,
-    weight: weights.quality,
-    weighted: weights.quality * qNorm,
+    weight: 1,
+    weighted: qNorm,
   };
   const volume: RankAxis = {
     raw: fc,
     norm: vNorm,
-    weight: weights.volume,
-    weighted: weights.volume * vNorm,
+    weight: RANKING.EVIDENCE_VOLUME_WEIGHT,
+    weighted: RANKING.EVIDENCE_VOLUME_WEIGHT * vNorm,
   };
   const breadth: RankAxis = {
-    raw: uc,
+    raw: declaredUc,
     norm: bNorm,
-    weight: weights.breadth,
-    weighted: weights.breadth * bNorm,
+    weight: RANKING.EVIDENCE_BREADTH_WEIGHT,
+    weighted: RANKING.EVIDENCE_BREADTH_WEIGHT * bNorm,
   };
 
-  // --- weighted base + additive bonuses ---
-  const base = clamp(quality.weighted + volume.weighted + breadth.weighted, 0, 1);
-  const paymentBonus =
-    (input.x402 ? RANKING.P_X402 : 0) + (input.mpp ? RANKING.P_MPP : 0);
-  const endpointBonus = input.hasServices ? RANKING.P_SERVICES : 0;
+  // Evidence quantity supports quality; it is never reputation by itself.
+  const evidenceStrength = clamp(volume.weighted + breadth.weighted, 0, 1);
+  // x402, MPP, and service presence are owner-controlled URI declarations.
+  // Preserve fields for response compatibility, but never turn claims into trust.
+  const paymentBonus = 0;
+  const endpointBonus = 0;
   // Kept as an always-zero response field for pre-release schema continuity.
   // Verification is evidence metadata, not a score boost: the current contract
   // cannot re-derive active uniqueClients without an unbounded event scan.
   const verifiedBonus = 0;
 
-  const score = clamp(base + paymentBonus + endpointBonus + verifiedBonus, 0, 1);
+  const score = clamp(qNorm * evidenceStrength, 0, 1);
+  // Retained compatibility alias. It is the final score, not an additive base.
+  const base = score;
   const score100 = Math.round(score * 100);
 
-  // --- confidence (evidence proxy, quality-independent) ---
-  const confidence = clamp(
-    RANKING.CONF_VOLUME * vNorm + RANKING.CONF_BREADTH * bNorm,
-    0,
-    1,
-  );
+  // Deprecated compatibility alias; never describe this as a probability.
+  const confidence = evidenceStrength;
 
   // --- flags ---
   const createdMs = parseCreatedAt(input.createdAt);
+  const lowEvidence =
+    fc < RANKING.MIN_FEEDBACK_FOR_EVIDENCE ||
+    effectiveUniqueClients < RANKING.MIN_UNIQUE_CLIENTS_FOR_EVIDENCE;
   const flags: AgentFlags = {
     unrated: fc === 0,
     newAgent: createdMs != null && now - createdMs < RANKING.NEW_AGENT_DAYS * MS_PER_DAY,
-    lowConfidence: fc < RANKING.MIN_FEEDBACK_FOR_CONFIDENCE,
+    lowEvidence,
+    // Deprecated compatibility alias.
+    lowConfidence: lowEvidence,
     verified: input.verificationStatus === "verified",
     verificationMismatch: input.verificationStatus === "mismatch",
   };
 
-  // --- ordering-only novelty floor (displayed score stays honest) ---
-  const sortScore = flags.unrated ? Math.max(score, RANKING.NOVELTY_FLOOR) : score;
+  // Relevance ordering uses the same declared-reputation heuristic users see.
+  const sortScore = score;
 
   return {
+    rankVersion: RANKING.VERSION,
     quality,
     volume,
     breadth,
+    qualityUnshrunkNorm: qNorm,
+    effectiveUniqueClients,
+    effectiveFeedbackCount,
+    evidenceStrength,
     paymentBonus,
     endpointBonus,
     verifiedBonus,
@@ -265,9 +273,14 @@ export function roundRankResult(r: RankResult, dp = 4): RankResult {
     weighted: f(a.weighted),
   });
   return {
+    rankVersion: r.rankVersion,
     quality: ax(r.quality),
     volume: ax(r.volume),
     breadth: ax(r.breadth),
+    qualityUnshrunkNorm: f(r.qualityUnshrunkNorm),
+    effectiveUniqueClients: r.effectiveUniqueClients,
+    effectiveFeedbackCount: r.effectiveFeedbackCount,
+    evidenceStrength: f(r.evidenceStrength),
     paymentBonus: f(r.paymentBonus),
     endpointBonus: f(r.endpointBonus),
     verifiedBonus: f(r.verifiedBonus),
@@ -288,8 +301,9 @@ function sortKey(mode: SortMode, r: RankResult): number {
   switch (mode) {
     case "score":
       return r.score;
-    case "confidence":
-      return r.confidence;
+    case "evidence":
+    case "confidence": // deprecated input alias
+      return r.evidenceStrength;
     case "newest":
       return 0; // handled separately (needs createdAt)
     case "relevance":
@@ -299,7 +313,7 @@ function sortKey(mode: SortMode, r: RankResult): number {
 }
 
 /**
- * Score every input and return them ranked. Stable: ties break by confidence
+ * Score every input and return them ranked. Stable: ties break by evidence strength
  * desc, then id asc. `newest` sorts by createdAt desc (missing dates last).
  * Pure and deterministic given an explicit `now`.
  */
@@ -321,9 +335,9 @@ export function rankAgents(inputs: RankInput[], opts: RankOptions = {}): RankedA
       const bv = sortKey(mode, b.result);
       if (av !== bv) return bv - av;
     }
-    // tie-break: confidence desc, then id asc (fully deterministic)
-    if (a.result.confidence !== b.result.confidence) {
-      return b.result.confidence - a.result.confidence;
+    // tie-break: evidence strength desc, then id asc (fully deterministic)
+    if (a.result.evidenceStrength !== b.result.evidenceStrength) {
+      return b.result.evidenceStrength - a.result.evidenceStrength;
     }
     return a.input.id - b.input.id;
   });

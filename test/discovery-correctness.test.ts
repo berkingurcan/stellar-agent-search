@@ -158,6 +158,7 @@ describe("ExplorerService bounded discovery coverage", () => {
       pagesScanned: 2,
       recordsScanned: 4,
       hasMore: true,
+      limitations: ["v1-unversioned-offset-pagination"],
     });
     expect(mock.calls).toHaveLength(2);
     for (const url of mock.calls) {
@@ -167,7 +168,7 @@ describe("ExplorerService bounded discovery coverage", () => {
     }
   });
 
-  it("marks coverage complete only from explicit pagination and omits unknown hasMore", async () => {
+  it("reports v1 exhaustion without claiming snapshot-complete coverage", async () => {
     const completeMock = new MockFetch(() =>
       jsonResponse(pageBody([agent(1)], { hasMore: false })),
     );
@@ -175,12 +176,13 @@ describe("ExplorerService bounded discovery coverage", () => {
       fetch: completeMock.fn,
     }).findAgentsWithCoverage("");
     expect(complete.coverage).toEqual({
-      coverageComplete: true,
+      coverageComplete: false,
       paginationExhausted: true,
-      snapshotConsistent: true,
+      snapshotConsistent: false,
       pagesScanned: 1,
       recordsScanned: 1,
       hasMore: false,
+      limitations: ["v1-unversioned-offset-pagination"],
     });
 
     const unknownMock = new MockFetch(() =>
@@ -192,9 +194,13 @@ describe("ExplorerService bounded discovery coverage", () => {
     expect(unknown.coverage).toEqual({
       coverageComplete: false,
       paginationExhausted: false,
-      snapshotConsistent: true,
+      snapshotConsistent: false,
       pagesScanned: 1,
       recordsScanned: 1,
+      limitations: [
+        "v1-unversioned-offset-pagination",
+        "pagination-metadata-unavailable",
+      ],
     });
     expect(unknown.coverage).not.toHaveProperty("hasMore");
   });
@@ -246,6 +252,58 @@ describe("feedback pagination windows", () => {
 });
 
 describe("tool discovery contracts", () => {
+  it("rejects ambiguous legacy minScore before any Explorer request", async () => {
+    const mock = new MockFetch(() => jsonResponse(pageBody([])));
+    const find = captureHandler(registerFindAgent, "find_agent", depsWith(mock));
+
+    const result = await find({
+      query: "scraper",
+      minScore: 50,
+      limit: 10,
+      sortBy: "relevance",
+      verify: false,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toMatch(/minScore.*ambiguous.*minExplorerScore/);
+    expect(mock.calls).toHaveLength(0);
+  });
+
+  it("forwards explicit minExplorerScore to the upstream minScore parameter", async () => {
+    const mock = new MockFetch(() =>
+      jsonResponse(pageBody([agent(10)], { total: 1, hasMore: false })),
+    );
+    const find = captureHandler(registerFindAgent, "find_agent", depsWith(mock));
+
+    const result = await find({
+      query: "scraper",
+      minExplorerScore: 250,
+      limit: 10,
+      sortBy: "relevance",
+      verify: false,
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(mock.calls[0]?.searchParams.get("minScore")).toBe("250");
+  });
+
+  it("rejects retired per-call ranking weights before any Explorer request", async () => {
+    const mock = new MockFetch(() => jsonResponse(pageBody([])));
+    const rank = captureHandler(registerRankAgent, "rank_agent", depsWith(mock));
+
+    const result = await rank({
+      agentIds: [10],
+      weights: { breadth: 1 },
+      limit: 10,
+      sortBy: "relevance",
+      verify: false,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toMatch(/weights.*no longer supported.*volume=0\.4/);
+    expect(mock.calls).toHaveLength(0);
+  });
+
   it("list_agents forwards MPP to one list request and never detail-hydrates candidates", async () => {
     const mock = new MockFetch(() =>
       jsonResponse(pageBody([agent(8), agent(9)], { total: 2, hasMore: false })),
@@ -276,12 +334,13 @@ describe("tool discovery contracts", () => {
 
     expect(result.isError).toBeFalsy();
     expect(result.structuredContent.coverage).toEqual({
-      coverageComplete: true,
+      coverageComplete: false,
       paginationExhausted: true,
-      snapshotConsistent: true,
+      snapshotConsistent: false,
       pagesScanned: 1,
       recordsScanned: 2,
       hasMore: false,
+      limitations: ["v1-unversioned-offset-pagination"],
     });
     expect(mock.calls).toHaveLength(1);
     expect(mock.calls[0].pathname).toBe("/api/v1/agents");
@@ -304,12 +363,13 @@ describe("tool discovery contracts", () => {
 
     expect(result.isError).toBeFalsy();
     expect(result.structuredContent.coverage).toEqual({
-      coverageComplete: true,
+      coverageComplete: false,
       paginationExhausted: true,
-      snapshotConsistent: true,
+      snapshotConsistent: false,
       pagesScanned: 1,
       recordsScanned: 1,
       hasMore: false,
+      limitations: ["v1-unversioned-offset-pagination"],
     });
     expect(mock.calls).toHaveLength(1);
     expect(mock.calls[0].pathname).toBe("/api/v1/agents");
@@ -337,6 +397,7 @@ describe("tool discovery contracts", () => {
       pagesScanned: 2,
       recordsScanned: 2,
       hasMore: true,
+      limitations: ["v1-unversioned-offset-pagination"],
     });
     expect(mock.calls).toHaveLength(2);
     for (const url of mock.calls) {
@@ -388,7 +449,10 @@ describe("tool discovery contracts", () => {
       hasMore: true,
       hydrationMissing: 0,
       detailsHydrated: 2,
-      limitations: ["detail-hydration-unversioned"],
+      limitations: [
+        "v1-unversioned-offset-pagination",
+        "detail-hydration-unversioned",
+      ],
     });
 
     const listCalls = mock.calls.filter((url) => url.pathname === "/api/v1/agents");

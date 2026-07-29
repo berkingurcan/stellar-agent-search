@@ -233,6 +233,14 @@ function envEquals(value: unknown, expected: Record<string, string>): boolean {
 
 function configMatches(value: unknown, launch: SetupReport["launch"]): boolean {
   if (!isRecord(value)) return false;
+  // Client config fields outside this canonical stdio shape can materially
+  // change what executes even when command/args/env look identical. In
+  // particular, cwd can redirect npx through attacker-controlled npm config or
+  // local packages, and type/transport can make a client ignore the stdio
+  // command entirely. Accept only the one benign client-added discriminator.
+  const allowedKeys = new Set(["type", "command", "args", "env"]);
+  if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
+  if (value.type !== undefined && value.type !== "stdio") return false;
   return (
     value.command === launch.command &&
     sameStringArray(value.args, launch.args) &&
@@ -766,7 +774,7 @@ export async function executeSetup(
   const parsed = parseOptions(options);
   const launch = desiredLaunch(parsed.env, parsed.version);
   const major = Number(runtime.nodeVersion.split(".")[0]);
-  const nodeCheck = { ok: Number.isFinite(major) && major >= 20, detail: `v${runtime.nodeVersion} (>=20 required)` };
+  const nodeCheck = { ok: Number.isFinite(major) && major >= 22, detail: `v${runtime.nodeVersion} (>=22 required)` };
   const entrypointOk = await fileExists(runtime.entrypoint);
   const entrypointCheck = { ok: entrypointOk, detail: entrypointOk ? runtime.entrypoint : `not found: ${runtime.entrypoint}` };
   const launcher = await runtime.runCommand("npx", ["--version"], 5_000);

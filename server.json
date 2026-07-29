@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.berkingurcan/stellar-agent-mcp",
   "title": "Stellar Agent MCP",
-  "description": "Discover, rank, and verify Stellar 8004 agents through a read-only, keyless MCP server and CLI.",
+  "description": "Discover and rank Stellar 8004 agents with a read-only MCP server and fail-closed contract probes.",
   "version": "0.1.0",
   "websiteUrl": "https://github.com/berkingurcan/stellar-agent-mcp",
   "repository": {
@@ -33,12 +33,12 @@
         },
         {
           "name": "STELLAR_RPC_URL",
-          "description": "Override the Soroban RPC URL used for on-chain reputation verification.",
+          "description": "Override the Soroban RPC URL used for the bounded Reputation-contract probe.",
           "isRequired": false
         },
         {
           "name": "VERIFY_ONCHAIN",
-          "description": "Set to 'false' to disable on-chain reputation verification (degrade to self-declared explorer data only).",
+          "description": "Set to 'false' to skip the bounded contract probe; reputation fields remain Explorer-declared either way.",
           "isRequired": false,
           "default": "true"
         }

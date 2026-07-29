@@ -8,7 +8,7 @@
  */
 
 import type { Config } from "../config.js";
-import type { ExplorerStatsResponse } from "./explorer.js";
+import { UpstreamDataError } from "./errors.js";
 
 export const REGISTRY_STATS_SAMPLE_CAP_AGENTS = 5_000;
 
@@ -19,7 +19,7 @@ export const REGISTRY_STATS_METRIC_DEFINITIONS = {
   totalUniqueClients:
     "Sum of each sampled agent's distinct-client count; not a global distinct count of clients, people, or accounts.",
   averageFeedbackScore:
-    "Unweighted mean of per-agent average feedback scores in the upstream sample, not a feedback-weighted global average.",
+    "Unweighted mean of per-agent average feedback scores in the upstream sample, not a feedback-weighted global average and not guaranteed to use a 0–100 protocol range.",
   agentsWithServices: "Agent rows with a non-empty services field, from an upstream exact-count query.",
   agentsWithX402: "Agent rows declaring x402 enabled, from an upstream exact-count query.",
   agentsWithMpp:
@@ -63,28 +63,89 @@ export interface RegistryStatsView {
   limitations: string[];
 }
 
-function safeOptionalCount(value: unknown): number | null {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+function upstreamError(path: string, expectation: string): never {
+  throw new UpstreamDataError(`Explorer field '${path}' must be ${expectation}.`);
+}
+
+function requireCount(value: unknown, path: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    return upstreamError(path, "a non-negative safe integer");
+  }
+  return value;
+}
+
+function requireFinite(value: unknown, path: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return upstreamError(path, "a finite number");
+  }
+  return value;
+}
+
+function requireDistribution(value: unknown, path: string): Record<string, number> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return upstreamError(path, "an object of non-negative safe-integer counts");
+  }
+  const validated: Record<string, number> = {};
+  for (const [key, count] of Object.entries(value)) {
+    validated[key] = requireCount(count, `${path}.${key}`);
+  }
+  return validated;
+}
+
+function requireNetwork(value: unknown, expected: Config["network"], path: string): void {
+  const normalized =
+    typeof value === "string" && value.toLowerCase() === "pubnet"
+      ? "mainnet"
+      : typeof value === "string"
+        ? value.toLowerCase()
+        : "";
+  if (normalized !== expected) upstreamError(path, `network '${expected}'`);
 }
 
 /** Attach metric semantics and coverage to the typed upstream values. */
 export function buildRegistryStatsView(
-  stats: ExplorerStatsResponse,
+  stats: unknown,
   network: Config["network"],
 ): RegistryStatsView {
-  const agentsWithMpp = safeOptionalCount(stats.agentsWithMpp);
+  if (typeof stats !== "object" || stats === null || Array.isArray(stats)) {
+    upstreamError("stats", "an object");
+  }
+  const raw = stats as Record<string, unknown>;
+  requireNetwork(raw.network, network, "stats.network");
+  const totalAgents = requireCount(raw.totalAgents, "stats.totalAgents");
+  const totalFeedbacks = requireCount(raw.totalFeedbacks, "stats.totalFeedbacks");
+  const totalValidations = requireCount(raw.totalValidations, "stats.totalValidations");
+  const totalUniqueClients = requireCount(raw.totalUniqueClients, "stats.totalUniqueClients");
+  const averageFeedbackScore = requireFinite(
+    raw.averageFeedbackScore,
+    "stats.averageFeedbackScore",
+  );
+  const agentsWithServices = requireCount(raw.agentsWithServices, "stats.agentsWithServices");
+  const agentsWithX402 = requireCount(raw.agentsWithX402, "stats.agentsWithX402");
+  const agentsWithMpp =
+    raw.agentsWithMpp === undefined
+      ? null
+      : requireCount(raw.agentsWithMpp, "stats.agentsWithMpp");
+  const protocolDistribution = requireDistribution(
+    raw.protocolDistribution,
+    "stats.protocolDistribution",
+  );
+  const trustDistribution = requireDistribution(
+    raw.trustDistribution,
+    "stats.trustDistribution",
+  );
   return {
     network,
-    totalAgents: stats.totalAgents,
-    totalFeedbacks: stats.totalFeedbacks,
-    totalValidations: stats.totalValidations,
-    totalUniqueClients: stats.totalUniqueClients,
-    averageFeedbackScore: stats.averageFeedbackScore,
-    agentsWithServices: stats.agentsWithServices,
-    agentsWithX402: stats.agentsWithX402,
+    totalAgents,
+    totalFeedbacks,
+    totalValidations,
+    totalUniqueClients,
+    averageFeedbackScore,
+    agentsWithServices,
+    agentsWithX402,
     agentsWithMpp,
-    protocolDistribution: stats.protocolDistribution,
-    trustDistribution: stats.trustDistribution,
+    protocolDistribution,
+    trustDistribution,
     metricDefinitions: REGISTRY_STATS_METRIC_DEFINITIONS,
     coverage: {
       source: "stellar-8004-explorer-v1",
@@ -108,5 +169,57 @@ export function buildRegistryStatsView(
       snapshotConsistent: false,
     },
     limitations: [...REGISTRY_STATS_LIMITATIONS],
+  };
+}
+
+export interface RegistryHealthView {
+  [key: string]: unknown;
+  status: string;
+  network: Config["network"];
+  anyStale: boolean;
+  indexer: {
+    identity: { lastLedger: number; stale: boolean };
+    reputation: { lastLedger: number; stale: boolean };
+    validation: { lastLedger: number; stale: boolean };
+  };
+}
+
+/** Runtime-validate the SDK's compile-time-only health response. */
+export function buildRegistryHealthView(
+  health: unknown,
+  network: Config["network"],
+): RegistryHealthView {
+  if (typeof health !== "object" || health === null || Array.isArray(health)) {
+    upstreamError("health", "an object");
+  }
+  const raw = health as Record<string, unknown>;
+  requireNetwork(raw.network, network, "health.network");
+  if (raw.status !== "healthy") {
+    upstreamError("health.status", "the literal 'healthy'");
+  }
+  if (typeof raw.indexer !== "object" || raw.indexer === null || Array.isArray(raw.indexer)) {
+    upstreamError("health.indexer", "an indexer status object");
+  }
+  const validateIndexer = (
+    value: unknown,
+    path: string,
+  ): { lastLedger: number; stale: boolean } => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return upstreamError(path, "an object with lastLedger/stale");
+    }
+    const record = value as Record<string, unknown>;
+    const lastLedger = requireCount(record.lastLedger, `${path}.lastLedger`);
+    if (typeof record.stale !== "boolean") upstreamError(`${path}.stale`, "a boolean");
+    return { lastLedger, stale: record.stale };
+  };
+  const rawIndexer = raw.indexer as Record<string, unknown>;
+  const identity = validateIndexer(rawIndexer.identity, "health.indexer.identity");
+  const reputation = validateIndexer(rawIndexer.reputation, "health.indexer.reputation");
+  const validation = validateIndexer(rawIndexer.validation, "health.indexer.validation");
+  return {
+    status: "healthy",
+    network,
+    anyStale: identity.stale || reputation.stale || validation.stale,
+    indexer: { identity, reputation, validation },
   };
 }

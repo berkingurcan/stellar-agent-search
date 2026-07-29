@@ -51,7 +51,7 @@ describe("npm bootstrap name reservation", () => {
       rmSync(target, { recursive: true, force: true });
       rmSync(npmCache, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it("refuses repository paths and non-empty destinations", () => {
     const repositoryTarget = join(ROOT, `.bootstrap-test-${randomUUID()}`);
@@ -76,6 +76,25 @@ describe("npm bootstrap name reservation", () => {
 });
 
 describe("real release fail-closed gates", () => {
+  it("advertises and enforces the x402 dependency chain's Node 22 runtime floor", () => {
+    const pkg = JSON.parse(read("package.json")) as { engines: { node: string } };
+    const lock = JSON.parse(read("package-lock.json")) as {
+      packages: Record<string, { engines?: { node?: string } }>;
+    };
+    const ci = read(".github", "workflows", "ci.yml");
+
+    expect(pkg.engines.node).toBe(">=22");
+    expect(lock.packages[""]?.engines?.node).toBe(">=22");
+    expect(read("scripts", "release", "validate-release.mjs")).toContain(
+      'pkg.engines?.node === ">=22"',
+    );
+    expect(read("tsup.config.ts")).toContain('target: "node22"');
+    expect(read("src", "cli", "index.ts")).toContain("major >= 22");
+    expect(read("src", "cli", "setup.ts")).toContain("major >= 22");
+    expect(ci).toContain("node: ['22', '24']");
+    expect(ci).not.toContain("node: ['20'");
+  });
+
   it("keeps the package bin-only and validates before any direct publish", () => {
     const pkg = JSON.parse(read("package.json")) as Record<string, unknown> & {
       scripts: Record<string, string>;
@@ -102,6 +121,8 @@ describe("real release fail-closed gates", () => {
     expect(workflow).toContain("verify-npm-release.mjs published");
     expect(workflow).toContain("npm pack --json --ignore-scripts --pack-destination");
     expect(workflow).toContain('npm install --ignore-scripts --no-audit --no-fund --save-exact "${{ steps.pack.outputs.path }}"');
+    expect(workflow).toContain('npm install --ignore-scripts --no-audit --no-fund --save-exact "$package_name@$package_version"');
+    expect(read(".github", "workflows", "ci.yml")).toContain("npm run check:release-surface");
     expect(workflow).toContain("npm sbom --omit=dev --sbom-format cyclonedx");
     expect(workflow).toContain('npm publish "${{ steps.pack.outputs.path }}" --ignore-scripts --access public');
     expect(workflow).toContain("/v0.1/servers/$encoded_name/versions/$encoded_version");
@@ -112,7 +133,21 @@ describe("real release fail-closed gates", () => {
     const runbook = read("instruction.md");
     expect(runbook).toContain("workflow filename: **`publish.yml`**");
     expect(runbook).toContain("environment name: **`npm-production`**");
-    expect(runbook).toContain("`PACKAGE_PUBLISHED`");
+    expect(runbook).toContain("`web/src/lib/install.ts`");
     expect(runbook).toContain("Never manually publish `0.1.0`");
+    expect(runbook.indexOf("Reserve the npm name once")).toBeLessThan(
+      runbook.indexOf("Make the canonical repository public"),
+    );
+
+    const landing = read("web", "src", "routes", "+page.svelte");
+    const installSelector = read("web", "src", "lib", "install.ts");
+    const pendingSurface = read("web", "src", "lib", "install-pending.ts");
+    const webPackage = JSON.parse(read("web", "package.json")) as { scripts: Record<string, string> };
+    expect(landing).not.toContain('code="npx -y stellar-agent-mcp@0.1.0');
+    expect(landing).toContain("Install command withheld until the npm package");
+    expect(installSelector).toContain("export * from './install-pending.js'");
+    expect(pendingSurface).toContain("export const PACKAGE_PUBLISHED = false");
+    expect(pendingSurface).not.toContain("npx");
+    expect(webPackage.scripts.deploy).toContain("npm run check:release-surface");
   });
 });

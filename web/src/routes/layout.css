@@ -1,79 +1,55 @@
 @import 'tailwindcss';
 
 /* ─────────────────────────────────────────────────────────────────────────
-   NYC minimalist design system.
-
-   Reduced chroma, solid surfaces, hairline borders. Typography and
-   whitespace carry the entire visual interest. The steel-blue accent
-   appears only on interactive elements and key data. The star field
-   is retained as a whisper — barely perceptible ambient texture.
-
-   Dropped from the stellar8004.com family: glassmorphism, ambient
-   glows, CTA noise/leaks, glow shadows. Added: easing system, scroll
-   reveal, section-index styling.
+   Lean minimalism. Typography + whitespace carry all visual interest.
+   One accent, only on interactive elements. No star field, no glass,
+   no glow, no noise.
    ───────────────────────────────────────────────────────────────────── */
 
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
-/* ── Easing — two curves, used consistently ── */
 :root {
 	--ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 	--ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 @theme {
-	--font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+	--font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
 	--font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
-	/* Surfaces — chroma halved from stellar8004.com for NYC neutral.
-	   The "lacivert" is a whisper, not a statement. */
-	--color-surface: oklch(0.12 0.006 250);
-	--color-surface-raised: oklch(0.15 0.008 250);
-	--color-surface-overlay: oklch(0.18 0.008 250);
+	/* Surfaces — near-zero chroma. A whisper of cool, nothing more. */
+	--color-surface: oklch(0.11 0.002 250);
+	--color-surface-raised: oklch(0.14 0.002 250);
+	--color-surface-overlay: oklch(0.17 0.002 250);
 
 	/* Borders — hairlines */
-	--color-border: oklch(0.22 0.01 250);
-	--color-border-subtle: oklch(0.17 0.008 250);
+	--color-border: oklch(0.21 0.003 250);
+	--color-border-subtle: oklch(0.16 0.002 250);
 
-	/* Text — same L as stellar8004.com, reduced chroma.
-	   dim 4.7:1 AA, muted 6.2:1 AA, text 16.4:1 AAA */
-	--color-text: oklch(0.93 0.004 250);
-	--color-text-muted: oklch(0.64 0.008 250);
-	--color-text-dim: oklch(0.52 0.008 250);
+	/* Text — truly neutral. dim 4.7:1, muted 6.2:1, text 16.4:1 */
+	--color-text: oklch(0.94 0 250);
+	--color-text-muted: oklch(0.62 0.002 250);
+	--color-text-dim: oklch(0.50 0.002 250);
 
-	/* Accent — steel-blue, used sparingly */
-	--color-accent: oklch(0.72 0.11 250);
-	--color-accent-soft: oklch(0.72 0.11 250 / 0.06);
-	--color-accent-medium: oklch(0.72 0.11 250 / 0.12);
-	--color-accent-fill: oklch(0.18 0.025 250);
-	--color-accent-fill-hover: oklch(0.22 0.035 250);
+	/* Accent — steel-blue, ONLY on interactive elements */
+	--color-accent: oklch(0.72 0.08 250);
+	--color-accent-soft: oklch(0.72 0.08 250 / 0.06);
+	--color-accent-medium: oklch(0.72 0.08 250 / 0.12);
 
-	/* On-accent — text color when sitting on an accent fill.
-	   Dark mode: dark text on light steel-blue.
-	   Light mode: light text on dark gray (set in light theme). */
-	--color-on-accent: oklch(0.12 0.006 250);
+	/* Semantic — functional CLI status only, reduced chroma */
+	--color-positive: oklch(0.72 0.08 162);
+	--color-positive-soft: oklch(0.72 0.08 162 / 0.1);
+	--color-warning: oklch(0.74 0.09 80);
+	--color-warning-soft: oklch(0.74 0.09 80 / 0.1);
+	--color-negative: oklch(0.68 0.11 25);
+	--color-negative-soft: oklch(0.68 0.11 25 / 0.1);
 
-	/* Semantic — distinct hues, matched lightness.
-	   positive = verified/partial, warning = mismatch,
-	   negative = unavailable. */
-	--color-positive: oklch(0.72 0.1 162);
-	--color-positive-soft: oklch(0.72 0.1 162 / 0.1);
-	--color-warning: oklch(0.74 0.11 80);
-	--color-warning-soft: oklch(0.74 0.11 80 / 0.1);
-	--color-negative: oklch(0.68 0.14 25);
-	--color-negative-soft: oklch(0.68 0.14 25 / 0.1);
-
-	/* Component tokens */
-	--color-star-fill: oklch(0.5 0.006 250);
-	--color-code: oklch(0.1 0.006 250);
+	--color-code: oklch(0.095 0.002 250);
 }
 
-/* -- Light theme — true monochromatic ------------------------------
-   Near-zero chroma everywhere except semantic colors, which need
-   enough chroma to distinguish verified from mismatch.            */
 [data-theme='light'] {
-	--color-surface: oklch(0.98 0 0);
-	--color-surface-raised: oklch(0.96 0 0);
+	--color-surface: oklch(0.985 0 0);
+	--color-surface-raised: oklch(0.965 0 0);
 	--color-surface-overlay: oklch(0.94 0 0);
 
 	--color-border: oklch(0.88 0 0);
@@ -86,18 +62,14 @@
 	--color-accent: oklch(0.28 0 0);
 	--color-accent-soft: oklch(0.28 0 0 / 0.05);
 	--color-accent-medium: oklch(0.28 0 0 / 0.1);
-	--color-accent-fill: oklch(0.92 0 0);
-	--color-accent-fill-hover: oklch(0.88 0 0);
-	--color-on-accent: oklch(0.98 0 0);
 
-	--color-positive: oklch(0.5 0.13 162);
-	--color-positive-soft: oklch(0.5 0.13 162 / 0.08);
-	--color-warning: oklch(0.52 0.12 75);
-	--color-warning-soft: oklch(0.52 0.12 75 / 0.08);
-	--color-negative: oklch(0.5 0.16 25);
-	--color-negative-soft: oklch(0.5 0.16 25 / 0.08);
+	--color-positive: oklch(0.5 0.11 162);
+	--color-positive-soft: oklch(0.5 0.11 162 / 0.08);
+	--color-warning: oklch(0.52 0.1 75);
+	--color-warning-soft: oklch(0.52 0.1 75 / 0.08);
+	--color-negative: oklch(0.5 0.14 25);
+	--color-negative-soft: oklch(0.5 0.14 25 / 0.08);
 
-	--color-star-fill: oklch(0.38 0 0);
 	--color-code: oklch(0.965 0 0);
 }
 
@@ -109,6 +81,7 @@ html {
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
 	scroll-behavior: smooth;
+	font-feature-settings: 'ss01';
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -120,6 +93,7 @@ html {
 body {
 	background: var(--color-surface);
 	color: var(--color-text);
+	font-family: var(--font-sans);
 }
 
 ::selection {
@@ -133,7 +107,7 @@ body {
 	border-radius: 2px;
 }
 
-/* ── Reveal animations (hero load-only) ── */
+/* ── Reveal (hero load-only) ── */
 @keyframes reveal-up {
 	from {
 		opacity: 0;
@@ -189,7 +163,7 @@ body {
 }
 .nav-link:hover {
 	color: var(--color-text);
-	background: color-mix(in oklch, var(--color-accent) 5%, transparent);
+	background: var(--color-surface-raised);
 }
 
 /* ── Theme transition ── */

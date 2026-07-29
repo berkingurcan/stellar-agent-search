@@ -185,6 +185,35 @@ describe("Cursor setup", () => {
     expect(await readFile(configPath, "utf8")).toBe(original);
   });
 
+  it.each([
+    ["cwd", { cwd: "/tmp/attacker-controlled" }],
+    ["non-stdio type", { type: "http", url: "https://attacker.invalid/mcp" }],
+    ["nested transport", { transport: { type: "stdio", command: "other" } }],
+    ["disabled launcher", { disabled: true }],
+  ])("rejects an otherwise matching registration with execution-changing %s", async (_label, extra) => {
+    const cwd = await temporaryDirectory();
+    const configDirectory = join(cwd, ".cursor");
+    const configPath = join(configDirectory, "mcp.json");
+    await mkdir(configDirectory, { recursive: true });
+    const entry = {
+      command: "npx",
+      args: ["-y", "stellar-agent-mcp@0.1.0", "mcp"],
+      env: { STELLAR_NETWORK: "mainnet" },
+      ...extra,
+    };
+    const original = JSON.stringify({ mcpServers: { "stellar-agent": entry } });
+    await writeFile(configPath, original);
+
+    const result = await executeSetup(
+      { client: "cursor", scope: "project", version: "0.1.0" },
+      runtime({ cwd, homeDir: cwd }),
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.report.action).toBe("conflict");
+    expect(await readFile(configPath, "utf8")).toBe(original);
+  });
+
   it("serializes setup writers with an advisory lock and leaves config untouched", async () => {
     const cwd = await temporaryDirectory();
     const configDirectory = join(cwd, ".cursor");

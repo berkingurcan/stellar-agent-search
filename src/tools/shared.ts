@@ -20,7 +20,11 @@ import type {
   FeedbackResponse,
 } from "@trionlabs/stellar8004";
 import type { Config } from "../config.js";
-import { ExplorerService, type ExplorerServiceOptions } from "../lib/explorer.js";
+import {
+  ExplorerService,
+  V1_UNVERSIONED_PAGINATION_LIMITATION,
+  type ExplorerServiceOptions,
+} from "../lib/explorer.js";
 import { ReputationVerifier, type ReputationVerifierOptions } from "../lib/reputation.js";
 import {
   rankAgents,
@@ -53,7 +57,6 @@ import type {
   DeclaredReputation,
   Network,
   RankResult,
-  RankWeights,
   SelfDeclaredFields,
   ToolResult,
   VerificationResult,
@@ -150,8 +153,11 @@ export function canonicalTrust(
   if (value === "tee") return "tee-attestation";
   return value;
 }
-export const zSort = z.enum(["relevance", "score", "confidence", "newest"]);
-export const zMinScore = z.number().min(0).max(100);
+export const zSort = z.enum(["relevance", "score", "evidence", "confidence", "newest"]);
+/** Upstream v1 leaderboard_scores.total_score threshold, not this server's local rank. */
+export const zMinExplorerScore = z.number().finite().nonnegative();
+/** @deprecated Input shape retained only so handlers can reject it explicitly. */
+export const zLegacyMinScore = zMinExplorerScore;
 /** Public free-text fields are intentionally small to bound CPU/log/cache-key amplification. */
 export const MAX_QUERY_LENGTH = 256;
 export const MAX_FEEDBACK_TAG_LENGTH = 64;
@@ -204,21 +210,27 @@ export function deriveCapabilities(a: AgentResponse): AgentCapabilities {
 
 /** Reputation as reported by the explorer/indexer (declared). */
 export function declaredReputation(a: AgentResponse): DeclaredReputation {
-  const feedbackCount = a.scores?.feedbackCount ?? a.feedbackCount ?? 0;
+  const safeCount = (value: unknown): number =>
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+  const feedbackCount = safeCount(a.scores?.feedbackCount ?? a.feedbackCount ?? 0);
   const rawAvg = a.scores?.average ?? a.avgScore ?? null;
   return {
-    average: feedbackCount > 0 && rawAvg != null ? rawAvg : null,
+    average:
+      feedbackCount > 0 && typeof rawAvg === "number" && Number.isFinite(rawAvg)
+        ? rawAvg
+        : null,
     feedbackCount,
-    uniqueClients: a.scores?.uniqueClients ?? a.uniqueClients ?? 0,
+    uniqueClients: safeCount(a.scores?.uniqueClients ?? a.uniqueClients ?? 0),
   };
 }
 
 /** Joined score summary for a profile. */
 export function agentScores(a: AgentResponse): AgentScores {
   const declared = declaredReputation(a);
+  const rawTotal = a.scores?.total ?? a.totalScore ?? null;
   return {
     average: declared.average,
-    total: a.scores?.total ?? a.totalScore ?? null,
+    total: typeof rawTotal === "number" && Number.isFinite(rawTotal) ? rawTotal : null,
     feedbackCount: declared.feedbackCount,
     uniqueClients: declared.uniqueClients,
   };
@@ -275,6 +287,10 @@ export interface RankedRow {
   rank: number;
   /** score100 (0..100) */
   score: number;
+  /** Versioned local ordering policy. */
+  rankVersion: string;
+  /** Declared-evidence index in [0,1], not a probability. */
+  evidenceStrength: number;
   stellarId: string;
   caip2Id: string;
   network: Network;
@@ -299,10 +315,13 @@ export function toRankedRow(
 ): RankedRow {
   const ids = agentIds(config, a.id);
   const caps = deriveCapabilities(a);
+  const projectedRank = roundRankResult(result);
   const row: RankedRow = {
     id: a.id,
     rank,
     score: result.score100,
+    rankVersion: result.rankVersion,
+    evidenceStrength: projectedRank.evidenceStrength,
     stellarId: ids.stellarId,
     caip2Id: ids.caip2Id,
     network: config.network,
@@ -314,7 +333,7 @@ export function toRankedRow(
     flags: result.flags,
     selfDeclared: selfDeclaredSlot(a),
   };
-  if (opts.includeBreakdown) row.breakdown = roundRankResult(result);
+  if (opts.includeBreakdown) row.breakdown = projectedRank;
   if (opts.verification) row.verification = opts.verification;
   return row;
 }
@@ -326,7 +345,7 @@ export function toRankedRow(
 
 /**
  * Build the canonical {@link AgentProfile} for one agent: typed identity +
- * declared reputation + on-chain verification overlay + rounded 3-axis rank,
+ * declared reputation + on-chain reachability evidence + rounded 3-axis rank,
  * with all untrusted free text confined to `selfDeclared` and every typed field
  * (owner/wallet/agentUri/supportedTrust) sanitized or address-validated.
  *
@@ -351,7 +370,6 @@ export async function buildAgentProfile(
     excludeClient: detail.owner,
   });
   const result = scoreAgent(toRankInput(detail, verification.status), {
-    weights: deps.config.weights,
     scoreMax: deps.config.scoreMax,
   });
   const ids = agentIds(deps.config, id);
@@ -391,10 +409,9 @@ export async function buildAgentProfile(
 // ---------------------------------------------------------------------------
 
 export interface RankVerifyOptions {
-  weights?: RankWeights;
   sortBy?: SortMode;
   verify: boolean;
-  /** How many of the returned rows to on-chain verify (default VERIFY_TOP_K). */
+  /** How many returned rows receive the bounded contract probe (default VERIFY_TOP_K). */
   verifyTopK?: number;
   /** How many rows to return (post-sort slice). */
   limit: number;
@@ -415,7 +432,6 @@ export async function rankAndVerify(
   const unique = [...byId.values()];
 
   const rankOpts: RankOptions = {
-    weights: opts.weights,
     scoreMax: deps.config.scoreMax,
     sortBy: opts.sortBy ?? "relevance",
   };
@@ -433,7 +449,7 @@ export async function rankAndVerify(
   );
   const verifyIds = new Set(returned.slice(0, effectiveVerifyTopK).map((r) => r.id));
 
-  // Verify (or skip) each returned agent. `skip` short-circuits without RPC.
+  // Probe (or skip) each returned agent. `skip` short-circuits without RPC.
   const verifications = new Map<number, VerificationResult>();
   const pending = [...returned];
   const concurrency = Math.max(
@@ -535,10 +551,11 @@ export interface FeedbackWindow {
   coverage: {
     windowComplete: boolean;
     paginationExhausted: boolean;
-    /** False for offset windows assembled from more than one HTTP response. */
+    /** Always false for Explorer v1; it supplies no revision-bound snapshot. */
     snapshotConsistent: boolean;
     pagesScanned: number;
     hasMore?: boolean;
+    limitations?: string[];
   };
 }
 
@@ -546,7 +563,7 @@ export interface FeedbackWindow {
  * Build a bounded caller-facing page over the Explorer's fixed-size upstream
  * pages. Revocation filtering happens before the local offset, so page=2,
  * limit=10 means visible rows 11..20 rather than upstream rows 21..30. The
- * upstream uses offset pagination without a revision cursor, so a multi-page
+ * upstream uses offset pagination without a revision cursor, so every v1
  * window is explicitly marked snapshot-inconsistent.
  */
 export async function collectFeedbackWindow(
@@ -567,6 +584,7 @@ export async function collectFeedbackWindow(
   let pagesScanned = 0;
   let hasMore: boolean | undefined;
   let paginationExhausted = false;
+  let paginationContradiction = false;
 
   for (let upstreamPage = 1; upstreamPage <= maxPages; upstreamPage++) {
     const res = await deps.explorer.getFeedback(
@@ -587,10 +605,9 @@ export async function collectFeedbackWindow(
       visibleSeen++;
     }
 
-    if (hasMore === false || batch.length === 0) {
-      paginationExhausted = true;
-    }
-    if (rows.length >= options.limit || paginationExhausted) break;
+    if (hasMore === false) paginationExhausted = true;
+    if (batch.length === 0 && hasMore === true) paginationContradiction = true;
+    if (rows.length >= options.limit || paginationExhausted || batch.length === 0) break;
     // Without an explicit continuation signal, do not speculate another page.
     if (hasMore === undefined) break;
   }
@@ -601,9 +618,14 @@ export async function collectFeedbackWindow(
     coverage: {
       windowComplete: rows.length >= options.limit || paginationExhausted,
       paginationExhausted,
-      snapshotConsistent: pagesScanned === 1,
+      snapshotConsistent: false,
       pagesScanned,
       ...(hasMore !== undefined ? { hasMore } : {}),
+      limitations: [
+        V1_UNVERSIONED_PAGINATION_LIMITATION,
+        ...(paginationContradiction ? ["upstream-pagination-contradiction"] : []),
+        ...(hasMore === undefined ? ["pagination-metadata-unavailable"] : []),
+      ],
     },
   };
 }

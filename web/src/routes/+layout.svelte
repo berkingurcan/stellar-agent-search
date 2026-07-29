@@ -3,7 +3,6 @@
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import { theme } from '$lib/theme.svelte.js';
-	import EllipticStars from '$lib/components/EllipticStars.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import { GITHUB, NPM, EXPLORER } from '$lib/links.js';
 
@@ -14,21 +13,17 @@
 	});
 </script>
 
-<EllipticStars />
-
 <div class="flex min-h-screen flex-col text-text">
-	<header class="sticky top-0 z-50 border-b border-border-subtle/60 bg-surface/80 backdrop-blur-md">
-		<nav class="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-2.5">
+	<header class="sticky top-0 z-50 border-b border-border bg-surface">
+		<nav class="mx-auto flex w-full max-w-4xl items-center justify-between px-6 py-3">
 			<a href="{base}/" class="flex items-center gap-2 text-text">
 				<img src="{base}/favicon.svg" alt="" class="h-4 w-4" />
 				<span class="font-mono text-[12px]">stellar-agent-mcp</span>
 			</a>
 
 			<div class="flex items-center gap-0.5">
-				<a href="#why" class="nav-link hidden sm:inline-flex">Why</a>
-				<a href="#output" class="nav-link hidden sm:inline-flex">Output</a>
-				<a href="#install" class="nav-link">Install</a>
-				<a href="#tools" class="nav-link hidden sm:inline-flex">Surface</a>
+				<a href="#why" class="nav-link hidden sm:inline-flex">Evidence</a>
+				<a href="#guarantees" class="nav-link hidden sm:inline-flex">Guarantees</a>
 
 				<span class="mx-1.5 hidden h-3.5 w-px bg-border sm:block"></span>
 
@@ -59,13 +54,13 @@
 		</nav>
 	</header>
 
-	<main class="relative z-10 mx-auto w-full max-w-5xl flex-1 px-6 py-20">
+	<main class="relative z-10 mx-auto w-full max-w-4xl flex-1 px-6 pt-28 pb-32">
 		{@render children()}
 	</main>
 
-	<footer class="relative z-10 mt-auto border-t border-border-subtle">
+	<footer class="relative z-10 mt-auto border-t border-border">
 		<div
-			class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-x-6 gap-y-3 px-6 py-6 text-[11px] text-text-dim"
+			class="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-x-6 gap-y-3 px-6 py-6 text-[11px] text-text-dim"
 		>
 			<div class="flex flex-wrap items-center gap-3">
 				<span class="font-mono">stellar-agent-mcp</span>
@@ -88,6 +83,12 @@
 					target="_blank"
 					rel="noopener noreferrer"
 					class="transition hover:text-text-muted">Docs</a
+				>
+				<a
+					href="{GITHUB}/blob/main/docs/evidence.md"
+					target="_blank"
+					rel="noopener noreferrer"
+					class="transition hover:text-text-muted">Evidence</a
 				>
 				<a
 					href="{GITHUB}/blob/main/SECURITY.md"

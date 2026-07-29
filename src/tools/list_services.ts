@@ -12,7 +12,7 @@
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { NotFoundError } from "@trionlabs/stellar8004";
+import { NotFoundError, ValidationError } from "@trionlabs/stellar8004";
 import { scoreAgent } from "../lib/ranking.js";
 import { buildSelfDeclaredFields, safe, selfDeclared, serverText } from "../lib/sanitize.js";
 import type { GetAgentsParams } from "../lib/explorer.js";
@@ -26,7 +26,8 @@ import {
   toolResult,
   toRankInput,
   zLimit,
-  zMinScore,
+  zLegacyMinScore,
+  zMinExplorerScore,
   zTrust,
   READ_ANNOTATIONS,
   type ToolDeps,
@@ -40,7 +41,12 @@ const inputShape = {
   x402: z.literal(true).optional().describe("When present, only x402 (USDC pay-per-call) services."),
   mpp: z.literal(true).optional().describe("When present, only MPP micropayment services."),
   trust: zTrust.optional(),
-  minScore: zMinScore.optional(),
+  minExplorerScore: zMinExplorerScore.optional().describe(
+    "Minimum upstream v1 Explorer total_score in protocol units; not local rank.",
+  ),
+  minScore: zLegacyMinScore
+    .optional()
+    .describe("Deprecated ambiguous input; rejected. Use minExplorerScore."),
   limit: zLimit(20),
   page: z.number().int().min(1).default(1),
 };
@@ -53,8 +59,12 @@ const zServiceRow = z
     stellarId: z.string(),
     caip2Id: z.string(),
     capabilities: z.object({ x402: z.boolean(), mpp: z.boolean() }).passthrough(),
+    capabilitiesVerified: z.literal(false),
     supportedTrust: z.array(z.string()),
+    trustVerified: z.literal(false),
     score: z.number(),
+    rankVersion: z.string(),
+    evidenceStrength: z.number(),
     flags: z.record(z.string(), z.any()),
     endpointVerified: z.literal(false),
     livenessVerified: z.literal(false),
@@ -84,8 +94,8 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
     {
       title: "List Services",
       description:
-        "Catalog of self-declared service endpoint candidates, each with its owning agent's typed " +
-        "capability, trust model, and ranked score. Filter by x402/mpp/trust/minScore/search. " +
+        "Catalog of self-declared service endpoint candidates, each with its owning agent's indexed " +
+        "owner-declared capability/trust signals and ranked score. Filter by x402/mpp/trust/minExplorerScore/search. " +
         "No endpoint is probed for liveness, ownership, protocol conformance, or payment behavior. " +
         "Service labels/endpoints are unverified and live in each row's labeled `selfDeclared` slot.",
       inputSchema: z.object(runtimeInputShape),
@@ -93,6 +103,11 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
       annotations: { title: "List Services", ...READ_ANNOTATIONS },
     },
     handler<Args>(async (args) => {
+      if (args.minScore !== undefined) {
+        throw new ValidationError(
+          "minScore is ambiguous and no longer supported; use minExplorerScore for the upstream v1 Explorer total_score filter.",
+        );
+      }
       const filters: Omit<NonNullable<GetAgentsParams>, "search" | "page"> = {
         hasServices: true,
         // neededPages below is calculated against this exact server page size.
@@ -101,7 +116,7 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
       if (args.x402 !== undefined) filters.x402 = args.x402;
       if (args.mpp !== undefined) filters.mpp = args.mpp;
       if (args.trust !== undefined) filters.trust = canonicalTrust(args.trust);
-      if (args.minScore !== undefined) filters.minScore = args.minScore;
+      if (args.minExplorerScore !== undefined) filters.minScore = args.minExplorerScore;
 
       // Discover via the same stem-matching primitive find_agent uses: the
       // explorer `search=` substring param misses "Scrapper" for "scraper". Fetch
@@ -122,7 +137,6 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
         .map((a) => ({
           a,
           result: scoreAgent(toRankInput(a), {
-            weights: deps.config.weights,
             scoreMax: deps.config.scoreMax,
           }),
         }))
@@ -175,11 +189,16 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
             stellarId: ids.stellarId,
             caip2Id: ids.caip2Id,
             capabilities: { x402: caps.x402, mpp: caps.mpp },
+            capabilitiesVerified: false as const,
             supportedTrust: caps.supportedTrust,
+            trustVerified: false as const,
             score: result.score100,
+            rankVersion: result.rankVersion,
+            evidenceStrength: result.evidenceStrength,
             flags: {
               unrated: result.flags.unrated,
               newAgent: result.flags.newAgent,
+              lowEvidence: result.flags.lowEvidence,
               lowConfidence: result.flags.lowConfidence,
             },
             endpointVerified: false as const,

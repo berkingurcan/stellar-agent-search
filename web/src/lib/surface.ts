@@ -10,11 +10,11 @@ export const TIER0: Tool[] = [
 	{ name: 'find_agent', what: 'Natural-language discovery → ranked candidates' },
 	{
 		name: 'rank_agent',
-		what: 'Rank an explicit id set or a query, full 3-axis breakdown + bounded on-chain evidence'
+		what: 'Rank an explicit id set or a query, full declared-data breakdown + fail-closed contract-probe status'
 	},
 	{
 		name: 'get_agent_profile',
-		what: 'Deep profile: identity, capabilities, declared-vs-chain evidence, recent feedback, unverified derived A2A-shaped projection'
+		what: 'Deep profile: identity, capabilities, declared reputation + probe limits, recent feedback, unverified derived A2A-shaped projection'
 	},
 	{ name: 'list_services', what: 'Catalog of self-declared x402/MPP endpoint candidates' }
 ];
@@ -29,7 +29,7 @@ export const TIER1: Tool[] = [
 	},
 	{ name: 'get_agents_by_owner', what: 'Current owner page, with explicit continuation coverage' },
 	{ name: 'get_agent_feedback', what: 'Recent on-chain reviews (sanitized, labeled)' },
-	{ name: 'verify_reputation', what: 'Standalone bounded declared-vs-chain reputation check' },
+	{ name: 'verify_reputation', what: 'Fail-closed contract reachability attempt; no reputation fields are currently verified' },
 	{
 		name: 'get_agent_card',
 		what: 'Unverified derived A2A-shaped projection + x402 hint; not protocol-conformance proof'
@@ -39,12 +39,6 @@ export const TIER1: Tool[] = [
 ];
 
 export const TOOL_COUNT = TIER0.length + TIER1.length;
-
-/**
- * Deliberately false until `stellar-agent-mcp@0.1.0` is owned on npm. A public
- * page must not expose a copyable `npx -y` command for an unclaimed name.
- */
-export const PACKAGE_PUBLISHED = false;
 
 /**
  * Small counts read as words in prose ("Four invariants"), not digits. Derived
@@ -105,44 +99,6 @@ export const INVARIANTS = [
 	},
 	{
 		title: 'Degrade closed',
-		body: 'Data precedence is explorer → bounded on-chain comparison → declared-only. Missing completeness or RPC evidence is labeled unavailable; matching average/count is partial while active unique clients remain unverified.'
-	}
-];
-
-/** Canonical client bootstrap examples; docs/integration.md retains manual configs. */
-export const CONFIGS: { id: string; label: string; lang: string; code: string; note: string }[] = [
-	{
-		id: 'claude-code',
-		label: 'Claude Code',
-		lang: 'bash',
-		code: `npx -y stellar-agent-mcp@0.1.0 setup --client claude --scope user --handshake
-
-# The idempotent setup records this explicit stdio launch:
-# npx -y stellar-agent-mcp@0.1.0 mcp
-
-# Optional: install the skill your agent reads before calling anything
-npx skills add berkingurcan/stellar-agent-mcp --skill mcp`,
-		note: 'Re-run with --check --handshake to verify without changing config, or use --dry-run to preview the registration.'
-	},
-	{
-		id: 'cursor',
-		label: 'Cursor',
-		lang: 'bash',
-		code: `npx -y stellar-agent-mcp@0.1.0 setup --client cursor --scope project --handshake
-
-# The atomic config update records this explicit stdio launch:
-# npx -y stellar-agent-mcp@0.1.0 mcp`,
-		note: 'Existing matching config is left unchanged; conflicts are reported, never overwritten. Read-only limits server-side actions, but endpoint candidates remain self-declared, so keep client approvals aligned with your own policy. Manual configs for other clients are in docs/integration.md.'
-	},
-	{
-		id: 'cli',
-		label: 'Terminal',
-		lang: 'bash',
-		code: `npx -y stellar-agent-mcp@0.1.0 find "web scraper" --x402   # discover
-npx -y stellar-agent-mcp@0.1.0 profile 10                  # full profile for agent 10
-npx -y stellar-agent-mcp@0.1.0 rank "scraping agents" --json
-npx -y stellar-agent-mcp@0.1.0 services --x402             # self-declared endpoint candidates
-npx -y stellar-agent-mcp@0.1.0 doctor                      # self-check`,
-		note: 'The same binary is a plain terminal tool. --json makes every command machine-readable.'
+		body: 'Explorer reputation stays declared data. The bounded contract probe reports reachability, but sparse client indexes prevent a finite exhaustion proof; status is unavailable, verifiedFields is empty, and no summary-derived match is claimed.'
 	}
 ];

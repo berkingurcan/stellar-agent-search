@@ -1,9 +1,10 @@
 /**
- * verify_reputation — the headline differentiator, isolated: re-derive one
- * agent's reputation directly from the on-chain Reputation contract and diff it
- * against the explorer's DECLARED numbers. Returns the full VerificationResult
- * (declared vs verified vs deltas + status). Degrades to "unavailable" if the
- * RPC is down and "skipped" if on-chain verification is disabled.
+ * verify_reputation — fail-closed evidence attempt for one agent. The current
+ * contract has no public client-count/cursor and its compacted pagination can
+ * hide retained addresses after expired index entries, so this release performs
+ * a bounded reachability read but never labels a subset/global comparison as
+ * verification. Returns "unavailable" with explicit limitations, or "skipped"
+ * when contract reads are disabled.
  */
 
 import { z } from "zod";
@@ -46,10 +47,10 @@ export function registerVerifyReputation(server: McpServer, deps: ToolDeps): voi
     {
       title: "Verify Reputation",
       description:
-        "Trust-minimized reputation check for one agent: re-derives the on-chain average from the " +
-        "Reputation contract (get_clients_paginated + get_summary) and diffs it against the " +
-        "explorer's declared numbers. The current contract can establish partial average/count " +
-        "parity for at most five comparable clients; status is partial | mismatch | unavailable | skipped.",
+        "Fail-closed reputation observation for one agent. The current Reputation contract has no " +
+        "authoritative client-set count/cursor and expired index entries can create holes, so the " +
+        "server performs one bounded reachability read but does not call get_summary or claim a diff. " +
+        "Current attempted checks return unavailable with explicit scope; skipped means not attempted.",
       inputSchema: z.object(inputShape),
       outputSchema: z.object(outputShape),
       annotations: { title: "Verify Reputation", ...READ_ANNOTATIONS },
@@ -72,12 +73,13 @@ export function registerVerifyReputation(server: McpServer, deps: ToolDeps): voi
 
       const ids = agentIds(deps.config, id);
       const declaredAvg = verification.declared.average;
-      const verifiedAvg = verification.verified?.average ?? null;
       const text = serverText`Agent ${id} reputation ${safe(verification.status)} on ${safe(
         deps.config.network,
-      )}: declared avg ${declaredAvg == null ? safe("n/a") : declaredAvg} vs on-chain ${
-        verifiedAvg == null ? safe("n/a") : verifiedAvg
-      } (declared feedbacks ${declared.feedbackCount}, unique clients ${declared.uniqueClients}).`;
+      )}: Explorer-declared avg ${declaredAvg == null ? safe("n/a") : declaredAvg}, feedbacks ${
+        declared.feedbackCount
+      }, unique clients ${declared.uniqueClients}; reason=${safe(
+        verification.reason ?? "none",
+      )}; verifiedFields=${verification.verifiedFields?.length ?? 0}; snapshotComparable=false.`;
 
       return toolResult(text, {
         agentId: id,

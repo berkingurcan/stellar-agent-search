@@ -10,14 +10,11 @@
  */
 
 import { getConfig } from "@trionlabs/stellar8004";
-import type { Network, RankWeights, StellarConfig } from "./types.js";
+import type { Network, StellarConfig } from "./types.js";
 import { log } from "./lib/logger.js";
 
-/** Feedback values are 0..100 integers (valueDecimals=0). */
+/** Local display normalization policy; the protocol itself allows signed i128 + decimals. */
 export const RANK_SCORE_MAX = 100;
-
-/** Default 3-axis weights (breadth > volume as a Sybil-cost hedge, not resistance). */
-export const DEFAULT_WEIGHTS: RankWeights = { quality: 0.5, volume: 0.2, breadth: 0.3 };
 
 /** Default explorer HTTP API base. */
 export const DEFAULT_EXPLORER_BASE = "https://stellar8004.com";
@@ -42,12 +39,10 @@ export interface Config {
   rpcUrl: string;
   /** Explorer HTTP API base (env override or default). */
   explorerBaseUrl: string;
-  /** Whether to perform on-chain reputation verification. */
+  /** Whether to attempt the bounded Reputation-contract probe. */
   verifyOnchain: boolean;
   /** Feedback score scale (RANK_SCORE_MAX). */
   scoreMax: number;
-  /** 3-axis ranking weights (env-overridable). */
-  weights: RankWeights;
   /** Optional funded simulation source; omitted for the default fabricated read-only source. */
   simSource?: string;
 }
@@ -112,13 +107,15 @@ export function loadConfig(env: EnvironmentMap = defaultEnvironment()): Config {
   }
   const explorerBaseUrl = explorerOverride || DEFAULT_EXPLORER_BASE;
 
-  const weights: RankWeights = {
-    quality: parseNum(env.RANK_W_QUALITY, DEFAULT_WEIGHTS.quality, "RANK_W_QUALITY"),
-    volume: parseNum(env.RANK_W_VOLUME, DEFAULT_WEIGHTS.volume, "RANK_W_VOLUME"),
-    breadth: parseNum(env.RANK_W_BREADTH, DEFAULT_WEIGHTS.breadth, "RANK_W_BREADTH"),
-  };
-  if (Object.values(weights).some((value) => value < 0) || Object.values(weights).every((value) => value === 0)) {
-    throw new ConfigError("Ranking weights must be non-negative and at least one must be greater than zero");
+  const legacyRankingWeight = ["RANK_W_QUALITY", "RANK_W_VOLUME", "RANK_W_BREADTH"].find(
+    (name) => env[name]?.trim(),
+  );
+  if (legacyRankingWeight) {
+    throw new ConfigError(
+      `${legacyRankingWeight} is no longer supported. Ranking policy ` +
+        `stellar-agent-mcp-declared-evidence-v1 uses fixed evidence weights ` +
+        `(volume=0.4, breadth=0.6) so callers cannot silently redefine score semantics.`,
+    );
   }
   const scoreMax = parseNum(env.RANK_SCORE_MAX, RANK_SCORE_MAX, "RANK_SCORE_MAX");
   if (scoreMax <= 0) throw new ConfigError("RANK_SCORE_MAX must be greater than zero");
@@ -130,7 +127,6 @@ export function loadConfig(env: EnvironmentMap = defaultEnvironment()): Config {
     explorerBaseUrl,
     verifyOnchain: parseBool(env.VERIFY_ONCHAIN, true, "VERIFY_ONCHAIN"),
     scoreMax,
-    weights,
     ...(env.RANK_SIM_SOURCE?.trim() ? { simSource: env.RANK_SIM_SOURCE.trim() } : {}),
   };
 }

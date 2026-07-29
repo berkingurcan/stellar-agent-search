@@ -53,11 +53,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@stellar/stellar-sdk/no-axios/contract` (fetch-based), reusing the generated bindings' `Spec` so argument
   encoding and result decoding are unchanged — see `src/lib/soroban.ts`. Unlike the `overrides` below, this
   **does** reach consumers of the published package: verified by uninstalling the override, leaving the
-  vulnerable `axios@1.15.0` in the tree, and watching `doctor`'s on-chain verification pass through a proxy
+  vulnerable `axios@1.15.0` in the tree, and watching `doctor`'s bounded contract-reachability read pass through a proxy
   that previously answered `405`.
 - `overrides: { "axios": "1.18.1" }` — `@stellar/stellar-sdk@15.1.0` pins axios to the exact version `1.15.0`,
   which carries two **high**-severity advisories. The override removes that vulnerable version from this
-  repository's resolved graph. The same bump crosses the 1.16.1 proxy fix, so `doctor`'s on-chain verification, which
+  repository's resolved graph. The same bump crosses the 1.16.1 proxy fix, so `doctor`'s contract reachability read, which
   previously failed with `405` behind a proxy, now passes. **Note:** npm applies `overrides` only from the root
   project, so this protects the repository and its CI, not consumers of the published package — see
   [docs/architecture.md](docs/architecture.md).
@@ -78,6 +78,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Ranking now uses the versioned `stellar-agent-mcp-declared-evidence-v1` policy: normalized indexed quality
+  multiplied by a fixed evidence index (`0.4 × capped volume + 0.6 × effective breadth`). Owner-declared
+  capabilities and verification state add zero points; there is no novelty floor. `rankVersion`,
+  `evidenceStrength`, and `lowEvidence` make the semantics explicit. Mutable `RANK_W_*` settings and supplied
+  `rank_agent.weights` are rejected. The ambiguous discovery input `minScore` is also rejected in favor of
+  `minExplorerScore`, which names the upstream v1 `total_score` filter rather than implying a local-rank gate.
 - The skill now ships from this repository at `skills/mcp/SKILL.md` (was `skill/SKILL.md`, destined for
   `trionlabs/stellar-8004`). Install with `npx skills add berkingurcan/stellar-agent-mcp --skill mcp`.
   Rationale: [docs/evidence.md §3](docs/evidence.md).
@@ -95,7 +101,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Cached on-chain verification results retain the timestamp of the actual Soroban read. A 10-minute-old cache
+- Cached contract-probe results retain the timestamp of the actual Soroban read. A 10-minute-old cache
   hit no longer rewrites `verification.checkedAt` to the current response time and masquerades as fresh.
 
 - **`examples/x402-demo.ts` demanded a facilitator credential it never uses.** `X402_API_KEY` was a *fatal*
@@ -136,18 +142,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tarball (it does not — `files` excludes `skills/`, deliberately), that one-command skill acquisition was
   already verifiable (it needs the repo public and `main` as the default branch), and the automated test count.
 
-## [0.1.0] — 2026-07-29
+### Planned 0.1.0 surface
 
-First public release: a read-only, keyless MCP server and CLI over the on-chain stellar-8004 agent registry on
-Stellar mainnet.
+Release-candidate surface for a read-only, keyless MCP server and CLI over the stellar-8004 registry on
+Stellar mainnet. Version 0.1.0 has not been published yet.
 
 ### Added
 
 **MCP tools (13, all read-only)**
 
 - `find_agent` — natural-language discovery → ranked candidates.
-- `rank_agent` — rank an explicit id set or a query, with the full 3-axis breakdown and on-chain verification.
-- `get_agent_profile` — identity, capabilities, declared-vs-verified reputation, recent feedback.
+- `rank_agent` — rank an explicit id set or a query, with the full declared-evidence breakdown and bounded
+  contract-probe status.
+- `get_agent_profile` — identity, capabilities, declared reputation, fail-closed probe status, recent feedback.
 - `list_services` — catalog of invokable x402 / MPP service endpoints.
 - `list_agents`, `leaderboard`, `resolve_agent`, `get_agents_by_owner`, `get_agent_feedback`,
   `verify_reputation`, `get_agent_card`, `get_registry_stats`, `get_registry_health`.
@@ -159,14 +166,15 @@ JSON + rendered-markdown payload.
 **MCP prompts** — `/find-and-vet-agent`, `/vet-agent`, `/compare-agents`, `/prepare-x402-call`,
 `/explore-registry`. `prepare-x402-call` stops before signing; this server holds no keys.
 
-**On-chain reputation verification** — reputation is re-derived directly from the Reputation contract
-(`get_summary` + `get_clients_paginated`) and reported as a declared-vs-verified diff
-(`verified | mismatch | unavailable | skipped`). Verification runs on default mainnet with **no funded account**
-by omitting `publicKey` from the Soroban read-only simulation.
+**Fail-closed contract evidence** — the current read calls one bounded `get_clients_paginated` window only.
+Because the contract exposes neither an authoritative client count nor an exhaustion cursor, the server does
+not call `get_summary` or compare any Explorer reputation field. Attempted probes report `unavailable`, an empty
+`verifiedFields`, and explicit limitations; skipped probes report `skipped`.
 
-**Sybil-cost-aware ranking** — three axes (quality 0.5, volume 0.2, breadth 0.3, re-normalized to sum 1) that
-weight unique clients (hard to fake) above raw feedback volume (cheap to fake), plus capability bonuses for
-x402 / MPP / services / verified status. This is a ranking hedge, not Sybil resistance or proof of personhood.
+**Declared-evidence ranking** — versioned policy `stellar-agent-mcp-declared-evidence-v1` multiplies normalized
+indexed quality by fixed evidence strength (`0.4 × capped volume + 0.6 × effective breadth`). Owner-declared
+x402/MPP/service metadata and probe status add zero points. This is a heuristic over indexer-declared inputs,
+not Sybil resistance, proof of personhood, or an authorization signal.
 
 **Trust boundary** — server-authored prose interpolates only typed values, compile-enforced by the `serverText`
 tagged template. Agent-authored free text is confined to labelled `selfDeclared` slots, sanitized (control,
@@ -194,6 +202,3 @@ writes on-chain reputation feedback. The only keyed code in the repo; run manual
 - stdout carries JSON-RPC only — every log goes to stderr.
 - Verification degrades closed: an unreachable RPC reports `unavailable`, never a declared figure relabelled as
   verified. An unrated agent never returns `verified`.
-
-[Unreleased]: https://github.com/berkingurcan/stellar-agent-mcp/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/berkingurcan/stellar-agent-mcp/releases/tag/v0.1.0

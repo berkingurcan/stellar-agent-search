@@ -1,6 +1,6 @@
 /**
  * get_agent_profile — deep profile for one agent: typed identity + capabilities
- * + scores + 3-axis breakdown + declared-vs-verified reputation + recent
+ * + scores + rank breakdown + declared reputation + fail-closed probe status + recent
  * feedback + the canonical stellar identifier + an explicitly unverified,
  * derived A2A-shaped projection.
  *
@@ -36,7 +36,12 @@ const inputShape = {
     ])
     .describe("Numeric agent id, numeric string, or a full stellar:{network}:{identity}#{id} handle."),
   feedbackLimit: z.number().int().min(0).max(50).default(5),
-  verify: z.boolean().default(true).describe("On-chain-verify reputation (default on)."),
+  verify: z
+    .boolean()
+    .default(true)
+    .describe(
+      "Attempt the bounded Reputation-contract probe (default on; current probe verifies no reputation fields).",
+    ),
 };
 
 type Args = z.infer<z.ZodObject<typeof inputShape>>;
@@ -49,6 +54,7 @@ const outputShape = {
     .object({
       windowComplete: z.boolean(),
       paginationExhausted: z.boolean(),
+      snapshotConsistent: z.boolean(),
       pagesScanned: z.number().int().nonnegative(),
       hasMore: z.boolean().optional(),
     })
@@ -62,10 +68,10 @@ export function registerGetAgentProfile(server: McpServer, deps: ToolDeps): void
     {
       title: "Get Agent Profile",
       description:
-        "Full profile for one agent: typed identity, capabilities, declared scores, a 3-axis rank " +
-        "breakdown, a bounded declared-vs-on-chain reputation check, recent feedback, the canonical " +
+        "Full profile for one agent: typed identity, capabilities, declared scores, a rank " +
+        "breakdown, bounded Reputation-contract reachability status, recent feedback, the canonical " +
         "stellar:{network}:{identity}#{id} handle, and an explicitly unverified derived A2A-shaped " +
-        "projection. No A2A conformance or endpoint ownership is implied; self-declared text is " +
+        "projection. The current probe verifies no reputation fields. No A2A conformance or endpoint ownership is implied; self-declared text is " +
         "confined to labeled `selfDeclared` slots.",
       inputSchema: z.object(inputShape),
       outputSchema: z.object(outputShape),
@@ -94,7 +100,13 @@ export function registerGetAgentProfile(server: McpServer, deps: ToolDeps): void
           : Promise.resolve({
               rows: [],
               revokedHidden: 0,
-              coverage: { windowComplete: true, paginationExhausted: false, pagesScanned: 0 },
+              coverage: {
+                windowComplete: true,
+                paginationExhausted: false,
+                snapshotConsistent: false,
+                pagesScanned: 0,
+                limitations: ["feedback-not-requested"],
+              },
             });
       const detailRes = await detailPromise;
       // Verification starts as soon as detail is available and overlaps the
@@ -116,9 +128,9 @@ export function registerGetAgentProfile(server: McpServer, deps: ToolDeps): void
         verification.status,
       )}, declared avg ${avg == null ? safe("n/a") : avg} over ${declared.feedbackCount} feedback(s), ${
         declared.uniqueClients
-      } unique client(s). Score ${rank.score100}/100, confidence ${Math.round(
-        rank.confidence * 100,
-      )}%. x402=${caps.x402}, mpp=${caps.mpp}, services=${profile.selfDeclared.services.length}.`;
+      } unique client(s). Score ${rank.score100}/100, evidenceStrength ${safe(
+        rank.evidenceStrength.toFixed(3),
+      )} (index, not probability), rankVersion=${safe(rank.rankVersion)}. snapshotComparable=${verification.snapshotComparable ?? false}. x402=${caps.x402}, mpp=${caps.mpp}, services=${profile.selfDeclared.services.length}.`;
 
       return toolResult(text, {
         profile,

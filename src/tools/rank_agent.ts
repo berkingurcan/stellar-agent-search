@@ -12,7 +12,7 @@ import {
   type AgentResponse,
 } from "@trionlabs/stellar8004";
 import { parseQuery } from "../lib/nlparse.js";
-import { normalizeWeights } from "../lib/ranking.js";
+import { RANKING } from "../lib/ranking.js";
 import type {
   DiscoveryCoverage,
   FindAgentsResult,
@@ -31,7 +31,6 @@ import {
   type ToolDeps,
 } from "./shared.js";
 import { zDiscoveryCoverage, zRankedAgent } from "./schemas.js";
-import type { RankWeights } from "../types.js";
 import { MAX_AGENT_ID } from "../lib/identifier.js";
 
 const CANDIDATE_PAGE_SIZE = 50;
@@ -59,18 +58,23 @@ const inputShape = {
     })
     .partial()
     .optional()
-    .describe("Optional axis-weight override; re-normalized to sum 1."),
+    .describe(
+      "Deprecated and rejected when supplied. The v1 policy fixes evidence weights at volume=0.4 and breadth=0.6.",
+    ),
   verify: z
     .boolean()
     .default(true)
-    .describe("On-chain-verify reputation (default on for explicit ranking)."),
+    .describe(
+      "Attempt the bounded Reputation-contract probe (default on; current probe verifies no reputation fields).",
+    ),
   sortBy: zSort.default("relevance"),
 };
 
 type Args = z.infer<z.ZodObject<typeof inputShape>>;
 
 const outputShape = {
-  weights: z.object({ quality: z.number(), volume: z.number(), breadth: z.number() }),
+  rankVersion: z.string(),
+  evidenceWeights: z.object({ volume: z.number(), breadth: z.number() }),
   count: z.number(),
   agents: z.array(zRankedAgent),
   // Only query-based ranking scans explorer pages. Explicit-id ranking has no
@@ -112,7 +116,9 @@ async function gatherByQuery(deps: ToolDeps, query: string): Promise<FindAgentsR
   if (parsed.filters.mpp !== undefined) filters.mpp = parsed.filters.mpp;
   if (parsed.filters.hasServices !== undefined) filters.hasServices = parsed.filters.hasServices;
   if (parsed.filters.trust !== undefined) filters.trust = parsed.filters.trust;
-  if (parsed.filters.minScore !== undefined) filters.minScore = parsed.filters.minScore;
+  if (parsed.filters.minExplorerScore !== undefined) {
+    filters.minScore = parsed.filters.minExplorerScore;
+  }
 
   return deps.explorer.findAgentsWithCoverage(parsed.keywords.join(" "), {
     filters,
@@ -141,8 +147,9 @@ export function registerRankAgent(server: McpServer, deps: ToolDeps): void {
     {
       title: "Rank Agent",
       description:
-        "Rank an explicit agent set or a query's candidates using the deterministic 3-axis engine " +
-        "(quality / volume / breadth) with additive capability bonuses. On-chain checks are " +
+        "Rank an explicit agent set or a query's candidates using the deterministic declared-evidence policy: " +
+        "normalized indexed average × fixed evidence strength (0.4 capped volume + 0.6 breadth). " +
+        "Owner-declared capability fields add zero. On-chain checks are " +
         "evidence metadata and never inflate rank. Every " +
         "row carries a full per-axis `breakdown` and a declared-vs-verified `verification` block. " +
         "Provide EITHER agentIds OR query.",
@@ -151,6 +158,11 @@ export function registerRankAgent(server: McpServer, deps: ToolDeps): void {
       annotations: { title: "Rank Agent", ...READ_ANNOTATIONS },
     },
     handler<Args>(async (args) => {
+      if (args.weights !== undefined) {
+        throw new ValidationError(
+          "rank_agent.weights is no longer supported: the v1 declared-evidence policy fixes volume=0.4 and breadth=0.6.",
+        );
+      }
       const hasIds = args.agentIds !== undefined && args.agentIds.length > 0;
       const hasQuery = args.query !== undefined && args.query.length > 0;
       if (hasIds === hasQuery) {
@@ -167,15 +179,7 @@ export function registerRankAgent(server: McpServer, deps: ToolDeps): void {
         coverage = discovery.coverage;
       }
 
-      const weights: RankWeights = {
-        quality: args.weights?.quality ?? deps.config.weights.quality,
-        volume: args.weights?.volume ?? deps.config.weights.volume,
-        breadth: args.weights?.breadth ?? deps.config.weights.breadth,
-      };
-      const effectiveWeights = normalizeWeights(weights);
-
       const rows = await rankAndVerify(deps, pool, {
-        weights,
         sortBy: args.sortBy,
         verify: args.verify,
         verifyTopK: Math.min(args.limit, VERIFY_CAP),
@@ -184,7 +188,11 @@ export function registerRankAgent(server: McpServer, deps: ToolDeps): void {
       });
 
       return toolResult(summarizeRanked(rows), {
-        weights: effectiveWeights,
+        rankVersion: RANKING.VERSION,
+        evidenceWeights: {
+          volume: RANKING.EVIDENCE_VOLUME_WEIGHT,
+          breadth: RANKING.EVIDENCE_BREADTH_WEIGHT,
+        },
         count: rows.length,
         agents: rows,
         ...(coverage ? { coverage } : {}),

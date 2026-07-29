@@ -14,8 +14,8 @@
  * Templates (RFC-6570):
  *   - stellar8004://agent/{id}              — full AgentProfile
  *   - stellar8004://agent/{id}/card         — unverified derived A2A-shaped projection
- *   - stellar8004://agent/{id}/feedback     — reviews (declared/verified split)
- *   - stellar8004://agent/{id}/reputation   — declared-vs-on-chain diff
+ *   - stellar8004://agent/{id}/feedback     — indexed review rows, sanitized and labeled
+ *   - stellar8004://agent/{id}/reputation   — declared reputation + fail-closed probe status
  *   - stellar8004://owner/{address}         — agents under an owner G-address
  *
  * TRUST BOUNDARY (INFRA-BLUEPRINT §3.2): every resource returns a DUAL payload —
@@ -39,11 +39,15 @@ import type {
   Capabilities,
   DeclaredReputation,
 } from "../types.js";
-import { ExplorerService, type DiscoveryCoverage } from "../lib/explorer.js";
+import {
+  ExplorerService,
+  V1_UNVERSIONED_PAGINATION_LIMITATION,
+  type DiscoveryCoverage,
+} from "../lib/explorer.js";
 import { ReputationVerifier } from "../lib/reputation.js";
 import { toAgentCard } from "../lib/agentcard.js";
 import { scoreAgent, roundRankResult } from "../lib/ranking.js";
-import { buildRegistryStatsView } from "../lib/registry-stats.js";
+import { buildRegistryHealthView, buildRegistryStatsView } from "../lib/registry-stats.js";
 import {
   buildStellarId,
   buildCaip2Id,
@@ -95,6 +99,8 @@ const MAX_LIST_PAGES = 5;
 
 const JSON_MIME = "application/json";
 const MD_MIME = "text/markdown";
+const I128_MIN = -(1n << 127n);
+const I128_MAX = (1n << 127n) - 1n;
 
 // ---------------------------------------------------------------------------
 // Data helpers (reuse ExplorerService / ReputationVerifier — no re-fetch logic)
@@ -133,7 +139,7 @@ function scoresFrom(agent: AgentResponse, _declared: DeclaredReputation): AgentS
 
 /**
  * Build the canonical {@link AgentProfile} join for one agent id: explorer
- * detail (identity + declared reputation) + on-chain verification overlay +
+ * detail (identity + declared reputation) + on-chain reachability evidence +
  * 3-axis rank. Degrades closed to declared-only when RPC verification is off or
  * unavailable (see ReputationVerifier).
  */
@@ -165,7 +171,7 @@ async function buildProfile(deps: ResourceDeps, id: number): Promise<AgentProfil
       verificationStatus: verification.status,
       createdAt: agent.createdAt ?? null,
     },
-    { weights: config.weights, scoreMax: config.scoreMax, now: Date.now() },
+    { scoreMax: config.scoreMax, now: Date.now() },
   );
 
   const selfDeclared = buildSelfDeclaredFields({
@@ -221,7 +227,10 @@ export function feedbackValueOrNull(v: unknown): number | string | null {
   if (v == null) return null;
   if (typeof v === "number") return Number.isSafeInteger(v) ? v : null;
   if (typeof v === "bigint") return v.toString();
-  if (typeof v === "string" && /^-?\d+$/.test(v)) return v;
+  if (typeof v === "string" && /^-?\d{1,39}$/.test(v)) {
+    const integer = BigInt(v);
+    if (integer >= I128_MIN && integer <= I128_MAX) return v;
+  }
   return null;
 }
 
@@ -256,14 +265,14 @@ function renderProfileMarkdown(p: AgentProfile): string {
     serverText`- network: ${safe(p.network)}`,
     serverText`- owner: \`${safe(p.owner)}\``,
     serverText`- wallet: ${p.wallet ? safe("`" + p.wallet + "`") : safe("(none)")}`,
-    serverText`- score: ${r ? r.score100 : 0}/100 · confidence ${r ? r.confidence : 0}`,
+    serverText`- score: ${r ? r.score100 : 0}/100 · evidenceStrength ${r ? r.evidenceStrength : 0} (index, not probability)`,
     serverText`- quality/volume/breadth (norm): ${r ? r.quality.norm : 0} / ${r ? r.volume.norm : 0} / ${r ? r.breadth.norm : 0}`,
     serverText`- declared average: ${declaredAvg}`,
     serverText`- feedbackCount: ${p.scores.feedbackCount} · uniqueClients: ${p.scores.uniqueClients}`,
     serverText`- verification: ${safe(p.verification.status)}${verifiedAvg == null ? safe("") : safe(" (on-chain avg " + verifiedAvg + ")")}`,
     serverText`- capabilities: x402=${p.capabilities.x402} · mpp=${p.capabilities.mpp} · services=${p.capabilities.hasServices}`,
     serverText`- supportedTrust: ${safe(p.supportedTrust.map((t) => sanitizeText(t, 40)).join(", ") || "(none)")}`,
-    serverText`- flags: unrated=${p.flags.unrated} · new=${p.flags.newAgent} · lowConfidence=${p.flags.lowConfidence} · verified=${p.flags.verified} · mismatch=${p.flags.verificationMismatch}`,
+    serverText`- flags: unrated=${p.flags.unrated} · new=${p.flags.newAgent} · lowEvidence=${p.flags.lowEvidence} · verified=${p.flags.verified} · mismatch=${p.flags.verificationMismatch}`,
     serverText`- createdAt: ${safe(p.createdAt ?? "unknown")} · resolveStatus: ${safe(p.resolveStatus ?? "unknown")}`,
   ].join("\n");
 
@@ -310,7 +319,7 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
         explorer.health(),
       ]);
       const stats = buildRegistryStatsView(statsRes.data, config.network);
-      const health = healthRes.data;
+      const health = buildRegistryHealthView(healthRes.data, config.network);
       const contracts = config.stellar.contracts;
       const mppSummary = stats.agentsWithMpp === null ? safe("not returned") : stats.agentsWithMpp;
       const rpc = {
@@ -396,8 +405,8 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
     },
     async () => {
       const res = await explorer.health();
-      const h = res.data;
-      const json = { network: config.network, status: h.status, indexer: h.indexer };
+      const h = buildRegistryHealthView(res.data, config.network);
+      const json = h;
       const md = [
         serverText`## Indexer Health (${safe(config.network)}) — status ${safe(h.status)}`,
         serverText`- identity: stale=${h.indexer.identity.stale} · lastLedger=${h.indexer.identity.lastLedger}`,
@@ -418,7 +427,7 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
     {
       title: "Agent Profile",
       description:
-        "Full AgentProfile (identity + declared/on-chain-checked reputation fields + 3-axis rank + stellar:…#id).",
+        "Full AgentProfile (identity + declared reputation + fail-closed contract-probe status + rank + stellar:…#id).",
       mimeType: JSON_MIME,
       annotations: { audience: ["user", "assistant"] },
     },
@@ -493,7 +502,7 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
     {
       title: "Agent Feedback",
       description:
-        "On-chain feedback (reviews) for an agent: typed value + client, with self-declared tags/endpoints labeled.",
+        "Explorer-indexed on-chain feedback for an agent: typed value + client, with self-declared tags/endpoints labeled and page coverage exposed.",
       mimeType: JSON_MIME,
       annotations: { audience: ["user", "assistant"] },
     },
@@ -505,13 +514,16 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
       const hasMore =
         typeof pagination?.hasMore === "boolean" ? pagination.hasMore : undefined;
       const coverage: DiscoveryCoverage = {
-        coverageComplete: hasMore === false,
+        coverageComplete: false,
         paginationExhausted: hasMore === false,
-        snapshotConsistent: true,
+        snapshotConsistent: false,
         pagesScanned: 1,
         recordsScanned: items.length,
         ...(hasMore !== undefined ? { hasMore } : {}),
-        ...(hasMore === undefined ? { limitations: ["pagination-metadata-unavailable"] } : {}),
+        limitations: [
+          V1_UNVERSIONED_PAGINATION_LIMITATION,
+          ...(hasMore === undefined ? ["pagination-metadata-unavailable"] : []),
+        ],
       };
       const json = buildFeedbackJson(id, items, coverage, {
         page: pagination?.page ?? 1,
@@ -534,7 +546,7 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
     {
       title: "Agent Reputation (declared vs on-chain)",
       description:
-        "Declared indexer reputation compared with a bounded on-chain read; current healthy checks are partial because active unique-client breadth and a common snapshot revision are unavailable.",
+        "Declared indexer reputation plus a bounded on-chain reachability observation. Current checks are unavailable because the contract exposes no authoritative client-set exhaustion proof.",
       mimeType: JSON_MIME,
       annotations: { audience: ["user", "assistant"] },
     },
@@ -549,6 +561,11 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
         declared: v.declared,
         verified: v.verified ?? null,
         deltas: v.deltas ?? null,
+        snapshotComparable: v.snapshotComparable ?? false,
+        limitations: v.limitations ?? [],
+        reason: v.reason ?? null,
+        verifiedFields: v.verifiedFields ?? [],
+        unverifiedFields: v.unverifiedFields ?? [],
         checkedAt: v.checkedAt,
       };
       const md = [
@@ -556,6 +573,9 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
         serverText`- declared: avg=${v.declared.average} · feedback=${v.declared.feedbackCount} · clients=${v.declared.uniqueClients}`,
         serverText`- on-chain: ${v.verified ? safe("avg=" + v.verified.average + " · count=" + v.verified.count + " · clients=" + v.verified.uniqueClients) : safe("(unavailable / skipped)")}`,
         serverText`- deltas: ${v.deltas ? safe("avg=" + v.deltas.average + " · count=" + v.deltas.count + " · clients=" + v.deltas.uniqueClients) : safe("(n/a)")}`,
+        serverText`- snapshotComparable: ${v.snapshotComparable ?? false} · reason: ${safe(v.reason ?? "n/a")}`,
+        serverText`- verifiedFields: ${safe((v.verifiedFields ?? []).join(", ") || "none")} · unverifiedFields: ${safe((v.unverifiedFields ?? []).join(", ") || "none")}`,
+        serverText`- limitations: ${safe((v.limitations ?? []).join(" | ") || "none reported")}`,
         serverText`- checkedAt: ${safe(v.checkedAt)}`,
       ].join("\n");
       return dual(uri.href, json, md + "\n");
@@ -603,12 +623,16 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
       const hasMore = res.meta?.pagination?.hasMore;
       const paginationExhausted = hasMore === false;
       const coverage = {
-        coverageComplete: paginationExhausted,
+        coverageComplete: false,
         paginationExhausted,
-        snapshotConsistent: true,
+        snapshotConsistent: false,
         pagesScanned: 1,
         recordsScanned: rows.length,
         ...(typeof hasMore === "boolean" ? { hasMore } : {}),
+        limitations: [
+          V1_UNVERSIONED_PAGINATION_LIMITATION,
+          ...(typeof hasMore === "boolean" ? [] : ["pagination-metadata-unavailable"]),
+        ],
       };
       const json = {
         owner: address,
@@ -639,7 +663,8 @@ interface LeaderboardRow {
   id: number;
   stellarId: string;
   score100: number;
-  confidence: number;
+  rankVersion: string;
+  evidenceStrength: number;
   feedbackCount: number;
   uniqueClients: number;
   x402: boolean;
@@ -674,14 +699,16 @@ async function computeLeaderboard(deps: ResourceDeps): Promise<LeaderboardResult
         hasServices: caps.hasServices,
         createdAt: a.createdAt ?? null,
       },
-      { weights: config.weights, scoreMax: config.scoreMax, now: Date.now() },
+      { scoreMax: config.scoreMax, now: Date.now() },
     );
     return { a, declared, caps, result };
   });
 
   scored.sort((x, y) => {
     if (y.result.sortScore !== x.result.sortScore) return y.result.sortScore - x.result.sortScore;
-    if (y.result.confidence !== x.result.confidence) return y.result.confidence - x.result.confidence;
+    if (y.result.evidenceStrength !== x.result.evidenceStrength) {
+      return y.result.evidenceStrength - x.result.evidenceStrength;
+    }
     return x.a.id - y.a.id;
   });
 
@@ -690,7 +717,8 @@ async function computeLeaderboard(deps: ResourceDeps): Promise<LeaderboardResult
       id: a.id,
       stellarId: buildStellarId(config.network, identity, a.id),
       score100: result.score100,
-      confidence: result.confidence,
+      rankVersion: result.rankVersion,
+      evidenceStrength: result.evidenceStrength,
       feedbackCount: declared.feedbackCount,
       uniqueClients: declared.uniqueClients,
       x402: caps.x402,
@@ -746,7 +774,8 @@ export function buildFeedbackJson(
     count: items.length,
     pagination,
     coverage,
-    note: "value/valueDecimals/clientAddress/isRevoked are typed on-chain facts; tag1/tag2/endpoint/feedbackUri are self-declared free text.",
+    source: "stellar8004-explorer-index",
+    note: "value/valueDecimals/clientAddress/isRevoked are indexed representations of on-chain fields, not a fresh direct-chain proof; tag1/tag2/endpoint/feedbackUri are client-authored free text.",
     feedback: items.map((f) => ({
       feedbackIndex: f.feedbackIndex,
       clientAddress: f.clientAddress,

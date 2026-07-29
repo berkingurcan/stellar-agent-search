@@ -53,10 +53,10 @@ Claude Code and confirm the server is connected before you hit record.
 |---|---|---|---|
 | 1 | Run `/mcp` | The `stellar-agent` server listed as connected, with its tools | "The server is installed and connected. Thirteen read-only tools; the four core ones are what this deliverable covers." |
 | 2 | Ask: *"Use find_agent to find a paid web scraper with a good reputation"* | The `find_agent` tool call and its ranked result | "**find_agent** — a plain-English query becomes a ranked list of live mainnet agents." |
-| 3 | Ask: *"Now rank_agent on agent 10 with verification on"* | The `rank_agent` call showing the 3-axis breakdown and the `verification` block | "**rank_agent** — quality, volume, and breadth. The bounded chain read reports 96 versus the indexer's 96.75 and the active count agrees. Status is **partial**, because active unique clients are not contract-derivable and the reads do not share a snapshot." |
+| 3 | Ask: *"Now rank_agent on agent 10 with verification on"* | The `rank_agent` call showing the 3-axis breakdown and the `verification` block | "**rank_agent** — quality, volume, and breadth are an Explorer-declared heuristic. The contract path is reachable, but the bounded client page cannot prove exhaustion, so status is **unavailable**, `verifiedFields` is empty, and no reputation field is promoted to verified." |
 | 4 | Ask: *"Show me the full profile for agent 10"* | The `get_agent_profile` result — identity, services, feedback | "**get_agent_profile** — identity, service endpoints, recent feedback, and the canonical `stellar:…#10` handle that the payment step pays against." |
 | 5 | Ask: *"List x402 service candidates and show their verification flags"* | The `list_services` result | "**list_services** — self-declared endpoint candidates, not proof of liveness or payment behavior. The separate demo admits one only after an exact challenge-policy check." |
-| 6 | Open [stellar8004.com](https://stellar8004.com), find agent 10 | The explorer page next to the terminal result | "Same agent, same numbers, live on mainnet. Nothing here is mocked." |
+| 6 | Open [stellar8004.com](https://stellar8004.com), find agent 10 | The explorer page next to the terminal result | "Same live indexed agent and declared numbers. The MCP labels their source rather than claiming an independent reputation match." |
 
 ### If something goes wrong
 
@@ -114,7 +114,7 @@ It must reach discovery cleanly and report the preflight balances you expect. On
 | 5 | The 402 | The HTTP 402 challenge | "The endpoint answers **402 Payment Required**. This challenge is an untrusted proposal; its full tuple must match reviewed policy before signing." |
 | 6 | Payment settles | The payment tx hash | "USDC paid over x402. That's the first mainnet transaction hash." |
 | 7 | Result returned | The scraping result | "And the agent delivered the work." |
-| 8 | Feedback write | The feedback tx hash | "Now the script writes reputation feedback back on-chain. The indexer can project it, while this MCP labels only the fields its bounded chain read can actually compare. Second transaction hash." |
+| 8 | Feedback write | The feedback tx hash | "Now the script writes reputation feedback back on-chain. The indexer can project it; this MCP keeps that projection declared because its bounded client-page probe cannot verify any reputation field. Second transaction hash." |
 | 9 | Open both hashes on [stellar.expert](https://stellar.expert) | Both transactions confirmed | "Both verifiable on Stellar Expert. Loop closed: discover, pay, receive, rate." |
 | 10 | Show `examples/run-<timestamp>.json` | The evidence record | "The run writes a receipt — no secrets in it, just the hashes, the endpoint, and the price." |
 
@@ -125,8 +125,12 @@ Copy both hashes into [docs/evidence.md](evidence.md) §2 as
 
 ### If something goes wrong mid-take
 
-Stop and restart the recording rather than editing. If the payment succeeded but `give_feedback` failed, the
-usual cause is XLM too low for the self-paid fee — top up and re-run; a second payment is cheap.
+If the failure happened **before** `payment_submitted` was durably written, stop and restart the recording.
+After that marker exists, do not rerun the full script: a payment may already have settled. Preserve the named
+`.journal.jsonl`, reconcile the exact payment authorization or feedback transaction hash, and resume only the
+missing feedback/evidence stage under explicit operator review. A terminal `FEEDBACK_FAILED` may justify a new
+feedback transaction after its cause is fixed; it never justifies a second payment. Unknown feedback outcomes
+must be reconciled before any new feedback is submitted.
 
 ---
 
@@ -144,7 +148,7 @@ recording supplies the SOW's required second-client evidence.
 
 | # | Action | What must be on screen | Say |
 |---|---|---|---|
-| 1 | Show a clean environment: `node -v`, no `.cursor/mcp.json`, and an empty Cursor MCP list | Node ≥ 20, no `stellar-agent` entry | "Fresh environment, nothing cached, no wallet and no API key. Node 20 or newer is all you need installed." |
+| 1 | Show a clean environment: `node -v`, no `.cursor/mcp.json`, and an empty Cursor MCP list | Node ≥ 22, no `stellar-agent` entry | "Fresh environment, nothing cached, no wallet and no API key. Node 22 or newer is all you need installed." |
 | 2 | `npx -y stellar-agent-mcp@0.1.0 setup --client cursor --scope project --handshake` | Human output ending in `install · added`, config path, successful handshake, and all 13 tool names | "This one command downloads the package, registers the server without clobbering other Cursor settings, starts it, and lists its tools." |
 | 3 | `npx -y stellar-agent-mcp@0.1.0 setup --client cursor --scope project --check --handshake` | Human output ending in `check · already-configured`; the same 13 tools; no config mutation | "The check is read-only and proves setup is idempotent." |
 | 4 | `npx skills add berkingurcan/stellar-agent-mcp --skill mcp` | The optional usage guide installing | "This separate command copies the skill guidance. It is documentation for the agent, not the runtime installer." |

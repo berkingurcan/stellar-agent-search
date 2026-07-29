@@ -9,8 +9,8 @@
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { safe, sanitizeText, serverText } from "../lib/sanitize.js";
-import { buildRegistryStatsView } from "../lib/registry-stats.js";
+import { safe, serverText } from "../lib/sanitize.js";
+import { buildRegistryHealthView, buildRegistryStatsView } from "../lib/registry-stats.js";
 import { handler, toolResult, READ_ANNOTATIONS, type ToolDeps } from "./shared.js";
 
 // ---------------------------------------------------------------------------
@@ -19,16 +19,16 @@ import { handler, toolResult, READ_ANNOTATIONS, type ToolDeps } from "./shared.j
 
 const statsOutput = {
   network: z.string(),
-  totalAgents: z.number(),
-  totalFeedbacks: z.number(),
-  totalValidations: z.number(),
-  totalUniqueClients: z.number(),
+  totalAgents: z.number().int().nonnegative(),
+  totalFeedbacks: z.number().int().nonnegative(),
+  totalValidations: z.number().int().nonnegative(),
+  totalUniqueClients: z.number().int().nonnegative(),
   averageFeedbackScore: z.number(),
-  agentsWithServices: z.number(),
-  agentsWithX402: z.number(),
-  agentsWithMpp: z.number().nullable(),
-  protocolDistribution: z.record(z.string(), z.number()),
-  trustDistribution: z.record(z.string(), z.number()),
+  agentsWithServices: z.number().int().nonnegative(),
+  agentsWithX402: z.number().int().nonnegative(),
+  agentsWithMpp: z.number().int().nonnegative().nullable(),
+  protocolDistribution: z.record(z.string(), z.number().int().nonnegative()),
+  trustDistribution: z.record(z.string(), z.number().int().nonnegative()),
   metricDefinitions: z.object({
     totalAgents: z.string(),
     totalFeedbacks: z.string(),
@@ -70,13 +70,13 @@ export function registerGetRegistryStats(server: McpServer, deps: ToolDeps): voi
       const structured = buildRegistryStatsView(s, deps.config.network);
       const mppSummary =
         structured.agentsWithMpp === null ? safe("not returned") : structured.agentsWithMpp;
-      const text = serverText`Registry on ${safe(deps.config.network)}: ${s.totalAgents} indexed agents, ${
-        s.totalFeedbacks
+      const text = serverText`Registry on ${safe(structured.network)}: ${structured.totalAgents} indexed agents, ${
+        structured.totalFeedbacks
       } feedback rows. Sampled over at most 5,000 agent rows: sum of per-agent distinct-client counts ${
-        s.totalUniqueClients
-      }, unweighted per-agent average score ${s.averageFeedbackScore}/100. Distributions are not proven global. x402 agents: ${
-        s.agentsWithX402
-      }, MPP agents: ${mppSummary}, with services: ${s.agentsWithServices}.`;
+        structured.totalUniqueClients
+      }, unweighted per-agent average score ${structured.averageFeedbackScore} in upstream protocol units. Distributions are not proven global. x402 agents: ${
+        structured.agentsWithX402
+      }, MPP agents: ${mppSummary}, with services: ${structured.agentsWithServices}.`;
       return toolResult(text, structured);
     }),
   );
@@ -86,7 +86,7 @@ export function registerGetRegistryStats(server: McpServer, deps: ToolDeps): voi
 // get_registry_health
 // ---------------------------------------------------------------------------
 
-const zIndexer = z.object({ lastLedger: z.number(), stale: z.boolean() }).passthrough();
+const zIndexer = z.object({ lastLedger: z.number().int().nonnegative(), stale: z.boolean() });
 
 const healthOutput = {
   status: z.string(),
@@ -104,38 +104,22 @@ export function registerGetRegistryHealth(server: McpServer, deps: ToolDeps): vo
       title: "Get Registry Health",
       description:
         "Per-registry indexer health: last indexed ledger and staleness for the identity, " +
-        "reputation, and validation indexers. A stale reputation indexer explains a temporary " +
-        "declared-vs-verified 'unavailable'/'mismatch'.",
+        "reputation, and validation indexers. Staleness weakens the freshness of Explorer-declared data; " +
+        "it does not make a bounded contract read exhaustive.",
       inputSchema: z.object({}),
       outputSchema: z.object(healthOutput),
       annotations: { title: "Get Registry Health", ...READ_ANNOTATIONS },
     },
     handler<Record<string, never>>(async () => {
       const h = (await deps.explorer.health()).data;
-      const anyStale = h.indexer.identity.stale || h.indexer.reputation.stale || h.indexer.validation.stale;
-      const structured = {
-        status: sanitizeText(h.status, 40),
-        network: sanitizeText(h.network, 40) || deps.config.network,
-        anyStale,
-        indexer: {
-          identity: { lastLedger: h.indexer.identity.lastLedger, stale: h.indexer.identity.stale },
-          reputation: {
-            lastLedger: h.indexer.reputation.lastLedger,
-            stale: h.indexer.reputation.stale,
-          },
-          validation: {
-            lastLedger: h.indexer.validation.lastLedger,
-            stale: h.indexer.validation.stale,
-          },
-        },
-      };
-      const text = serverText`Registry indexers on ${safe(deps.config.network)}: identity ledger ${
-        h.indexer.identity.lastLedger
-      } (stale=${h.indexer.identity.stale}), reputation ledger ${
-        h.indexer.reputation.lastLedger
-      } (stale=${h.indexer.reputation.stale}), validation ledger ${
-        h.indexer.validation.lastLedger
-      } (stale=${h.indexer.validation.stale}).`;
+      const structured = buildRegistryHealthView(h, deps.config.network);
+      const text = serverText`Registry indexers on ${safe(structured.network)}: identity ledger ${
+        structured.indexer.identity.lastLedger
+      } (stale=${structured.indexer.identity.stale}), reputation ledger ${
+        structured.indexer.reputation.lastLedger
+      } (stale=${structured.indexer.reputation.stale}), validation ledger ${
+        structured.indexer.validation.lastLedger
+      } (stale=${structured.indexer.validation.stale}).`;
       return toolResult(text, structured);
     }),
   );

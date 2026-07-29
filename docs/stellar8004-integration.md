@@ -35,7 +35,7 @@ versioned public Explorer API
       │ typed client, retries, normalization
       ▼
 stellar-agent-mcp
-      └── optional bounded Soroban verification overlay
+      └── optional bounded Soroban contract-reachability probe
 ```
 
 The MCP is a read-only consumer and ranking/presentation layer. It is **not** another indexer, registry,
@@ -47,9 +47,10 @@ database, or source of truth.
 - The versioned Explorer API is the only product read boundary. The SDK owns its request/response types,
   retry policy, and normalization.
 - The MCP owns discovery intent parsing, its explicit ranking policy, output safety, MCP tools/resources, and
-  optional top-K verification.
-- Soroban verification is an overlay. It may re-derive reputation for an explicit agent or a bounded top-K,
-  but it MUST NOT write a competing canonical value to Supabase or an MCP-owned database/cache.
+  optional top-K contract reachability attempts.
+- Soroban evidence is a bounded, fail-closed probe. The current release cannot prove client-set exhaustion,
+  so it compares no reputation fields: average, feedback count, and `uniqueClients` all remain
+  indexer-declared. It MUST NOT write a competing canonical value to Supabase or an MCP-owned database/cache.
 
 ## Repository and package decision
 
@@ -58,6 +59,13 @@ At the inspected upstream commit (`d92c2f4`), `trionlabs/stellar-8004` contains 
 Supabase schema/API, Explorer UI, and published `@trionlabs/stellar8004` SDK. It does **not** contain an MCP
 protocol server, Streamable HTTP handler, MCP package manifest, or MCP client-setup CLI. Its current "MCP"
 references describe agent service metadata/examples; they are not a reusable MCP runtime.
+
+One similarly named upstream document needs an explicit distinction:
+`docs/findings/supabase/02-self-hosted-mcp-setup.md` describes Supabase Studio's operator/admin MCP for
+database maintenance behind SSH/IP restrictions. It is not a Stellar 8004 agent-registry MCP, is not the
+public Explorer read contract, and must not be copied, Service-Bound, or exposed as this product's runtime.
+The reusable boundary from `stellar8004.com` is the versioned public Explorer API/SDK; this repo supplies the
+agent-facing MCP adapter over that boundary.
 
 | Surface | Canonical home | How this repo uses it |
 |---|---|---|
@@ -153,12 +161,12 @@ The current v1 integration is useful and intentionally honest, but not globally 
 |---|---|
 | Read boundary | `ExplorerService` wraps the upstream `ExplorerClient`; there is no Supabase dependency |
 | Network | Mainnet by default; testnet requires an explicit Explorer URL rather than silently reading mainnet |
-| Filters | Structured `x402`, `mpp`, `hasServices`, `trust`, and `minScore` are sent to the v1 agent list |
+| Filters | MCP `x402`, `mpp`, `hasServices`, `trust`, and explicit `minExplorerScore` are sent to the v1 list (`minExplorerScore` maps to upstream `minScore`; it is not local rank) |
 | Text | The v1 list projection omits `services[]`, so the bounded first-pass stem match can use only fetched agent name/description; service text is not globally searchable today |
 | Pagination | v1 uses page/offset pagination; every MCP walk has a hard page cap |
-| Coverage | Only an explicit final `hasMore: false` makes a discovery scan complete; missing or true pagination remains incomplete |
+| Coverage | `hasMore: false` proves only that the observed v1 pagination ended; without a revision-bound snapshot, v1 always reports `coverageComplete: false` and `snapshotConsistent: false` |
 | Reliability | SDK timeout/retries/rate-limit handling plus process-local TTL cache and single-flight |
-| Verification | Optional, bounded Soroban reputation re-derivation; RPC failure degrades to declared-only |
+| Reputation evidence | One optional bounded Soroban client-page probe; reachable attempts still return `unavailable`, `verifiedFields: []`, and `snapshotComparable: false` because exhaustion is unprovable |
 
 The concrete candidate ceilings are:
 
@@ -173,8 +181,9 @@ The concrete candidate ceilings are:
 These are bounded-work safety controls, not claims of global ranking. A match beyond a capped window can be
 missed. `coverageComplete`, `paginationExhausted`, `snapshotConsistent`, `pagesScanned`, `recordsScanned`,
 and `hasMore` prevent the discovery tools from presenting that window as the whole registry. Because v1 is
-offset-paginated with no revision cursor, a multi-page walk is conservatively `snapshotConsistent: false`
-even when it reaches `hasMore: false`; only a single exhausted page can be globally complete. The v2 contract
+offset-paginated with no revision cursor, every v1 result is conservatively `snapshotConsistent: false` and
+`coverageComplete: false`, including a single page that ends with `hasMore: false`. That final flag is retained
+as `paginationExhausted: true`; it is useful progress evidence, not a global-completeness proof. The v2 contract
 below moves filtering, text retrieval, stable ordering, and cursor pagination to the canonical indexed read
 boundary.
 
@@ -182,10 +191,14 @@ Two other v1 limits remain explicit:
 
 - the owner SDK method exposes only the current first page (up to 20 rows), so owner tools/resources return
   coverage rather than claiming "all agents"; and
-- the current contract `get_summary` silently processes at most five client addresses. The verifier removes
-  owner self-feedback to match the canonical indexer, verifies average/count only when the complete comparable
-  set fits that cap, reports `partial` because active `uniqueClients` is not contract-derivable, and reports
-  `unavailable` above the cap. A maintained upstream aggregate is required for scalable full verification.
+- the current contract `get_summary` silently processes at most five caller-supplied client addresses, while
+  `get_clients_paginated` compacts around expired index entries and exposes no authoritative count/cursor.
+  A finite page therefore cannot prove that a later retained client does not exist. The verifier performs one
+  bounded client-page reachability read and then stops: it does not call `get_summary`, remove/filter a
+  supposedly complete set, or compare average/count. Attempted results are `unavailable` with
+  `reason: client-set-exhaustion-unprovable`, `verifiedFields: []`, and `snapshotComparable: false`; all
+  reputation values stay indexer-declared. A maintained upstream aggregate is required before field-scoped or
+  complete-field evidence can be emitted.
   That contract/SDK work is tracked in
   [trionlabs/stellar-8004#19](https://github.com/trionlabs/stellar-8004/issues/19) and
   [P3-14](../issues/P3-14-upstream-reputation-aggregate-v2.md).
@@ -403,8 +416,9 @@ policy says otherwise:
 | 503 | `INDEX_STALE`, `INDEX_INTEGRITY_DEGRADED`, `QUERY_INCOMPLETE`, `UPSTREAM_UNAVAILABLE` | Degrade honestly; never query Supabase directly |
 | 503 | `INDEX_ROLLBACK_DETECTED` | Stop serving v2 until the projection is reconciled |
 
-The MCP maps these into its stable tool error taxonomy. A Soroban verification error is different: indexed
-rows may still be returned with verification `unavailable`, but they MUST NOT be called verified.
+The MCP maps these into its stable tool error taxonomy. Soroban reputation evidence is a separate state:
+indexed rows may still be returned with status `unavailable`, whether the RPC failed or the reachable client
+page could not prove exhaustion, but no reputation field may be called verified.
 
 ### ETag and cache semantics
 
@@ -443,8 +457,9 @@ The indexer's checkpoint behavior is part of the trust boundary:
   until reconciliation completes.
 - If the Explorer API is down, the MCP may return a bounded still-fresh cache entry only when allowed by the
   original cache header; otherwise it returns an upstream error. There is no database bypass.
-- If Soroban RPC is down, discovery can remain available from indexed truth while verification reports
-  `unavailable`. Indexed and verified are separate states.
+- If Soroban RPC is down, discovery can remain available from indexed truth while reputation evidence reports
+  `unavailable`. A reachable RPC also remains `unavailable` until client-set exhaustion is provable. Indexed
+  and verified are separate states.
 
 ## Backward compatibility and rollout
 

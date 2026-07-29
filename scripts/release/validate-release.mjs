@@ -32,7 +32,7 @@ const pkg = readJson("package.json");
 const server = readJson("server.json");
 const serverPackage = server.packages?.[0];
 
-check(pkg.engines?.node === ">=20", "package.json must require Node >=20");
+check(pkg.engines?.node === ">=22", "package.json must require Node >=22");
 check(
   pkg.bin?.["stellar-agent-mcp"] === "dist/index.js" && Object.keys(pkg.bin).length === 1,
   "package.json must expose exactly the stellar-agent-mcp CLI bin",
@@ -81,6 +81,8 @@ const persistentDocs = [
   "docs/getting-started.md",
   "docs/integration.md",
   "skills/mcp/SKILL.md",
+  "web/src/lib/install-published.ts",
+  "web/src/routes/+page.svelte",
 ];
 for (const path of persistentDocs) {
   const contents = read(path);

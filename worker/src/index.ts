@@ -1,5 +1,11 @@
 import { createMcpHandler } from "agents/mcp/server";
-import { loadConfig, type Config, type EnvironmentMap } from "../../src/config.js";
+import packageMetadata from "../../package.json" with { type: "json" };
+import {
+  RANK_SCORE_MAX,
+  loadConfig,
+  type Config,
+  type EnvironmentMap,
+} from "../../src/config.js";
 import { TtlCache } from "../../src/lib/explorer.js";
 import { buildServer } from "../../src/server.js";
 import {
@@ -12,10 +18,13 @@ export const HEALTH_PATH = "/healthz";
 export const MAX_BODY_BYTES = 256 * 1024;
 export const MAX_BATCH_ITEMS = 8;
 export const MAX_UPSTREAM_COST = 24;
+/** MCP identity baked into the Worker artifact; never mutable through bindings. */
+export const WORKER_SERVER_VERSION = packageMetadata.version;
 /**
- * One truthful on-chain reputation check performs at most three simulations:
- * clients[0..6), a boundary probe at offset 6 when needed, then get_summary.
- * More than five comparable clients degrades closed without a summary.
+ * Conservative admission charge reserved for one Reputation-contract probe.
+ * The current verifier performs only one bounded client-page simulation and
+ * deliberately never calls get_summary; spare headroom keeps a future change
+ * from silently weakening edge admission before this estimate is reviewed.
  */
 const MAX_REPUTATION_VERIFY_COST = 3;
 
@@ -94,7 +103,6 @@ export interface WorkerEnv {
   RANK_W_VOLUME?: string;
   RANK_W_BREADTH?: string;
   RANK_SIM_SOURCE?: string;
-  SERVER_VERSION?: string;
   CF_VERSION_METADATA?: { id: string; tag?: string; timestamp?: string };
 }
 
@@ -506,8 +514,15 @@ export function estimateUpstreamCost(parsedBody: unknown): number {
   return parsedBody.reduce((sum, item) => sum + messageCost(item), 0);
 }
 
-function isHeavyToolCall(message: unknown): boolean {
-  if (!isRecord(message) || Reflect.get(message, "method") !== "tools/call") return false;
+function isHeavyMessage(message: unknown): boolean {
+  if (!isRecord(message)) return false;
+  const method = Reflect.get(message, "method");
+  // Dynamic resource reads can fan out just like tools: agent/profile/card/
+  // reputation resources perform Soroban comparisons, leaderboard/list can
+  // scan five Explorer pages, and the dispatcher exposes no safe pre-handler
+  // URI-to-cost seam. Permit only one such branch per HTTP batch.
+  if (method === "resources/read" || method === "resources/list") return true;
+  if (method !== "tools/call") return false;
   const params = Reflect.get(message, "params");
   if (!isRecord(params)) return false;
   const name = Reflect.get(params, "name");
@@ -536,7 +551,7 @@ function isHeavyToolCall(message: unknown): boolean {
 
 export function heavyToolCallCount(parsedBody: unknown): number {
   const messages = Array.isArray(parsedBody) ? parsedBody : [parsedBody];
-  return messages.reduce((count, message) => count + (isHeavyToolCall(message) ? 1 : 0), 0);
+  return messages.reduce((count, message) => count + (isHeavyMessage(message) ? 1 : 0), 0);
 }
 
 function trustedConnectingIp(request: Request): string {
@@ -640,9 +655,23 @@ function responseForSharedCache(response: Response): Response {
   });
 }
 
+function bypassSharedCaches(request: Request): boolean {
+  const directives = (request.headers.get("cache-control") ?? "")
+    .toLowerCase()
+    .split(",")
+    .map((directive) => directive.trim());
+  return directives.some(
+    (directive) =>
+      directive === "no-cache" ||
+      directive === "no-store" ||
+      directive === "max-age=0",
+  );
+}
+
 export function createExplorerBindingFetch(options: ExplorerBindingFetchOptions): typeof fetch {
   const base = publicApiBase(options.publicBaseUrl);
   const connectingIp = trustedConnectingIp(options.originalRequest);
+  const bypassCache = bypassSharedCaches(options.originalRequest);
 
   return async (input, init) => {
     const requested = new Request(input, init);
@@ -656,7 +685,7 @@ export function createExplorerBindingFetch(options: ExplorerBindingFetchOptions)
 
     // Cache API entries are PoP-local and best effort. The SDK/TtlCache path is
     // still authoritative when `caches.default` is absent or fails.
-    if (options.cache !== undefined) {
+    if (!bypassCache && options.cache !== undefined) {
       try {
         const hit = await options.cache.match(cacheKey);
         if (hit !== undefined) return hit.clone();
@@ -689,7 +718,7 @@ export function createExplorerBindingFetch(options: ExplorerBindingFetchOptions)
     });
     const response = await options.binding.fetch(downstream);
 
-    if (options.cache !== undefined && responseIsPubliclyCacheable(response)) {
+    if (!bypassCache && options.cache !== undefined && responseIsPubliclyCacheable(response)) {
       const write = options.cache
         .put(cacheKey, responseForSharedCache(response))
         .catch(() => undefined);
@@ -715,7 +744,14 @@ function rebuiltRequest(request: Request, bytes: Uint8Array): Request {
 }
 
 function isCanonicalRemoteConfig(config: Config): boolean {
-  if (config.network !== "mainnet") return false;
+  if (
+    config.network !== "mainnet" ||
+    config.verifyOnchain !== true ||
+    config.scoreMax !== RANK_SCORE_MAX ||
+    config.simSource !== undefined
+  ) {
+    return false;
+  }
   try {
     const explorer = new URL(config.explorerBaseUrl);
     const rpc = new URL(config.rpcUrl);
@@ -744,7 +780,7 @@ function operatorConfigError(origin: string | undefined): Response {
     jsonRpcError(
       503,
       -32050,
-      "This Worker accepts only Stellar mainnet with the canonical Explorer and default HTTPS Soroban RPC.",
+      "This Worker accepts only the canonical mainnet Explorer/RPC, enabled on-chain verification, and release ranking policy.",
     ),
     origin,
   );
@@ -818,7 +854,7 @@ async function handleMcp(
       jsonRpcError(
         413,
         -32012,
-        "A JSON-RPC batch may contain at most one fan-out or on-chain verification tool call.",
+        "A JSON-RPC batch may contain at most one fan-out/on-chain branch (tool or dynamic resource).",
         {
           heavyCalls,
           maxHeavyCalls: 1,
@@ -853,9 +889,18 @@ async function handleMcp(
   } catch {
     return operatorConfigError(origin);
   }
-  if (!isCanonicalRemoteConfig(config)) return operatorConfigError(origin);
+  // SERVER_VERSION used to be a mutable binding. Reject a stale dashboard
+  // secret/config explicitly instead of silently letting release identity drift.
+  if (Reflect.has(env, "SERVER_VERSION") || !isCanonicalRemoteConfig(config)) {
+    return operatorConfigError(origin);
+  }
 
-  const edgeCache = runtime.cache === undefined ? discoverDefaultCache() : runtime.cache ?? undefined;
+  const bypassCache = bypassSharedCaches(request);
+  const edgeCache = bypassCache
+    ? undefined
+    : runtime.cache === undefined
+      ? discoverDefaultCache()
+      : runtime.cache ?? undefined;
   const explorerFetch = createExplorerBindingFetch({
     binding: env.STELLAR8004_API,
     publicBaseUrl: config.explorerBaseUrl,
@@ -866,7 +911,12 @@ async function handleMcp(
   const deps = createToolDeps(config, {
     explorer: {
       fetch: explorerFetch,
-      cache: getIsolateExplorerCache(config.network, config.explorerBaseUrl),
+      // A canary/freshness probe must exercise the Service Binding rather than
+      // succeeding from a previous request's isolate cache. Keep request-local
+      // single-flight semantics without sharing cached values across requests.
+      cache: bypassCache
+        ? new TtlCache({ maxEntries: 8 })
+        : getIsolateExplorerCache(config.network, config.explorerBaseUrl),
     },
     verifier: {
       cache: getIsolateVerifierCache(config.network, config.rpcUrl),
@@ -878,7 +928,7 @@ async function handleMcp(
     () =>
       buildServer(config, {
         deps,
-        ...(env.SERVER_VERSION?.trim() ? { version: env.SERVER_VERSION.trim() } : {}),
+        version: WORKER_SERVER_VERSION,
       }),
     {
       route: MCP_PATH,

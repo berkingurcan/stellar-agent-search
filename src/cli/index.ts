@@ -26,7 +26,7 @@ import {
   VERIFY_TOP_K,
   type RankedRow,
 } from "../tools/shared.js";
-import { scoreAgent } from "../lib/ranking.js";
+import { RANKING, scoreAgent } from "../lib/ranking.js";
 import type {
   DiscoveryCoverage,
   FindAgentsResult,
@@ -36,6 +36,7 @@ import { MAX_AGENT_ID, resolveAgentId, validWalletOrNull } from "../lib/identifi
 import { buildSelfDeclaredFields, sanitizeText } from "../lib/sanitize.js";
 import { parseQuery } from "../lib/nlparse.js";
 import { classifyError } from "../lib/errors.js";
+import { buildRegistryHealthView } from "../lib/registry-stats.js";
 import { log, isLogLevel } from "../lib/logger.js";
 import {
   NotFoundError,
@@ -63,7 +64,7 @@ export interface CliFlags {
   mpp: boolean;
   hasServices: boolean;
   limit?: number;
-  minScore?: number;
+  minExplorerScore?: number;
   logLevel?: string;
   help: boolean;
   version: boolean;
@@ -84,7 +85,7 @@ const VALUE_FLAGS = new Map<string, keyof CliFlags>([
   ["--explorer-url", "explorerUrl"],
   ["--rpc-url", "rpcUrl"],
   ["--limit", "limit"],
-  ["--min-score", "minScore"],
+  ["--min-explorer-score", "minExplorerScore"],
   ["--log-level", "logLevel"],
   ["--port", "port"],
   ["--client", "client"],
@@ -116,9 +117,9 @@ export function parseFlags(argv: string[]): CliFlags {
       const key = VALUE_FLAGS.get(tok)!;
       const val = argv[++i];
       if (val === undefined) throw new Error(`Missing value for ${tok}`);
-      if (key === "limit" || key === "port" || key === "minScore") {
+      if (key === "limit" || key === "port" || key === "minExplorerScore") {
         const n = Number(val);
-        const [min, max] = key === "limit" ? [1, 50] : key === "port" ? [1, 65_535] : [0, 100];
+        const [min, max] = key === "limit" ? [1, 50] : key === "port" ? [1, 65_535] : [0, Number.MAX_SAFE_INTEGER];
         if (!/^\d+$/.test(val) || !Number.isSafeInteger(n) || n < min || n > max) {
           throw new Error(`${tok} expects an integer from ${min} to ${max}, got '${val}'`);
         }
@@ -170,6 +171,10 @@ export function parseFlags(argv: string[]): CliFlags {
       case "--handshake":
         flags.handshake = true;
         break;
+      case "--min-score":
+        throw new Error(
+          "--min-score is ambiguous and no longer supported; use --min-explorer-score for the upstream v1 Explorer total_score filter",
+        );
       default:
         if (tok.startsWith("-")) throw new Error(`Unknown flag: ${tok}`);
         flags.positionals.push(tok);
@@ -301,12 +306,12 @@ async function gatherByQuery(deps: ToolDeps, query: string, flags: CliFlags): Pr
   const x402 = flags.x402 || parsed.filters.x402;
   const hasServices = flags.hasServices || parsed.filters.hasServices;
   const trust = parsed.filters.trust;
-  const minScore = flags.minScore ?? parsed.filters.minScore;
+  const minExplorerScore = flags.minExplorerScore ?? parsed.filters.minExplorerScore;
   if (x402 !== undefined && x402) filters.x402 = true;
   if (flags.mpp || parsed.filters.mpp) filters.mpp = true;
   if (hasServices !== undefined && hasServices) filters.hasServices = true;
   if (trust !== undefined) filters.trust = trust;
-  if (minScore !== undefined) filters.minScore = minScore;
+  if (minExplorerScore !== undefined) filters.minScore = minExplorerScore;
 
   return deps.explorer.findAgentsWithCoverage(parsed.keywords.join(" "), {
     filters,
@@ -350,7 +355,6 @@ async function cmdFind(deps: ToolDeps, flags: CliFlags): Promise<number> {
   }
   const discovery = await gatherByQuery(deps, query, flags);
   const rows = await rankAndVerify(cliBoundedDeps(deps), discovery.agents, {
-    weights: deps.config.weights,
     sortBy: "relevance",
     // Discovery remains fast by default; --verify is an explicit bounded RPC opt-in.
     verify: flags.verify,
@@ -404,7 +408,6 @@ async function cmdRank(deps: ToolDeps, flags: CliFlags): Promise<number> {
   }
 
   const rows = await rankAndVerify(cliBoundedDeps(deps), pool, {
-    weights: deps.config.weights,
     sortBy: "relevance",
     verify: !flags.noVerify,
     verifyTopK: Math.min(flags.limit ?? 10, 25),
@@ -413,12 +416,27 @@ async function cmdRank(deps: ToolDeps, flags: CliFlags): Promise<number> {
   });
 
   if (flags.json) {
-    out(JSON.stringify({ count: rows.length, weights: deps.config.weights, agents: rows, ...(coverage ? { coverage } : {}) }, null, 2));
+    out(
+      JSON.stringify(
+        {
+          rankVersion: RANKING.VERSION,
+          evidenceWeights: {
+            volume: RANKING.EVIDENCE_VOLUME_WEIGHT,
+            breadth: RANKING.EVIDENCE_BREADTH_WEIGHT,
+          },
+          count: rows.length,
+          agents: rows,
+          ...(coverage ? { coverage } : {}),
+        },
+        null,
+        2,
+      ),
+    );
     return 0;
   }
   out(
     `Ranked ${rows.length} agent(s) on ${deps.config.network} ` +
-      `(weights q=${deps.config.weights.quality} v=${deps.config.weights.volume} b=${deps.config.weights.breadth}):`,
+      `(policy ${RANKING.VERSION}; evidence volume=${RANKING.EVIDENCE_VOLUME_WEIGHT} breadth=${RANKING.EVIDENCE_BREADTH_WEIGHT}):`,
   );
   out();
   out(rankRowsTable(rows));
@@ -427,11 +445,9 @@ async function cmdRank(deps: ToolDeps, flags: CliFlags): Promise<number> {
     const b = r.breakdown;
     if (!b) continue;
     out(
-      `  agent ${r.id}: base ${b.base.toFixed(3)} = ` +
-        `quality ${b.quality.weighted.toFixed(3)} + volume ${b.volume.weighted.toFixed(3)} + ` +
-        `breadth ${b.breadth.weighted.toFixed(3)}; bonuses pay=${b.paymentBonus.toFixed(2)} ` +
-        `endpoint=${b.endpointBonus.toFixed(2)}; ` +
-        `confidence ${Math.round(b.confidence * 100)}%`,
+      `  agent ${r.id}: quality ${b.quality.norm.toFixed(3)} × evidence ${b.evidenceStrength.toFixed(3)} ` +
+        `(capped volume ${b.volume.weighted.toFixed(3)} + breadth ${b.breadth.weighted.toFixed(3)}) ` +
+        `= score ${b.score.toFixed(3)}; owner-declared capability contribution 0`,
     );
   }
   if (coverage) {
@@ -463,7 +479,6 @@ async function cmdProfile(deps: ToolDeps, flags: CliFlags): Promise<number> {
     excludeClient: detail.owner,
   });
   const result = scoreAgent(toRankInput(detail, verification.status), {
-    weights: deps.config.weights,
     scoreMax: deps.config.scoreMax,
   });
   const ids = agentIds(deps.config, id);
@@ -492,15 +507,25 @@ async function cmdProfile(deps: ToolDeps, flags: CliFlags): Promise<number> {
   out(`  stellarId : ${ids.stellarId}`);
   out(`  owner     : ${sanitizeText(detail.owner, 60)}`);
   out(`  wallet    : ${validWalletOrNull(detail.wallet) ?? "(none — payTo comes from the x402 challenge)"}`);
-  out(`  score     : ${result.score100}/100   confidence ${Math.round(result.confidence * 100)}%`);
+  out(
+    `  score     : ${result.score100}/100   evidence ${result.evidenceStrength.toFixed(3)} ` +
+      `(index, not probability; ${result.rankVersion})`,
+  );
   out(
     `  reputation: ${verification.status}` +
       (verification.verified
         ? `  (declared avg ${declared.average ?? "n/a"} vs on-chain ${verification.verified.average})`
         : `  (declared avg ${declared.average ?? "n/a"} over ${declared.feedbackCount} feedback)`),
   );
+  if (verification.verified) {
+    out("  evidence  : bounded, unversioned observations; snapshotComparable=no; active clients not chain-derived");
+  } else if (verification.reason) {
+    out(`  evidence  : ${verification.reason}; snapshotComparable=no; no reputation field verified`);
+  }
   out(`  capability: x402=${yn(caps.x402)} mpp=${yn(caps.mpp)} services=${self.services.length} trust=[${caps.supportedTrust.join(", ")}]`);
-  const fl = Object.entries(result.flags).filter(([, v]) => v).map(([k]) => k);
+  const fl = Object.entries(result.flags)
+    .filter(([k, v]) => v && k !== "lowConfidence")
+    .map(([k]) => k);
   if (fl.length) out(`  flags     : ${fl.join(", ")}`);
   out();
   out(`  self-declared (UNVERIFIED):`);
@@ -521,7 +546,7 @@ async function cmdServices(deps: ToolDeps, flags: CliFlags): Promise<number> {
   };
   if (flags.x402) filters.x402 = true;
   if (flags.mpp) filters.mpp = true;
-  if (flags.minScore !== undefined) filters.minScore = flags.minScore;
+  if (flags.minExplorerScore !== undefined) filters.minScore = flags.minExplorerScore;
 
   // Discover via stem-matching (the explorer `search=` misses "Scrapper").
   const discovery = await deps.explorer.findAgentsWithCoverage(search, {
@@ -532,7 +557,7 @@ async function cmdServices(deps: ToolDeps, flags: CliFlags): Promise<number> {
   const pool = discovery.agents;
 
   const scored = pool
-    .map((a) => ({ a, result: scoreAgent(toRankInput(a), { weights: deps.config.weights, scoreMax: deps.config.scoreMax }) }))
+    .map((a) => ({ a, result: scoreAgent(toRankInput(a), { scoreMax: deps.config.scoreMax }) }))
     .sort((x, y) => y.result.score100 - x.result.score100);
 
   // The LIST endpoint omits services[] + metadata, so hydrate the top agents via
@@ -603,6 +628,8 @@ async function cmdServices(deps: ToolDeps, flags: CliFlags): Promise<number> {
         stellarId: ids.stellarId,
         caip2Id: ids.caip2Id,
         capabilities: { x402: caps.x402, mpp: caps.mpp },
+        capabilitiesVerified: false,
+        trustVerified: false,
         score: result.score100,
         endpointVerified: false,
         livenessVerified: false,
@@ -671,7 +698,7 @@ async function cmdDoctor(deps: ToolDeps, flags: CliFlags): Promise<number> {
 
   // 1. node
   const major = Number(process.versions.node.split(".")[0]);
-  checks.push({ name: "node", ok: major >= 20, detail: `v${process.versions.node} (>=20 required)` });
+  checks.push({ name: "node", ok: major >= 22, detail: `v${process.versions.node} (>=22 required)` });
 
   // 2. network + read-only posture
   checks.push({ name: "network", ok: true, detail: cfg.network });
@@ -684,13 +711,20 @@ async function cmdDoctor(deps: ToolDeps, flags: CliFlags): Promise<number> {
 
   // 3. explorer health
   try {
-    const health = (await deps.explorer.health()).data;
-    const identity = health.indexer?.identity;
-    const stale = identity?.stale ? "STALE" : "fresh";
+    const health = buildRegistryHealthView(
+      (await deps.explorer.health()).data,
+      cfg.network,
+    );
+    const indexerDetail = (["identity", "reputation", "validation"] as const)
+      .map((name) => {
+        const state = health.indexer[name];
+        return `${name}=${state.lastLedger}/${state.stale ? "STALE" : "fresh"}`;
+      })
+      .join(" ");
     checks.push({
       name: "explorer",
-      ok: health.status === "ok" || health.status === "healthy",
-      detail: `${cfg.explorerBaseUrl}  status=${health.status}  identity ledger ${identity?.lastLedger ?? "?"} (${stale})`,
+      ok: health.status === "healthy" && !health.anyStale,
+      detail: `${cfg.explorerBaseUrl}  status=${health.status}  ${indexerDetail}`,
     });
   } catch (e) {
     checks.push({ name: "explorer", ok: false, detail: `${cfg.explorerBaseUrl}  ${classifyError(e).error}` });
@@ -709,36 +743,31 @@ async function cmdDoctor(deps: ToolDeps, flags: CliFlags): Promise<number> {
     checks.push({ name: "soroban", ok: false, detail: `${cfg.rpcUrl}  ${(e as Error).message}` });
   }
 
-  // 5. on-chain verify sample (agent #10 exists on mainnet)
+  // 5. exact Reputation-contract read-path health (agent #10 exists on mainnet)
   if (cfg.verifyOnchain) {
     try {
-      // probe(), not verify(): verify() degrades a failed read to null, which
-      // is indistinguishable from an unrated agent. A self-check that reports a
-      // broken read as "no data yet" is worse than no check at all.
-      const sample = (await deps.explorer.getAgent(10)).data;
-      const probe = await deps.verifier.probe(10, { excludeClient: sample.owner });
+      // Reachability is not comparability. The current contract exposes no
+      // authoritative client-count/cursor, so doctor checks the real simulation
+      // path without turning a successful bounded read into a verification claim.
+      const probe = await deps.verifier.probeReachability(10);
       if (probe.ok) {
-        const v = probe.value;
         checks.push({
-          name: "verify",
+          name: "contract",
           ok: true,
-          detail:
-            v.count > 0
-              ? `on-chain reputation read OK (sampled agent #10: avg ${v.average}, ${v.count} comparable feedback; active unique clients are not derived by this read)`
-              : `on-chain read path OK (sampled agent #10 has no on-chain feedback yet)`,
+          detail: `read path OK (sample #10 returned ${probe.observedClients} address(es) from bounded indices ${probe.start}..${probe.start + probe.limit - 1}; not an exhaustive client count; verification unavailable)`,
         });
       } else {
         checks.push({
-          name: "verify",
+          name: "contract",
           ok: false,
-          detail: `on-chain read FAILED (${probe.reason})${probe.detail ? `: ${probe.detail}` : ""}`,
+          detail: `read path FAILED (${probe.reason})${probe.detail ? `: ${probe.detail}` : ""}`,
         });
       }
     } catch (e) {
-      checks.push({ name: "verify", ok: false, detail: `sample read failed: ${classifyError(e).error}` });
+      checks.push({ name: "contract", ok: false, detail: `sample read failed: ${classifyError(e).error}` });
     }
   } else {
-    checks.push({ name: "verify", ok: true, detail: "disabled (VERIFY_ONCHAIN=false / --no-verify)" });
+    checks.push({ name: "contract", ok: true, detail: "disabled (VERIFY_ONCHAIN=false / --no-verify)" });
   }
 
   // 6. tools registered
@@ -814,8 +843,8 @@ USAGE
 
 COMMANDS
   find <query>            Natural-language discovery → ranked candidates
-  rank <query | id...>    Rank a query's candidates or an explicit id set (3-axis + verify)
-  profile <id>            Full profile: identity, capabilities, declared-vs-verified reputation
+  rank <query | id...>    Rank a query's candidates or an explicit id set (3-axis + evidence limits)
+  profile <id>            Full profile: identity, capabilities, declared reputation + evidence limits
   services [search]       Catalog of self-declared x402/MPP endpoint candidates
   doctor                  Self-check: env, explorer health, RPC reachability, read-only posture
   setup --client <name>   Idempotently register with Claude Code, Cursor, or Codex
@@ -827,11 +856,11 @@ FLAGS
   --network <mainnet|testnet>   Network (env STELLAR_NETWORK; default mainnet)
   --explorer-url <url>          Explorer API base (env EXPLORER_BASE_URL)
   --rpc-url <url>               Soroban RPC (env STELLAR_RPC_URL)
-  --verify                      Verify find results on-chain (off by default; bounded)
-  --no-verify                   Skip on-chain reputation verification (env VERIFY_ONCHAIN=false)
+  --verify                      Attempt bounded on-chain evidence reads for find results (off by default)
+  --no-verify                   Skip on-chain reputation evidence reads (env VERIFY_ONCHAIN=false)
   --x402                        Require x402 (pay-per-call) support
   --mpp                         Require MPP micropayment support
-  --min-score <0..100>          Minimum declared reputation
+  --min-explorer-score <n>      Minimum upstream v1 Explorer total_score (not local rank)
   --limit <N>                   Max rows
   --json                        Machine-readable output
   --client <claude|cursor|codex>  Client to configure (setup only)
@@ -841,8 +870,8 @@ FLAGS
   --handshake                    Initialize this package and list its MCP tools
   (precedence: flag → env → default)
 
-Agent names/descriptions/services are self-declared & UNVERIFIED; reputation checks are bounded, field-scoped,
-and usually partial (average + active count only).`);
+Agent names/descriptions/services are self-declared & UNVERIFIED. Reputation evidence fails closed: the
+current contract has no authoritative client-set cursor/count, so no reputation field is marked verified.`);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,11 +1,11 @@
 {
   "name": "stellar-agent-mcp",
   "version": "0.1.0",
-  "description": "Read-only MCP server and CLI for Stellar 8004 agent discovery, ranking, and bounded on-chain reputation comparison.",
+  "description": "Read-only MCP server and CLI for Stellar 8004 discovery, declared-evidence ranking, and bounded contract probes.",
   "type": "module",
   "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "bin": {
     "stellar-agent-mcp": "dist/index.js"

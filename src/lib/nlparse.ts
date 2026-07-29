@@ -7,8 +7,8 @@
  *
  * A raw query like "a paid web scraper with a good reputation" becomes:
  *   { keywords: ["web", "scraper"],
- *     filters:  { x402: true, minScore: 70 },
- *     matched:  ["x402:paid", "minScore:70"] }
+ *     filters:  { x402: true, minExplorerScore: 70 },
+ *     matched:  ["x402:paid", "minExplorerScore:70"] }
  *
  * Explicit tool arguments always win over these inferred filters (merged by the
  * caller in tools/find_agent.ts) — this parser only proposes.
@@ -22,7 +22,8 @@ export interface ParsedFilters {
   mpp?: boolean;
   hasServices?: boolean;
   trust?: TrustModel;
-  minScore?: number;
+  /** Minimum upstream v1 leaderboard_scores.total_score, not local rank score. */
+  minExplorerScore?: number;
 }
 
 export interface ParsedQuery {
@@ -92,7 +93,7 @@ const RE_SERVICES = /\b(invoke|invocable|invokable|callable|endpoints?|apis?|ser
 // serialising `false` is silently ignored. Detect common negative requests so
 // callers can reject them instead of returning the opposite of what was asked.
 const RE_NEGATED_X402 =
-  /\b(?:no|not|without|exclude|excluding|free\s+of)\b(?:\s+[\p{L}\p{N}-]+){0,3}\s+(?:x402|paid|payments?|usdc|micropayments?)\b|\b(?:non[- ]?(?:x402|paid|payments?|usdc|micropayments?)|unpaid|x402[- ]?free|payment[- ]?free|payments?[- ]?free|odemesiz|ucretsiz)\b|\b(?:x402|odeme|odemeler|ucret)\s+(?:olmadan|olmayan|istemiyorum|siz)\b/u;
+  /\b(?:no|not|without|exclude|excluding|except|avoid|avoiding|doesn['’]?t|dont|free\s+of)\b(?:\s+[\p{L}\p{N}'’-]+){0,4}\s+(?:x402|paid|pay|payments?|usdc|micropayments?)\b|\b(?:no[- ]?(?:pay|payment)|non[- ]?(?:x402|paid|payments?|usdc|micropayments?)|unpaid|x402[- ]?free|payment[- ]?free|payments?[- ]?free|odemesiz|ucretsiz)\b|\b(?:x402|payments?|usdc|odeme|odemeler|ucret)\s+(?:free|disabled|off|unsupported|false|not\s+required|olmadan|olmayan|istemiyorum|siz|yok)\b/u;
 const RE_NEGATED_MPP =
   /\b(?:no|not|without|exclude|excluding|free\s+of)\b(?:\s+[\p{L}\p{N}-]+){0,3}\s+(?:mpp|streaming\s+(?:payments?|micropayments?))\b|\b(?:non[- ]?mpp|mpp[- ]?free)\b|\bmpp\s+(?:olmadan|olmayan|istemiyorum|siz)\b/u;
 const RE_NEGATED_SERVICES =
@@ -100,11 +101,11 @@ const RE_NEGATED_SERVICES =
 
 // Trust and score filters are also positive-only. Negated/upper-bound phrases
 // must be rejected before the positive trigger regexes run, otherwise
-// "without TEE" becomes trust=tee and "score below 50" becomes minScore=50.
+// "without TEE" becomes trust=tee and "score below 50" becomes minExplorerScore=50.
 const RE_NEGATED_TRUST =
-  /\b(?:no|not|without|exclude|excluding|free\s+of)\b(?:\s+[\p{L}\p{N}-]+){0,3}\s+(?:tee|enclaves?|attest\w*|validation|validated|validators?|reputation(?:[- ]based|\s+trust|\s+model)?|trust(?:\s+model)?)\b|\b(?:non[- ]?(?:tee|validation|validated|attested|reputation)|unvalidated|unattested|tee[- ]?free|validation[- ]?free|reputation[- ]?free)\b|\b(?:tee|dogrulama|itibar|guven)\s+(?:olmadan|olmayan|istemiyorum|siz)\b/u;
+  /\b(?:no|not|without|exclude|excluding|except|avoid|avoiding|doesn['’]?t|dont|free\s+of)\b(?:\s+[\p{L}\p{N}'’-]+){0,4}\s+(?:tee|trusted\s+execution\s+environments?|enclaves?|attest\w*|validation|validated|validators?|reputation(?:[- ]based|\s+trust|\s+model)?|trust(?:\s+model)?)\b|\b(?:non[- ]?(?:tee|validation|validated|attested|reputation)|unvalidated|unattested|tee[- ]?free|validation[- ]?free|reputation[- ]?free)\b|\b(?:tee|validation|attestation|reputation|trust|dogrulama|itibar|guven)\s+(?:free|disabled|off|unsupported|false|optional|not\s+required|olmadan|olmayan|istemiyorum|siz|yok)\b/u;
 const RE_NEGATED_SCORE =
-  /\b(?:score|rating|rated|reputation|puan|itibar)\b[^\d]{0,24}\b(?:below|under|lower\s+than|less\s+than|at\s+most|no\s+more\s+than|no\s+higher\s+than|cannot\s+exceed|up\s+to|max(?:imum)?|altinda|alti|en\s+fazla)\s*\d{1,3}\b|\b(?:below|under|lower\s+than|less\s+than|at\s+most|no\s+more\s+than|no\s+higher\s+than|up\s+to|max(?:imum)?|en\s+fazla)\s+\d{1,3}\b|\b(?:max(?:imum)?|en\s+fazla)\s+(?:score|rating|puan)[^\d]{0,12}\d{1,3}\b|\b\d{1,3}\s+(?:ve\s+)?alti\b|\b(?:not|without|exclude|excluding)\b(?:\s+[\p{L}\p{N}-]+){0,3}\s+(?:top[- ]?rated|highly\s+rated|well[- ]?reviewed|reputable|trusted|good\s+reputation|high\s+reputation)\b|\b(?:unrated|low[- ]?rated|poor\s+reputation|bad\s+reputation|dusuk\s+puan(?:li)?)\b/u;
+  /\b(?:score|rating|rated|reputation|puan|itibar)\b[^\d]{0,24}(?:<=?|\b(?:below|under|lower\s+than|less\s+than|at\s+or\s+below|at\s+most|no\s+more\s+than|no\s+(?:higher|greater)\s+than|(?:cannot|cant|must\s+not|should\s+not)\s+exceed|capped\s+at|up\s+to|max(?:imum)?|altinda|alti|en\s+fazla)\b)\s*\d{1,3}\b|\b(?:not\s+)?(?:below|under|lower\s+than|less\s+than|at\s+or\s+below|at\s+most|no\s+more\s+than|no\s+(?:higher|greater)\s+than|up\s+to|max(?:imum)?|en\s+fazla)\s+\d{1,3}\b|\b(?:max(?:imum)?|en\s+fazla)\s+(?:score|rating|puan)[^\d]{0,12}\d{1,3}\b|\b\d{1,3}\s+(?:ve\s+)?alti\b|\b(?:not|without|exclude|excluding)\b(?:\s+[\p{L}\p{N}-]+){0,3}\s+(?:top[- ]?rated|highly\s+rated|well[- ]?reviewed|reputable|trusted|good\s+reputation|high\s+reputation)\b|\b(?:unrated|low[- ]?rated|poor\s+reputation|bad\s+reputation|dusuk\s+puan(?:li)?)\b/u;
 
 // Trust models. Reputation-as-trust needs explicit trust-model phrasing so the
 // common "good reputation" (a quality phrase) does NOT become a trust filter.
@@ -115,11 +116,11 @@ const RE_TRUST_TEE = /\b(tee|enclave|attest\w*)\b/;
 
 // Numeric score: "score/rated/rating ... N" or "above/over/at least N".
 // The \b anchors are essential: without them "curated"/"operated"/"generated"
-// all contain "rated" and would inject a spurious minScore (e.g. "a curated
-// feed of 100 sources" → minScore=100, silently emptying discovery).
+// all contain "rated" and would inject a spurious minExplorerScore (e.g. "a curated
+// feed of 100 sources" → minExplorerScore=100, silently emptying discovery).
 const RE_SCORE_NUM = /\b(?:score|scored|rated|rating)\b\D{0,12}(\d{1,3})/;
 const RE_SCORE_ABOVE = /\b(?:above|over|at\s+least|minimum|min)\s+(\d{1,3})\b/;
-// Qualitative reputation phrases → implied minScore.
+// Qualitative reputation phrases → implied minExplorerScore.
 const RE_SCORE_TOP = /\b(top[- ]?rated|best|excellent|highest[- ]?rated)\b/;
 const RE_SCORE_HIGH =
   /\b(highly\s+rated|well[- ]?reviewed|reputable|trusted|good\s+reputation|high\s+reputation|strong\s+reputation|great\s+reputation|iyi\s+itibar\w*|yuksek\s+puanli?)\b/;
@@ -148,7 +149,7 @@ export function parseQuery(raw: string): ParsedQuery {
   if (negatedMpp) unsupported.push("negative-filter:mpp");
   if (negatedServices) unsupported.push("negative-filter:hasServices");
   if (negatedTrust) unsupported.push("negative-filter:trust");
-  if (negatedScore) unsupported.push("negative-filter:minScore");
+  if (negatedScore) unsupported.push("negative-filter:minExplorerScore");
 
   if (!negatedX402 && (RE_X402.test(text) || RE_PAY.test(text))) {
     filters.x402 = true;
@@ -176,17 +177,17 @@ export function parseQuery(raw: string): ParsedQuery {
     matched.push("trust:tee-attestation");
   }
 
-  // 3. minScore — explicit number wins, then qualitative phrases.
+  // 3. minExplorerScore — explicit number wins, then qualitative phrases.
   const numMatch = text.match(RE_SCORE_NUM) ?? text.match(RE_SCORE_ABOVE);
   if (!negatedScore && numMatch && numMatch[1] !== undefined) {
-    filters.minScore = clampScore(Number(numMatch[1]));
-    matched.push(`minScore:${filters.minScore}`);
+    filters.minExplorerScore = normalizeExplorerThreshold(Number(numMatch[1]));
+    matched.push(`minExplorerScore:${filters.minExplorerScore}`);
   } else if (!negatedScore && RE_SCORE_TOP.test(text)) {
-    filters.minScore = 80;
-    matched.push("minScore:80");
+    filters.minExplorerScore = 80;
+    matched.push("minExplorerScore:80");
   } else if (!negatedScore && RE_SCORE_HIGH.test(text)) {
-    filters.minScore = 70;
-    matched.push("minScore:70");
+    filters.minExplorerScore = 70;
+    matched.push("minExplorerScore:70");
   }
 
   // 4. Residual keywords → explorer full-text search.
@@ -195,10 +196,10 @@ export function parseQuery(raw: string): ParsedQuery {
   return { keywords, filters, matched, unsupported };
 }
 
-/** Clamp a parsed score to the valid 0..100 integer range. */
-function clampScore(n: number): number {
+/** Normalize a natural-language upstream threshold without implying a 0..100 range. */
+function normalizeExplorerThreshold(n: number): number {
   if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(100, Math.round(n)));
+  return Math.max(0, Math.round(n));
 }
 
 /**

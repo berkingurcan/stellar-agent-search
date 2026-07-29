@@ -34,43 +34,47 @@ substring-matches poorly and has no score sort.
 | `mpp` | boolean | — | Require MPP micropayments (filtered by the explorer) |
 | `hasServices` | boolean | — | Require at least one self-declared service entry |
 | `trust` | `reputation`\|`validation`\|`crypto-economic`\|`tee-attestation` | — | Require a declared trust model |
-| `minScore` | number 0–100 | — | Minimum declared reputation |
-| `sortBy` | `relevance`\|`score`\|`confidence`\|`newest` | `relevance` | Ordering |
-| `verify` | boolean | `false` | Run bounded on-chain field checks for the top results (slower) |
+| `minExplorerScore` | non-negative number | — | Upstream v1 `leaderboard_scores.total_score` threshold in protocol units; not local rank |
+| `minScore` | number | — | Deprecated ambiguous input; rejected |
+| `sortBy` | `relevance`\|`score`\|`evidence`\|`newest` | `relevance` | `confidence` remains a deprecated alias of `evidence` |
+| `verify` | boolean | `false` | Attempt the bounded contract reachability probe for top results; no reputation fields are currently verified |
 
 **Output:** `{ interpretedQuery: { keywords, filters, matched }, count, agents: RankedAgent[], coverage }`.
-`coverage` is `{ coverageComplete, pagesScanned, recordsScanned, hasMore? }`; callers must not interpret a
-ranked window as a global result when `coverageComplete` is false.
+`coverage` is `{ coverageComplete, paginationExhausted, snapshotConsistent, pagesScanned, recordsScanned,
+hasMore?, limitations? }`. Explorer v1 reports `coverageComplete: false` and `snapshotConsistent: false`;
+`paginationExhausted: true` means only that the observed page stream ended. Callers must not interpret a
+ranked window as a complete or snapshot-consistent global result.
 
 ### `rank_agent`
 
-Rank an explicit agent set **or** a query's candidates with the full 3-axis breakdown + bounded on-chain
-comparison. This is where the declared-vs-chain scope is most visible. Provide **exactly one** of `agentIds` or
-`query`.
+Rank an explicit agent set **or** a query's candidates with the full 3-axis declared-data breakdown plus the
+fail-closed contract-probe status. Provide **exactly one** of `agentIds` or `query`.
 
 | Input | Type | Default | Notes |
 |---|---|---|---|
 | `agentIds` | int[] (1–50, non-neg) | — | Explicit ids. **XOR** with `query` |
 | `query` | string (min 1) | — | NL query whose candidates are ranked. **XOR** with `agentIds` |
 | `limit` | int 1–50 | `10` | Max rows |
-| `weights` | `{ quality?, volume?, breadth? }` (each ≥ 0) | — | Axis-weight override, re-normalized to sum 1 |
-| `verify` | boolean | `true` | On-chain-verify (default on for explicit ranking) |
-| `sortBy` | `relevance`\|`score`\|`confidence`\|`newest` | `relevance` | Ordering |
+| `weights` | object | — | Deprecated; any supplied value is rejected because `rankVersion` fixes score semantics |
+| `verify` | boolean | `true` | Attempt the bounded contract probe (default on for explicit ranking); this does not verify a score |
+| `sortBy` | `relevance`\|`score`\|`evidence`\|`newest` | `relevance` | `confidence` is a deprecated alias |
 
-**Output:** `{ weights: {quality,volume,breadth}, count, agents: RankedAgent[], coverage? }` — each row includes
-the full per-axis `breakdown`. `coverage` is present for query-based ranking and absent for explicit ids.
+**Output:** `{ rankVersion, evidenceWeights: {volume,breadth}, count, agents: RankedAgent[], coverage? }` —
+each row includes the full breakdown. The v1 policy computes `score = normalizedQuality ×
+(0.4 × cappedVolume + 0.6 × effectiveBreadth)`. `coverage` is present for query-based ranking and absent for
+explicit ids.
 
 ### `get_agent_profile`
 
 Deep profile for one agent: typed identity, capabilities, declared scores, 3-axis rank breakdown,
-declared-vs-chain reputation evidence, recent feedback, the canonical `stellar:…#id` handle, and an A2A
+fail-closed reputation-evidence status, recent feedback, the canonical `stellar:…#id` handle, and an A2A
 AgentCard projection.
 
 | Input | Type | Default | Notes |
 |---|---|---|---|
 | `agent` | id \| numeric string \| stellar handle | — | **Required** |
 | `feedbackLimit` | int 0–50 | `5` | How many recent (non-revoked) reviews to include |
-| `verify` | boolean | `true` | On-chain-verify reputation |
+| `verify` | boolean | `true` | Attempt the bounded contract probe; current reputation fields remain declared |
 
 **Output:** `{ profile: AgentProfile, agentCard: SelfDeclared, recentFeedback: SelfDeclared, verification }`.
 The `agentCard` and `recentFeedback` carry untrusted text and are therefore emitted inside labeled
@@ -88,7 +92,8 @@ typed capability/trust claims, and ranked score. `hasServices: true` is always f
 | `x402` | boolean | — | Only x402 services |
 | `mpp` | boolean | — | Only MPP services (filtered by the explorer) |
 | `trust` | `reputation`\|`validation`\|`tee` | — | Trust model |
-| `minScore` | number 0–100 | — | Minimum declared reputation |
+| `minExplorerScore` | non-negative number | — | Upstream v1 `total_score` threshold; not local rank |
+| `minScore` | number | — | Deprecated ambiguous input; rejected |
 | `limit` | int 1–50 | `20` | Agents per page |
 | `page` | int ≥ 1 | `1` | Page number |
 
@@ -108,13 +113,16 @@ Paginated, filterable browse primitive, ranked client-side (declared-only by def
 |---|---|---|
 | `x402` / `mpp` / `hasServices` | boolean | — |
 | `trust` | `reputation`\|`validation`\|`tee` | — |
-| `minScore` | number 0–100 | — |
-| `sortBy` | `relevance`\|`score`\|`confidence`\|`newest` | `score` |
+| `minExplorerScore` | non-negative number | — |
+| `minScore` | number (deprecated; rejected) | — |
+| `sortBy` | `relevance`\|`score`\|`evidence`\|`newest` | `score` |
 | `limit` | int 1–50 | `20` |
 | `page` | int ≥ 1 | `1` |
 | `verify` | boolean | `false` |
 
-**Output:** `{ count, page, agents: RankedAgent[] }`.
+**Output:** `{ count, page, pagination, agents: RankedAgent[], coverage }`. Explorer v1 always reports
+`coverageComplete: false` and `snapshotConsistent: false`; page 2+ additionally reports
+`prior-pages-not-scanned` in `coverage.limitations`.
 
 ### `leaderboard`
 
@@ -126,7 +134,8 @@ client-side, because the explorer has no server-side score sort. Rows include th
 | `limit` | int 1–50 | `10` |
 | `x402` / `mpp` / `hasServices` | boolean | — |
 | `trust` | `reputation`\|`validation`\|`tee` | — |
-| `minScore` | number 0–100 | — |
+| `minExplorerScore` | non-negative number | — |
+| `minScore` | number (deprecated; rejected) | — |
 | `verify` | boolean | `false` |
 
 **Output:** `{ count, agents: RankedAgent[], coverage }`. `coverageComplete: false` means the bounded
@@ -142,7 +151,8 @@ endpoint's current page (the only form that requires an explorer lookup); inspec
 | `ref` | number \| string | id, numeric string, stellar handle, or owner G-address |
 
 **Output:** `{ kind: "id"|"stellarId"|"owner", network, owner, count, agents: [{ id, stellarId, caip2Id }], coverage? }`.
-`coverage` is present for owner lookups; only `coverageComplete: true` rules out later owner rows.
+`coverage` is present for owner lookups. Explorer v1 has no revision-bound cursor, so current owner results
+always report `coverageComplete: false`; `paginationExhausted` records only the observed page boundary.
 
 ### `get_agents_by_owner`
 
@@ -171,27 +181,29 @@ Recent on-chain feedback (reviews) for one agent. Feedback is client-authored an
 | `tag` | string | — | Filter by feedback tag |
 | `includeRevoked` | boolean | `false` | Revoked entries are hidden unless set |
 
-**Output:** `{ agentId, stellarId, page, count, summary: { returned, revokedHidden }, feedback: SelfDeclared }`.
-Typed on-chain facts (`value`, `valueDecimals`, `clientAddress`, `isRevoked`) are kept; free-text
+**Output:** `{ agentId, stellarId, page, count, summary: { returned, revokedHidden }, coverage,
+feedback: SelfDeclared }`. `coverage.windowComplete` is false when the explorer reports another page—even if
+the current filtered window is empty—and `snapshotConsistent` is false for the unversioned v1 read. Typed
+on-chain facts (`value`, `valueDecimals`, `clientAddress`, `isRevoked`) are kept; free-text
 `tag1`/`tag2`/`endpoint`/`feedbackUri` are sanitized and labeled self-declared.
 
 ### `verify_reputation`
 
-Runs the bounded reputation comparison in isolation. It reads the on-chain Reputation contract
-(`get_clients_paginated` + `get_summary`) and compares average and active feedback count with the explorer.
-The current contract summary accepts at most five comparable clients, active unique clients are not
-derivable from its append-only client list, and the two reads do not share a ledger-bound snapshot.
+Runs the fail-closed Reputation-contract probe in isolation. It reads one six-slot client-index window with
+`get_clients_paginated`. The contract exposes no authoritative client count/cursor; expired entries can
+create holes, so no finite page—including an empty page—proves exhaustive history. This release therefore
+does not call `get_summary` and compares no Explorer reputation fields.
 
 | Input | Type | Notes |
 |---|---|---|
 | `agent` | id \| numeric string \| stellar handle | **Required** |
 
 **Output:** `{ agentId, stellarId, verified: boolean, verification }`. Status is
-`verified | partial | mismatch | unavailable | skipped`; current healthy comparisons are `partial`, while
-`verified` is reserved for future complete-field evidence. Thus the top-level `verified` boolean remains
-`false` for a healthy current result. `snapshotComparable` is always `false`, and `uniqueClients` remains an
-indexer-declared field. It degrades to `unavailable` when completeness or RPC evidence is missing and to
-`skipped` when checking is disabled.
+`verified | partial | mismatch | unavailable | skipped`; current attempted checks are `unavailable` with
+`reason: "client-set-exhaustion-unprovable"` when the contract answers, or `reason: "rpc-error"` when it does
+not. `verifiedFields` is empty, all declared reputation fields remain unverified, and `snapshotComparable` is
+always false. `verified`/`partial`/`mismatch` are reserved for a future authoritative aggregate. Disabled or
+unrequested checks are `skipped`.
 
 ### `get_agent_card`
 
@@ -203,13 +215,13 @@ transport support, skills, or payment requirements. It is also available via the
 | Input | Type | Default | Notes |
 |---|---|---|---|
 | `agent` | id \| numeric string \| stellar handle | — | **Required** |
-| `verify` | boolean | `false` | Request the bounded average/count comparison; does not verify A2A or endpoints |
+| `verify` | boolean | `false` | Request the bounded contract probe; it does not currently verify reputation, A2A, or endpoints |
 
 **Output:** `{ card, conformance: "unverified-derived", note }`. Agent-authored name, description, URI,
 wallet, service candidates, metadata, declared capability flags, and trust claims live only under
 `card.selfDeclared`. The standard-shaped `url` is `null`, `skills[]` and capability extensions are empty,
 and no actionable x402 requirement is synthesized. `x-stellar8004.verified` can become true only for a future
-complete-field reputation status; healthy current `partial` results leave it false. It does not verify the
+complete-field reputation status; current fail-closed results leave it false. It does not verify the
 agent, endpoint, or A2A implementation.
 
 ### `get_registry_stats`
@@ -227,13 +239,18 @@ trustDistribution, metricDefinitions, coverage, limitations }`.
 a globally deduplicated count of clients, people, or accounts. `agentsWithMpp` is `null` only when the
 upstream response omits that newer field. `coverage` identifies exact-count vs sampled metrics, the 5,000
 agent cap, the unknown sample size, non-global distributions, and the lack of a transactional snapshot.
+`averageFeedbackScore` is reported in upstream protocol units; the MCP does not append `/100`. Every count,
+average, distribution entry, and network label is runtime-validated; malformed HTTP-success payloads fail as
+`UPSTREAM_ERROR` instead of being normalized into plausible data.
 
 ### `get_registry_health`
 
 Per-registry indexer liveness/staleness. No input.
 
 **Output:** `{ status, network, anyStale, indexer: { identity, reputation, validation } }` where each indexer
-is `{ lastLedger, stale }`. A stale reputation indexer explains a temporary `unavailable`/`mismatch`.
+is `{ lastLedger, stale }`. Only the literal upstream status `healthy`, matching configured network, safe
+non-negative ledger integers, and boolean stale flags are accepted; malformed success payloads become
+`UPSTREAM_ERROR`. Staleness weakens Explorer freshness but does not make a bounded contract read exhaustive.
 
 ---
 
@@ -245,7 +262,9 @@ is `{ lastLedger, stale }`. A stale reputation indexer explains a temporary `una
 {
   "id": 10,
   "rank": 1,                       // 1-based position
-  "score": 96,                     // score100 (0..100)
+  "score": 50,                     // score100 (0..100), versioned local declared-evidence heuristic
+  "rankVersion": "stellar-agent-mcp-declared-evidence-v1",
+  "evidenceStrength": 0.5199,       // uncalibrated index, not probability
   "stellarId": "stellar:mainnet:CBGP…6X35#10",
   "caip2Id":  "stellar:pubnet:CBGP…6X35#10",
   "network": "mainnet",
@@ -253,8 +272,8 @@ is `{ lastLedger, stale }`. A stale reputation indexer explains a temporary `una
   "wallet": null,                  // agent-level wallet may be empty; challenge payTo is still untrusted
   "capabilities": { "x402": true, "mpp": false, "hasServices": true, "supportedTrust": ["reputation"] },
   "supportedTrust": ["reputation"],
-  "scores": { "average": 96.75, "total": null, "feedbackCount": 4, "uniqueClients": 4 },
-  "flags": { "unrated": false, "newAgent": false, "lowConfidence": false, "verified": false, "verificationMismatch": false },
+  "scores": { "average": 96.75, "total": null, "feedbackCount": 8, "uniqueClients": 4 },
+  "flags": { "unrated": false, "newAgent": false, "lowEvidence": false, "lowConfidence": false, "verified": false, "verificationMismatch": false },
   "breakdown": { /* full RankResult — present when includeBreakdown (rank_agent, leaderboard) */ },
   "verification": { /* VerificationResult — present for checked rows */ },
   "selfDeclared": {                // UNTRUSTED, labeled
@@ -270,25 +289,24 @@ is `{ lastLedger, stale }`. A stale reputation indexer explains a temporary `una
 
 ```jsonc
 {
-  "status": "partial",             // verified (reserved) | partial | mismatch | unavailable | skipped
-  "declared": { "average": 96.75, "feedbackCount": 4, "uniqueClients": 4 },
-  "verified": { "average": 96, "count": 4, "uniqueClients": null },   // legacy field name; bounded chain observation
-  "deltas":   { "average": 0, "count": 0, "uniqueClients": null },
-  "verifiedFields": ["average", "feedbackCount"],
-  "unverifiedFields": ["uniqueClients"],
+  "status": "unavailable",         // current reachable-probe result
+  "declared": { "average": 96.75, "feedbackCount": 8, "uniqueClients": 4 },
+  "reason": "client-set-exhaustion-unprovable",
+  "verifiedFields": [],
+  "unverifiedFields": ["average", "feedbackCount", "uniqueClients"],
   "snapshotComparable": false,
+  "limitations": ["…bounded read cannot prove exhaustive client history…"],
   "checkedAt": "2026-07-23T00:00:00.000Z"
 }
 ```
 
-`verifiedFields` is also a retained schema name: it identifies the two compared fields, not synchronized or
-complete truth. `uniqueClients` is copied only under `declared`, never into the chain observation, and the
-always-false `snapshotComparable` prevents a matching pair of reads from being presented as snapshot parity.
+The optional legacy `verified` and `deltas` objects are omitted because no comparison is made. Explorer values
+remain only under `declared`; `reason`, field scopes, and limitations explain exactly why.
 
 ### `AgentProfile` (from `get_agent_profile`)
 
 Superset of a `RankedAgent`: adds `agentUri`, `verified` (mirror of `verification.status === "verified"`;
-therefore false for current healthy `partial` results),
+therefore false for current fail-closed results),
 `rank` (full `RankResult`), `createdAt`, `txHash`, `resolveStatus`, and the same labeled `selfDeclared`
 block. See [architecture.md](architecture.md) for the join and the ranking formula.
 
@@ -305,7 +323,7 @@ with a **stable** `code`:
 | `RATE_LIMITED` | Explorer rate-limited the request | `retryAfterMs` |
 | `NOT_FOUND` | Agent / resource does not exist | — |
 | `BAD_REQUEST` | Invalid argument that passed zod but failed a domain check | — |
-| `UPSTREAM_ERROR` | Explorer/RPC returned an error status | `detail: "status=…"` |
+| `UPSTREAM_ERROR` | Explorer/RPC error, scope mismatch, or malformed HTTP-success payload | status/scope/payload detail |
 | `INTERNAL` | Anything else | — |
 
 Zod input-validation errors are handled by the MCP SDK **before** the handler runs and are not mapped here.
@@ -324,10 +342,10 @@ free text appears only inside a clearly labeled, sanitized "self-declared (unver
 | `stellar8004://registry` | static | contracts + `/stats` + `/health` snapshot |
 | `stellar8004://leaderboard` | static | top-20 agents in a bounded scan, client-side 3-axis rank + coverage (declared-only) |
 | `stellar8004://health` | static | per-registry indexer staleness |
-| `stellar8004://agent/{id}` | template | full `AgentProfile` (identity + declared/bounded-chain evidence + rank) |
+| `stellar8004://agent/{id}` | template | full `AgentProfile` (identity + declared reputation + fail-closed probe status + rank) |
 | `stellar8004://agent/{id}/card` | template | Unverified derived A2A-shaped projection; self-declared endpoint candidates are not promoted |
 | `stellar8004://agent/{id}/feedback` | template | on-chain reviews (typed facts + labeled self-declared tags) |
-| `stellar8004://agent/{id}/reputation` | template | bounded declared-vs-chain average/count diff + limitations |
+| `stellar8004://agent/{id}/reputation` | template | declared reputation + unavailable/skipped probe status, reason, and limitations |
 | `stellar8004://owner/{address}` | template | current owner API page + explicit continuation coverage |
 
 The resource set is fixed at construction, so `resources.listChanged` is deliberately **not** declared — this
@@ -345,9 +363,9 @@ interpolation.
 
 | Prompt | Arguments | Instructs |
 |---|---|---|
-| `find-and-vet-agent` *(flagship)* | `task*`, `budget?`, `require_x402?`, `min_score?` | discover → profile + verify + feedback → recommend exactly one with its `stellar:…#id` |
-| `vet-agent` | `agent*` | single-agent trust memo (declared vs bounded chain evidence, review themes, freshness, red flags) |
-| `compare-agents` | `agent_a*`, `agent_b*`, `agent_c?` | side-by-side table across declared ranking axes and bounded evidence + a recommendation |
+| `find-and-vet-agent` *(flagship)* | `task*`, `budget?`, `require_x402?`, `min_explorer_score?` | discover → profile + evidence-limit check + feedback → recommend exactly one candidate with caveats |
+| `vet-agent` | `agent*` | single-agent evidence-limit memo (declared data, probe status, review themes, freshness, red flags) |
+| `compare-agents` | `agent_a*`, `agent_b*`, `agent_c?` | side-by-side table across declared ranking axes and fail-closed evidence status + a recommendation |
 | `prepare-x402-call` | `agent*`, `task?` | lay out the exact x402 flow (fetch → 402 → sign → retry) and **STOP before signing** |
 | `explore-registry` | `focus?` | pull the `registry` + `leaderboard` + `health` resources and summarize registry state |
 

@@ -1,12 +1,22 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const PRODUCTION_ORIGIN = "https://mcp.stellar8004.com";
 const PROTOCOL_VERSION = "2025-11-25";
+const SERVER_NAME = "stellar-agent-mcp";
+const packageMetadata = JSON.parse(
+  readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+);
+export const EXPECTED_SERVER_VERSION = packageMetadata.version;
 
 function fail(message) {
   throw new Error(message);
+}
+
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function readArgs(argv) {
@@ -55,6 +65,7 @@ async function responsePayload(response) {
 async function rpc(origin, versionId, body, sessionId) {
   const headers = new Headers({
     accept: "application/json, text/event-stream",
+    "cache-control": "no-cache",
     "content-type": "application/json",
     "mcp-protocol-version": PROTOCOL_VERSION,
     "cloudflare-workers-version-overrides": overrideHeader(versionId),
@@ -69,7 +80,55 @@ async function rpc(origin, versionId, body, sessionId) {
   if (!response.ok) fail(`MCP request failed with HTTP ${response.status}`);
   const payload = await responsePayload(response);
   if (payload?.error) fail(`MCP error ${payload.error.code}: ${payload.error.message}`);
+  if (!isRecord(payload) || payload.jsonrpc !== "2.0" || payload.id !== body.id) {
+    fail("MCP response did not match the JSON-RPC request id/version");
+  }
   return { payload, sessionId: response.headers.get("mcp-session-id") ?? sessionId };
+}
+
+function assertInitializeResult(payload) {
+  const result = payload.result;
+  if (!isRecord(result)) fail("initialize returned no result object");
+  if (result.protocolVersion !== PROTOCOL_VERSION) {
+    fail(`initialize protocolVersion must be exactly ${PROTOCOL_VERSION}`);
+  }
+  if (!isRecord(result.serverInfo)) fail("initialize returned no serverInfo object");
+  if (result.serverInfo.name !== SERVER_NAME) {
+    fail(`initialize serverInfo.name must be exactly ${SERVER_NAME}`);
+  }
+  if (result.serverInfo.version !== EXPECTED_SERVER_VERSION) {
+    fail(`initialize serverInfo.version must be exactly ${EXPECTED_SERVER_VERSION}`);
+  }
+  if (!isRecord(result.capabilities)) fail("initialize returned no capabilities object");
+  for (const name of ["tools", "resources", "prompts"]) {
+    const capability = result.capabilities[name];
+    if (!isRecord(capability) || capability.listChanged !== false) {
+      fail(`initialize capability ${name}.listChanged must be exactly false`);
+    }
+  }
+}
+
+function assertFreshRegistryHealth(structuredHealth) {
+  if (
+    !isRecord(structuredHealth) ||
+    structuredHealth.status !== "healthy" ||
+    structuredHealth.network !== "mainnet" ||
+    structuredHealth.anyStale !== false ||
+    !isRecord(structuredHealth.indexer)
+  ) {
+    fail("get_registry_health returned invalid or stale structured health data");
+  }
+  for (const name of ["identity", "reputation", "validation"]) {
+    const indexer = structuredHealth.indexer[name];
+    if (
+      !isRecord(indexer) ||
+      !Number.isSafeInteger(indexer.lastLedger) ||
+      indexer.lastLedger <= 0 ||
+      indexer.stale !== false
+    ) {
+      fail(`get_registry_health returned invalid or stale ${name} indexer data`);
+    }
+  }
 }
 
 export async function runCanary(options) {
@@ -99,6 +158,7 @@ export async function runCanary(options) {
       clientInfo: { name: `stellar-agent-mcp-canary-${options.label}`, version: "1.0.0" },
     },
   });
+  assertInitializeResult(initialized.payload);
   const toolCall = await rpc(
     options.origin,
     options.versionId,
@@ -110,7 +170,14 @@ export async function runCanary(options) {
     },
     initialized.sessionId,
   );
-  if (!toolCall.payload?.result) fail("get_registry_health returned no result");
+  const result = toolCall.payload?.result;
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    fail("get_registry_health returned no result");
+  }
+  if (result.isError === true || result.error != null) {
+    fail("get_registry_health returned a tool-level error");
+  }
+  assertFreshRegistryHealth(result.structuredContent);
 
   return {
     ok: true,
@@ -121,7 +188,7 @@ export async function runCanary(options) {
     checks: {
       versionOverride: true,
       shallowHealth: true,
-      mcpInitialize: true,
+      mcpIdentityAndCapabilities: true,
       explorerServiceBindingPath: true,
       originalCallerIdentity: "requires-upstream-log-comparison-with-second-physical-client",
     },
