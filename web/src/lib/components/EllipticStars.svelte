@@ -11,11 +11,11 @@
 	let smoothMouse = { x: -1000, y: -1000 };
 	let animId: number;
 
-	const SPACING = 44;
-	const GLOW_RADIUS = 140;
+	const SPACING = 52;
+	const GLOW_RADIUS = 120;
 	const GLOW_RADIUS_SQ = GLOW_RADIUS * GLOW_RADIUS;
-	const BASE_OPACITY = 0.06;
-	const MAX_OPACITY = 0.35;
+	const BASE_OPACITY = 0.025;
+	const MAX_OPACITY = 0.12;
 	const FOLLOW_LERP = 0.1;
 	const T1 = 0.09; // 0.3^2
 	const T2 = 0.36; // 0.6^2
