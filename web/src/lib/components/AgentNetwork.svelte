@@ -26,9 +26,6 @@
 	};
 	type Edge = { a: Node; b: Node; el: SVGLineElement | null };
 
-	let nodes: Node[] = [];
-	let edges: Edge[] = [];
-
 	function isoX(col: number, row: number) {
 		return (col - row) * TILE * ISO_X;
 	}
@@ -37,33 +34,38 @@
 	}
 
 	function build() {
-		nodes = [];
-		edges = [];
+		const builtNodes: Node[] = [];
+		const builtEdges: Edge[] = [];
 		for (let row = 0; row < ROWS; row++) {
 			for (let col = 0; col < COLS; col++) {
-				const r = 1.8 + Math.random() * 2.2;
-				nodes.push({
+				// Keep SSR and hydration byte-stable. Math.random() here makes the
+				// server and browser render different SVG attributes.
+				const radiusStep = (col * 17 + row * 31) % 11;
+				const opacityStep = (col * 7 + row * 11) % 5;
+				builtNodes.push({
 					ix: col,
 					iy: row,
 					sx: isoX(col, row),
 					sy: isoY(col, row),
-					r,
+					r: 1.8 + radiusStep * 0.2,
 					el: null,
-					baseOpacity: 0.12 + Math.random() * 0.08
+					baseOpacity: 0.12 + opacityStep * 0.02
 				});
 			}
 		}
-		for (let i = 0; i < nodes.length; i++) {
-			const n = nodes[i];
-			const right = nodes.find((m) => m.ix === n.ix + 1 && m.iy === n.iy);
-			const down = nodes.find((m) => m.ix === n.ix && m.iy === n.iy + 1);
-			if (right) edges.push({ a: n, b: right, el: null });
-			if (down) edges.push({ a: n, b: down, el: null });
+		for (let i = 0; i < builtNodes.length; i++) {
+			const n = builtNodes[i];
+			const right = builtNodes.find((m) => m.ix === n.ix + 1 && m.iy === n.iy);
+			const down = builtNodes.find((m) => m.ix === n.ix && m.iy === n.iy + 1);
+			if (right) builtEdges.push({ a: n, b: right, el: null });
+			if (down) builtEdges.push({ a: n, b: down, el: null });
 		}
+
+		return { nodes: builtNodes, edges: builtEdges };
 	}
 
-	// Pre-build for SSR render
-	build();
+	// Pre-build deterministically so SSR and hydration emit identical SVG.
+	const { nodes, edges } = build();
 
 	function tick() {
 		if (!svg) {
@@ -131,15 +133,14 @@
 		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 		if (!svg) return;
 
-		// Capture element refs
-		nodes = nodes.map((n, i) => ({
-			...n,
-			el: svg?.querySelector(`[data-node="${i}"]`) ?? null
-		}));
-		edges = edges.map((e, i) => ({
-			...e,
-			el: svg?.querySelector(`[data-edge="${i}"]`) ?? null
-		}));
+		// These refs are animation-only state; mutating them avoids a redundant
+		// template update after hydration.
+		for (let i = 0; i < nodes.length; i++) {
+			nodes[i].el = svg.querySelector(`[data-node="${i}"]`);
+		}
+		for (let i = 0; i < edges.length; i++) {
+			edges[i].el = svg.querySelector(`[data-edge="${i}"]`);
+		}
 
 		window.addEventListener('mousemove', onMove, { passive: true });
 
@@ -152,7 +153,7 @@
 
 <svg
 	bind:this={svg}
-	class="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+	class="pointer-events-none absolute inset-0 h-full w-full"
 	viewBox="-260 -160 520 320"
 	preserveAspectRatio="xMidYMid slice"
 	aria-hidden="true"
