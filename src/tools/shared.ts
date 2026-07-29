@@ -535,15 +535,19 @@ export interface FeedbackWindow {
   coverage: {
     windowComplete: boolean;
     paginationExhausted: boolean;
+    /** False for offset windows assembled from more than one HTTP response. */
+    snapshotConsistent: boolean;
     pagesScanned: number;
     hasMore?: boolean;
   };
 }
 
 /**
- * Build a stable caller-facing page over the Explorer's fixed-size upstream
+ * Build a bounded caller-facing page over the Explorer's fixed-size upstream
  * pages. Revocation filtering happens before the local offset, so page=2,
- * limit=10 means visible rows 11..20 rather than upstream rows 21..30.
+ * limit=10 means visible rows 11..20 rather than upstream rows 21..30. The
+ * upstream uses offset pagination without a revision cursor, so a multi-page
+ * window is explicitly marked snapshot-inconsistent.
  */
 export async function collectFeedbackWindow(
   deps: ToolDeps,
@@ -583,11 +587,10 @@ export async function collectFeedbackWindow(
       visibleSeen++;
     }
 
-    if (rows.length >= options.limit) break;
     if (hasMore === false || batch.length === 0) {
       paginationExhausted = true;
-      break;
     }
+    if (rows.length >= options.limit || paginationExhausted) break;
     // Without an explicit continuation signal, do not speculate another page.
     if (hasMore === undefined) break;
   }
@@ -598,6 +601,7 @@ export async function collectFeedbackWindow(
     coverage: {
       windowComplete: rows.length >= options.limit || paginationExhausted,
       paginationExhausted,
+      snapshotConsistent: pagesScanned === 1,
       pagesScanned,
       ...(hasMore !== undefined ? { hasMore } : {}),
     },

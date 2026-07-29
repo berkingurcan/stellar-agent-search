@@ -60,7 +60,7 @@ describe("verifyAgainst: unrated agent is never 'verified' (rep-#4)", () => {
 });
 
 describe("verifyAgainst: rated agent (rep sanity)", () => {
-  it("preserves the real chain-read time when a verification cache entry is reused", async () => {
+  it("reuses a successful chain read for less than 60s, then refreshes it", async () => {
     let now = Date.parse("2026-07-29T12:00:00.000Z");
     const clock: Clock = {
       now: () => now,
@@ -71,20 +71,23 @@ describe("verifyAgainst: rated agent (rep sanity)", () => {
     const first = new ReputationVerifier(cfg, { cache, clock, client: fakeClient(C(4), 90) });
 
     const initial = await first.verifyAgainst(70, declared);
-    now += 5 * 60_000;
+    now += 59_000;
     const cached = await first.verifyAgainst(70, declared);
+    now += 1_000;
+    const refreshed = await first.verifyAgainst(70, declared);
 
     expect(initial.checkedAt).toBe("2026-07-29T12:00:00.000Z");
     expect(cached.checkedAt).toBe(initial.checkedAt);
+    expect(refreshed.checkedAt).toBe("2026-07-29T12:01:00.000Z");
   });
 
   it("shares actor-neutral Soroban results across request-scoped verifiers", async () => {
     let firstCalls = 0;
     let secondCalls = 0;
     const counted = (counter: () => void, avg: number): ReputationClient => ({
-      get_clients_paginated: async () => {
+      get_clients_paginated: async ({ start }: { start: number }) => {
         counter();
-        return { result: C(4) };
+        return { result: start === 0 ? C(4) : [] };
       },
       get_summary: async () => {
         counter();
@@ -108,7 +111,7 @@ describe("verifyAgainst: rated agent (rep sanity)", () => {
 
     expect((await first.verify(77))?.average).toBe(91);
     expect((await second.verify(77))?.average).toBe(91);
-    expect(firstCalls).toBe(2);
+    expect(firstCalls).toBe(3);
     expect(secondCalls).toBe(0);
   });
 
@@ -120,6 +123,8 @@ describe("verifyAgainst: rated agent (rep sanity)", () => {
     expect(res.verifiedFields).toEqual(["average", "feedbackCount"]);
     expect(res.unverifiedFields).toEqual(["uniqueClients"]);
     expect(res.verified?.average).toBe(90);
+    expect(res.snapshotComparable).toBe(false);
+    expect(res.limitations.join(" ")).toMatch(/do not share a common revision/i);
   });
 
   it("declared diverges from on-chain beyond tolerance → 'mismatch'", async () => {
@@ -127,6 +132,20 @@ describe("verifyAgainst: rated agent (rep sanity)", () => {
     const declared: DeclaredReputation = { average: 90, feedbackCount: 8, uniqueClients: 4 };
     const res = await v.verifyAgainst(4, declared);
     expect(res.status).toBe("mismatch");
+    expect(res.reason).toBe("declared-onchain-diff-unversioned-snapshots");
+    expect(res.snapshotComparable).toBe(false);
+    expect(res.limitations.join(" ")).toMatch(/not proof.*manipulation/i);
+  });
+
+  it("treats a one-row feedback-count delta as a difference, not parity", async () => {
+    const v = new ReputationVerifier(cfg, { client: fakeClient(C(4), 90, 7) });
+    const declared: DeclaredReputation = { average: 90, feedbackCount: 8, uniqueClients: 4 };
+    const res = await v.verifyAgainst(41, declared);
+
+    expect(res.status).toBe("mismatch");
+    expect(res.deltas?.count).toBe(1);
+    expect(res.reason).toBe("declared-onchain-diff-unversioned-snapshots");
+    expect(res.snapshotComparable).toBe(false);
   });
 
   it("does not verify an inflated declared feedback volume", async () => {
@@ -234,7 +253,11 @@ describe("probe(): a failed read is distinguishable from an unrated agent", () =
       10,
       { average: 96, feedbackCount: 4, uniqueClients: 4 },
     );
-    expect(result).toMatchObject({ status: "skipped", reason: "disabled" });
+    expect(result).toMatchObject({
+      status: "skipped",
+      reason: "disabled",
+      snapshotComparable: false,
+    });
   });
 
   it("accepts exactly five clients without exceeding the contract cap", async () => {
@@ -294,6 +317,26 @@ describe("probe(): a failed read is distinguishable from an unrated agent", () =
     } as unknown as ReputationClient;
     const p = await new ReputationVerifier(cfg, { client }).probe(13);
     expect(p).toEqual({ ok: false, reason: "truncated" });
+  });
+
+  it("probes offset six even when expired storage keys compact the first vector", async () => {
+    let summaryCalls = 0;
+    const client = {
+      get_clients_paginated: async ({ start }: { start: number }) => ({
+        // Five returned addresses do not prove indices 0..5 were complete: the
+        // contract skips missing ClientAtIndex keys when building this vector.
+        result: start === 0 ? C(5) : start === 6 ? ["GLATERCLIENT"] : [],
+      }),
+      get_summary: async () => {
+        summaryCalls++;
+        throw new Error("must not summarize a client set with a later storage index");
+      },
+    } as unknown as ReputationClient;
+
+    const p = await new ReputationVerifier(cfg, { client }).probe(16);
+
+    expect(p).toEqual({ ok: false, reason: "truncated" });
+    expect(summaryCalls).toBe(0);
   });
 });
 

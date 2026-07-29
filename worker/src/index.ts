@@ -56,7 +56,14 @@ const PREFLIGHT_HEADERS = new Set([
   "mcp-protocol-version",
   "mcp-session-id",
 ]);
-const HEAVY_TOOLS = new Set(["rank_agent", "list_services", "leaderboard"]);
+const ALWAYS_HEAVY_TOOLS = new Set([
+  "find_agent",
+  "rank_agent",
+  "list_services",
+  "leaderboard",
+  "get_agent_feedback",
+  "verify_reputation",
+]);
 
 export interface ServiceBinding {
   fetch(request: Request): Promise<Response>;
@@ -499,17 +506,37 @@ export function estimateUpstreamCost(parsedBody: unknown): number {
   return parsedBody.reduce((sum, item) => sum + messageCost(item), 0);
 }
 
-function heavyToolCallCount(parsedBody: unknown): number {
-  const messages = Array.isArray(parsedBody) ? parsedBody : [parsedBody];
-  let count = 0;
-  for (const message of messages) {
-    if (!isRecord(message) || Reflect.get(message, "method") !== "tools/call") continue;
-    const params = Reflect.get(message, "params");
-    if (!isRecord(params)) continue;
-    const name = Reflect.get(params, "name");
-    if (typeof name === "string" && HEAVY_TOOLS.has(name)) count++;
+function isHeavyToolCall(message: unknown): boolean {
+  if (!isRecord(message) || Reflect.get(message, "method") !== "tools/call") return false;
+  const params = Reflect.get(message, "params");
+  if (!isRecord(params)) return false;
+  const name = Reflect.get(params, "name");
+  if (typeof name !== "string") return false;
+  if (ALWAYS_HEAVY_TOOLS.has(name)) return true;
+
+  const argumentsValue = Reflect.get(params, "arguments");
+  const args = isRecord(argumentsValue) ? argumentsValue : {};
+  switch (name) {
+    case "get_agent_profile":
+      // Default profile work verifies on-chain and scans feedback. It is light
+      // only when the caller explicitly disables both independent branches.
+      return (
+        booleanArgument(args, "verify", true) ||
+        numberArgument(args, "feedbackLimit", 5, 0, 50) > 0
+      );
+    case "get_agent_card":
+      return booleanArgument(args, "verify", false);
+    case "list_agents":
+    case "get_agents_by_owner":
+      return booleanArgument(args, "verify", false);
+    default:
+      return false;
   }
-  return count;
+}
+
+export function heavyToolCallCount(parsedBody: unknown): number {
+  const messages = Array.isArray(parsedBody) ? parsedBody : [parsedBody];
+  return messages.reduce((count, message) => count + (isHeavyToolCall(message) ? 1 : 0), 0);
 }
 
 function trustedConnectingIp(request: Request): string {
@@ -788,10 +815,15 @@ async function handleMcp(
   const heavyCalls = heavyToolCallCount(parsed.value);
   if (heavyCalls > 1) {
     return withCors(
-      jsonRpcError(413, -32012, "A JSON-RPC batch may contain at most one fan-out tool call.", {
-        heavyCalls,
-        maxHeavyCalls: 1,
-      }),
+      jsonRpcError(
+        413,
+        -32012,
+        "A JSON-RPC batch may contain at most one fan-out or on-chain verification tool call.",
+        {
+          heavyCalls,
+          maxHeavyCalls: 1,
+        },
+      ),
       origin,
     );
   }

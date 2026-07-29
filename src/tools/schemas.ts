@@ -54,6 +54,8 @@ export const zVerification = z
   .object({
     status: z.enum(["verified", "partial", "mismatch", "unavailable", "skipped"]),
     declared: z.record(z.string(), z.any()),
+    snapshotComparable: z.literal(false),
+    limitations: z.array(z.string()),
     verified: z.record(z.string(), z.any()).optional(),
     deltas: z.record(z.string(), z.any()).optional(),
     checkedAt: z.string(),

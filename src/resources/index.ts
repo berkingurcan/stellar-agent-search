@@ -48,6 +48,7 @@ import {
   buildStellarId,
   buildCaip2Id,
   isValidOwnerAddress,
+  MAX_AGENT_ID,
   validWalletOrNull,
 } from "../lib/identifier.js";
 import {
@@ -211,11 +212,17 @@ function dual(uri: string, json: unknown, markdown: string) {
   };
 }
 
-/** Coerce a possibly-string/nullable feedback value to a finite number or null. */
-function numOrNull(v: unknown): number | null {
+/**
+ * Preserve the contract's signed i128 feedback integer without IEEE-754 loss.
+ * SDK responses intentionally allow `number | string | null`: safe integers
+ * remain numbers, while larger canonical decimal integers remain strings.
+ */
+export function feedbackValueOrNull(v: unknown): number | string | null {
   if (v == null) return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+  if (typeof v === "number") return Number.isSafeInteger(v) ? v : null;
+  if (typeof v === "bigint") return v.toString();
+  if (typeof v === "string" && /^-?\d+$/.test(v)) return v;
+  return null;
 }
 
 /**
@@ -494,8 +501,25 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
       const id = parseIdVar(variables["id"]);
       const res = await explorer.getFeedback(id, { page: 1 });
       const items = res.data ?? [];
-      const json = buildFeedbackJson(id, items);
-      const md = renderFeedbackMarkdown(id, items);
+      const pagination = res.meta?.pagination;
+      const hasMore =
+        typeof pagination?.hasMore === "boolean" ? pagination.hasMore : undefined;
+      const coverage: DiscoveryCoverage = {
+        coverageComplete: hasMore === false,
+        paginationExhausted: hasMore === false,
+        snapshotConsistent: true,
+        pagesScanned: 1,
+        recordsScanned: items.length,
+        ...(hasMore !== undefined ? { hasMore } : {}),
+        ...(hasMore === undefined ? { limitations: ["pagination-metadata-unavailable"] } : {}),
+      };
+      const json = buildFeedbackJson(id, items, coverage, {
+        page: pagination?.page ?? 1,
+        limit: pagination?.limit ?? items.length,
+        total: Number.isSafeInteger(pagination?.total) ? pagination!.total : null,
+        hasMore: hasMore ?? null,
+      });
+      const md = renderFeedbackMarkdown(id, items, coverage);
       return dual(uri.href, json, md);
     },
   );
@@ -510,7 +534,7 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
     {
       title: "Agent Reputation (declared vs on-chain)",
       description:
-        "Declared indexer reputation re-derived on-chain via get_summary; status verified|mismatch|unavailable|skipped.",
+        "Declared indexer reputation compared with a bounded on-chain read; current healthy checks are partial because active unique-client breadth and a common snapshot revision are unavailable.",
       mimeType: JSON_MIME,
       annotations: { audience: ["user", "assistant"] },
     },
@@ -711,15 +735,22 @@ function makeIdCompleter(deps: ResourceDeps) {
 // Feedback rendering (typed value/client kept; free-text tags/endpoints labeled)
 // ---------------------------------------------------------------------------
 
-function buildFeedbackJson(agentId: number, items: FeedbackResponse[]) {
+export function buildFeedbackJson(
+  agentId: number,
+  items: FeedbackResponse[],
+  coverage: DiscoveryCoverage,
+  pagination: { page: number; limit: number; total: number | null; hasMore: boolean | null },
+) {
   return {
     agentId,
     count: items.length,
+    pagination,
+    coverage,
     note: "value/valueDecimals/clientAddress/isRevoked are typed on-chain facts; tag1/tag2/endpoint/feedbackUri are self-declared free text.",
     feedback: items.map((f) => ({
       feedbackIndex: f.feedbackIndex,
       clientAddress: f.clientAddress,
-      value: numOrNull(f.value),
+      value: feedbackValueOrNull(f.value),
       valueDecimals: f.valueDecimals ?? 0,
       isRevoked: Boolean(f.isRevoked),
       createdAt: f.createdAt,
@@ -736,13 +767,17 @@ function buildFeedbackJson(agentId: number, items: FeedbackResponse[]) {
   };
 }
 
-function renderFeedbackMarkdown(agentId: number, items: FeedbackResponse[]): string {
-  const header = serverText`## Feedback — Agent #${agentId} (${items.length} shown)`;
+export function renderFeedbackMarkdown(
+  agentId: number,
+  items: FeedbackResponse[],
+  coverage: DiscoveryCoverage,
+): string {
+  const header = serverText`## Feedback — Agent #${agentId} (${items.length} shown; coverageComplete=${coverage.coverageComplete}; hasMore=${safe(coverage.hasMore === undefined ? "unknown" : String(coverage.hasMore))})`;
   if (items.length === 0) return `${header}\n- (no feedback)\n`;
 
   const rows = items.map((f) => {
-    const val = numOrNull(f.value);
-    const line = serverText`- #${f.feedbackIndex} · value=${val} · client \`${safe(f.clientAddress)}\` · revoked=${Boolean(f.isRevoked)} · responses=${f.responses?.length ?? 0} · ${safe(f.createdAt)}`;
+    const val = feedbackValueOrNull(f.value);
+    const line = serverText`- #${f.feedbackIndex} · value=${safe(val == null ? "null" : String(val))} · client \`${safe(f.clientAddress)}\` · revoked=${Boolean(f.isRevoked)} · responses=${f.responses?.length ?? 0} · ${safe(f.createdAt)}`;
     const tags = selfDeclaredBlock([
       ["tag1", f.tag1 ?? null],
       ["tag2", f.tag2 ?? null],
@@ -763,15 +798,23 @@ function firstVar(v: string | string[] | undefined): string {
   return v ?? "";
 }
 
-function parseIdVar(v: string | string[] | undefined): number {
+export function parseIdVar(v: string | string[] | undefined): number {
   const raw = firstVar(v).trim();
   // Digit-only + safe-integer gate. Number() alone accepts "0x1f" (→31),
   // "1e3" (→1000) and "" (→0), silently fetching the wrong agent instead of
   // erroring on a malformed URI.
   if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
-    throw new Error(`Invalid agent id in resource URI: '${raw}' (expected a non-negative integer)`);
+    throw new Error(
+      `Invalid agent id in resource URI: '${raw}' (expected an unsigned 32-bit integer)`,
+    );
   }
-  return Number(raw);
+  const id = Number(raw);
+  if (id > MAX_AGENT_ID) {
+    throw new Error(
+      `Invalid agent id in resource URI: '${raw}' (expected an unsigned 32-bit integer)`,
+    );
+  }
+  return id;
 }
 
 function parseAddressVar(v: string | string[] | undefined): string {

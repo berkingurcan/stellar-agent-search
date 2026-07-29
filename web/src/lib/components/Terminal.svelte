@@ -55,7 +55,7 @@
 
 <figure class="m-0 overflow-hidden rounded-xl border border-border">
 	<!-- Prompt line: the exact command that produced the output below -->
-	<div class="flex items-center gap-2.5 border-b border-border bg-surface-raised px-3.5 py-2.5">
+	<div class="flex items-center gap-2.5 border-b border-border bg-surface px-3.5 py-2.5">
 		<span class="font-mono text-[10px] text-text-dim select-none">$</span>
 		<code class="min-w-0 flex-1 truncate font-mono text-[11px] text-text-muted">{command}</code>
 	</div>

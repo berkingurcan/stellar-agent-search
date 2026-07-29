@@ -152,6 +152,14 @@ export interface DeclaredReputation {
 export interface VerificationResult {
   status: VerificationStatus;
   declared: DeclaredReputation;
+  /**
+   * Always false for the current v1 integration: Explorer and Soroban do not
+   * expose a shared revision/ledger snapshot. Optional here only so consumers
+   * can still accept pre-0.1 fixtures; current server outputs always emit it.
+   */
+  snapshotComparable?: false;
+  /** Explicit caveats that bound what the comparison can establish. */
+  limitations?: string[];
   verified?: OnchainReputation;
   deltas?: { average: number; count: number; uniqueClients: number | null };
   /** Why verification was skipped/unavailable (never hidden behind a boolean). */

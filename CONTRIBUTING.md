@@ -121,8 +121,13 @@ Registry. Exact-version checks make a rerun resumable without treating an unrela
 registry record as ours.
 
 ```bash
-npm version patch    # or minor / major — updates package.json and tags
-git push --follow-tags
+npm version patch --no-git-tag-version  # or minor / major; do not tag yet
+# Update server.json (top-level + packages[0]) and skills/mcp/SKILL.md metadata.version.
+npm ci && npm run validate:release && npm run typecheck && npm test && npm run build
+git commit -am "chore: release vX.Y.Z"
+git tag vX.Y.Z
+git push origin main
+git push origin vX.Y.Z
 ```
 
 Keep `version` in sync across four hand-maintained places: `package.json`, `server.json` (both the top-level
@@ -136,29 +141,42 @@ The tag-driven path needs two things that only exist after a first publish:
 1. **The repository must be public.** npm provenance is generated from a public source, and the MCP Registry's
    GitHub OIDC login expects a public repository.
 2. **Reserve the name with a non-install-default bootstrap version.** Trusted Publisher configuration requires
-   the package to exist. In a disposable clean copy of the tagged source, change only `package.json` to `0.0.0`,
-   build and inspect the tarball, then publish it under a non-`latest` dist-tag:
+   the package to exist. Generate an inert `0.0.0` package outside the repository: it contains only
+   `package.json`, `README.md`, and `LICENSE`, while its `publishConfig` forces the non-`latest` `bootstrap`
+   dist-tag. Inspect and publish that placeholder, not a version-rewritten copy of the real runtime:
 
    ```bash
-   npm login
-   npm version 0.0.0 --no-git-tag-version
    npm ci
+   npm run validate:release
    npm run typecheck
    npm test
-   npm pack --dry-run
-   npm publish --access public --tag bootstrap
+   npm run build
+   bootstrap_dir="$(mktemp -d)"
+   node scripts/release/create-bootstrap-package.mjs "$bootstrap_dir"
+   npm pack --dry-run "$bootstrap_dir"
+   npm login
+   npm publish "$bootstrap_dir" --access public --tag bootstrap
+   npm view stellar-agent-mcp dist-tags --json
    ```
 
    Do not publish `0.1.0` manually: that release must come from OIDC so it has verifiable provenance.
 3. **Configure npm Trusted Publishing.** In the package settings, select GitHub Actions, repository
    `berkingurcan/stellar-agent-mcp`, and workflow filename **`publish.yml`** (the npm field takes the filename,
-   not `.github/workflows/publish.yml`). Restrict token publishing after the OIDC path succeeds.
+   not `.github/workflows/publish.yml`). Set environment name **`npm-production`** and allow `npm publish` only.
+   Restrict token publishing after the OIDC path succeeds.
 4. **Set the repository Actions variable `NPM_PACKAGE_OWNERS`.** Its comma-separated value must be the exact
    npm maintainer allowlist (usually the one account that performed the bootstrap). The workflow refuses both
    a missing variable and an unexpected extra owner.
+5. **Protect the GitHub `npm-production` environment.** Require a second reviewer, prevent self-review, allow
+   only selected tags matching `v*`, and disable administrator bypass. A YAML environment reference alone does
+   not create those rules; a solo maintainer needs a second trusted repository reviewer.
 
 Then create/push `v0.1.0` from a green commit already on `main`. The workflow publishes the exact tarball it
 tested, verifies its registry integrity and GitHub provenance, and only then attempts the MCP Registry record.
+After both registry records are independently readable, follow
+[`issues/P0-03-first-npm-publish.md`](issues/P0-03-first-npm-publish.md#3-verify-first-then-expose-onboarding):
+flip `web/src/lib/surface.ts`'s `PACKAGE_PUBLISHED` in a reviewed follow-up and remove the dated pre-release
+warnings. Keep persistent MCP launches exact-version pinned.
 
 ## Reporting security issues
 

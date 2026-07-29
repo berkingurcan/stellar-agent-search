@@ -23,7 +23,7 @@ import {
   VERIFY_TOP_K,
   type ToolDeps,
 } from "./shared.js";
-import { zRankedAgent } from "./schemas.js";
+import { zDiscoveryCoverage, zRankedAgent } from "./schemas.js";
 
 const inputShape = {
   x402: z.literal(true).optional(),
@@ -42,6 +42,13 @@ type Args = z.infer<z.ZodObject<typeof inputShape>>;
 const outputShape = {
   count: z.number(),
   page: z.number(),
+  pagination: z.object({
+    page: z.number().int().positive(),
+    limit: z.number().int().positive(),
+    total: z.number().int().nonnegative().nullable(),
+    hasMore: z.boolean().nullable(),
+  }),
+  coverage: zDiscoveryCoverage,
   agents: z.array(zRankedAgent),
 };
 
@@ -66,7 +73,10 @@ export function registerListAgents(server: McpServer, deps: ToolDeps): void {
       if (args.trust !== undefined) params.trust = canonicalTrust(args.trust);
       if (args.minScore !== undefined) params.minScore = args.minScore;
 
-      const agents = (await deps.explorer.getAgents(params)).data ?? [];
+      const response = await deps.explorer.getAgents(params);
+      const agents = response.data ?? [];
+      const pagination = response.meta?.pagination;
+      const hasMore = typeof pagination?.hasMore === "boolean" ? pagination.hasMore : undefined;
 
       const rows = await rankAndVerify(deps, agents, {
         weights: deps.config.weights,
@@ -80,6 +90,21 @@ export function registerListAgents(server: McpServer, deps: ToolDeps): void {
       return toolResult(summarizeRanked(rows), {
         count: rows.length,
         page: args.page,
+        pagination: {
+          page: pagination?.page ?? args.page,
+          limit: pagination?.limit ?? args.limit,
+          total: Number.isSafeInteger(pagination?.total) ? pagination!.total : null,
+          hasMore: hasMore ?? null,
+        },
+        coverage: {
+          coverageComplete: hasMore === false,
+          paginationExhausted: hasMore === false,
+          snapshotConsistent: true,
+          pagesScanned: 1,
+          recordsScanned: agents.length,
+          ...(hasMore !== undefined ? { hasMore } : {}),
+          ...(hasMore === undefined ? { limitations: ["pagination-metadata-unavailable"] } : {}),
+        },
         agents: rows,
       });
     }),

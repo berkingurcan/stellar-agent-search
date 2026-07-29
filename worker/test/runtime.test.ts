@@ -8,6 +8,7 @@ import {
   createExplorerBindingFetch,
   createWorker,
   estimateUpstreamCost,
+  heavyToolCallCount,
   type EdgeCache,
   type RateLimitBinding,
   type ServiceBinding,
@@ -168,6 +169,15 @@ const modernDiscoverBody = {
     },
   },
 };
+
+function toolCall(name: string, args: Record<string, unknown>, id: number): Record<string, unknown> {
+  return {
+    jsonrpc: "2.0",
+    id,
+    method: "tools/call",
+    params: { name, arguments: args },
+  };
+}
 
 describe("routing, Host, Origin, and CORS admission", () => {
   it("serves only exact /mcp and /healthz paths", async () => {
@@ -498,6 +508,85 @@ describe("method, body, JSON, batch, and upstream-cost admission", () => {
     const error = Reflect.get(payload, "error");
     const data = isRecord(error) ? Reflect.get(error, "data") : undefined;
     expect(isRecord(data) ? Reflect.get(data, "heavyCalls") : undefined).toBe(2);
+  });
+
+  it.each([
+    [
+      "two verify_reputation calls",
+      toolCall("verify_reputation", { agent: 7 }, 101),
+      toolCall("verify_reputation", { agent: 8 }, 102),
+    ],
+    [
+      "two default verified profiles",
+      toolCall("get_agent_profile", { agent: 7 }, 103),
+      toolCall("get_agent_profile", { agent: 8 }, 104),
+    ],
+    [
+      "two feedback-fan-out profiles with verification disabled",
+      toolCall("get_agent_profile", { agent: 7, verify: false, feedbackLimit: 1 }, 105),
+      toolCall("get_agent_profile", { agent: 8, verify: false, feedbackLimit: 1 }, 106),
+    ],
+    [
+      "two verified agent cards",
+      toolCall("get_agent_card", { agent: 7, verify: true }, 107),
+      toolCall("get_agent_card", { agent: 8, verify: true }, 108),
+    ],
+    [
+      "two verified agent lists",
+      toolCall("list_agents", { verify: true }, 109),
+      toolCall("list_agents", { verify: true }, 110),
+    ],
+    [
+      "two verified owner fleets",
+      toolCall(
+        "get_agents_by_owner",
+        { owner: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", verify: true },
+        111,
+      ),
+      toolCall(
+        "get_agents_by_owner",
+        { owner: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", verify: true },
+        112,
+      ),
+    ],
+  ])("rejects %s in one HTTP batch before dispatch", async (_label, first, second) => {
+    const binding = new ThrowingBinding();
+    const response = await createWorker({ cache: null }).fetch(
+      legacyRequest([first, second]),
+      workerEnv(binding),
+      new TestContext(),
+    );
+
+    expect(response.status).toBe(413);
+    const payload = await rpcPayload(response);
+    const error = Reflect.get(payload, "error");
+    const data = isRecord(error) ? Reflect.get(error, "data") : undefined;
+    expect(isRecord(error) ? Reflect.get(error, "code") : undefined).toBe(-32012);
+    expect(isRecord(data) ? Reflect.get(data, "heavyCalls") : undefined).toBe(2);
+    expect(binding.calls).toBe(0);
+  });
+
+  it("keeps explicitly non-verifying single-read variants light", () => {
+    const light = [
+      toolCall("get_agent_profile", { agent: 7, verify: false, feedbackLimit: 0 }, 121),
+      toolCall("get_agent_card", { agent: 7, verify: false }, 122),
+      toolCall("list_agents", { verify: false }, 123),
+      toolCall(
+        "get_agents_by_owner",
+        { owner: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", verify: false },
+        124,
+      ),
+    ];
+    expect(heavyToolCallCount(light)).toBe(0);
+
+    expect(
+      heavyToolCallCount([
+        toolCall("get_agent_profile", { agent: 7 }, 125),
+        toolCall("get_agent_card", { agent: 7, verify: true }, 126),
+        toolCall("list_agents", { verify: true }, 127),
+        toolCall("get_agents_by_owner", { owner: "owner", verify: true }, 128),
+      ]),
+    ).toBe(4);
   });
 
   it("admits one unknown modern request at, but not above, the safe budget", async () => {

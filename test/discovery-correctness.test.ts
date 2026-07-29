@@ -387,6 +387,8 @@ describe("tool discovery contracts", () => {
       recordsScanned: 4,
       hasMore: true,
       hydrationMissing: 0,
+      detailsHydrated: 2,
+      limitations: ["detail-hydration-unversioned"],
     });
 
     const listCalls = mock.calls.filter((url) => url.pathname === "/api/v1/agents");

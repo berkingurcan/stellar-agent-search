@@ -154,6 +154,12 @@ jobs:
           path: stellar-agent-mcp.cdx.json
           if-no-files-found: error
 
+      - name: Audit packed-consumer runtime graph
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP/sbom-consumer"
+          npm audit --omit=dev --audit-level=high
+
       # The name must first be reserved as 0.0.0 under the non-default
       # "bootstrap" dist-tag. If it is absent, OIDC cannot have been configured
       # yet; fail instead of attempting to publish an unowned package.

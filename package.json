@@ -1,7 +1,7 @@
 {
   "name": "stellar-agent-mcp",
   "version": "0.1.0",
-  "description": "Read-only MCP server + CLI to discover, rank, and inspect on-chain Stellar (stellar-8004) agents, with on-chain-verified reputation.",
+  "description": "Read-only MCP server and CLI for Stellar 8004 agent discovery, ranking, and bounded on-chain reputation checks.",
   "type": "module",
   "license": "MIT",
   "engines": {
