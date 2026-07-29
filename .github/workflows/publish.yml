@@ -7,6 +7,10 @@ on:
     tags:
       - 'v*'
 
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
   id-token: write
@@ -21,12 +25,18 @@ jobs:
   publish:
     name: npm + MCP Registry
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # This environment must be created in GitHub with a required reviewer,
+    # self-review disabled, admin bypass disabled, and selected tag pattern v*.
+    # The same name must be set on npm's Trusted Publisher configuration.
+    environment: npm-production
 
     steps:
       - name: Checkout complete release history
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -46,6 +56,10 @@ jobs:
           release_commit="$(git rev-list -n 1 "$GITHUB_REF_NAME")"
           if [[ -z "$release_commit" || "$(git rev-parse HEAD)" != "$release_commit" ]]; then
             echo "::error::Checkout does not resolve to the tagged release commit."
+            exit 1
+          fi
+          if [[ "$GITHUB_SHA" != "$release_commit" ]]; then
+            echo "::error::GitHub event SHA does not resolve to the tagged release commit."
             exit 1
           fi
           if ! git merge-base --is-ancestor "$release_commit" origin/main; then
@@ -123,7 +137,13 @@ jobs:
           mkdir -p "$consumer"
           cd "$consumer"
           npm init -y
-          npm install --ignore-scripts --save-exact "${{ steps.pack.outputs.path }}"
+          npm install --ignore-scripts --no-audit --no-fund --save-exact "${{ steps.pack.outputs.path }}"
+          expected_version="$(node -p "require('$GITHUB_WORKSPACE/package.json').version")"
+          actual_version="$(./node_modules/.bin/stellar-agent-mcp --version)"
+          if [[ "$actual_version" != "$expected_version" ]]; then
+            echo "::error::Packed CLI reported $actual_version, expected $expected_version."
+            exit 1
+          fi
           npm ls --all
           npm sbom --omit=dev --sbom-format cyclonedx > "$GITHUB_WORKSPACE/stellar-agent-mcp.cdx.json"
 
@@ -164,7 +184,9 @@ jobs:
 
       - name: Publish exact tarball to npm (provenance via OIDC)
         if: steps.npm-version.outputs.exists != 'true'
-        run: npm publish "${{ steps.pack.outputs.path }}" --access public
+        # The exact archive above was already validated. Suppressing lifecycle
+        # scripts here prevents npm from rebuilding a different artifact.
+        run: npm publish "${{ steps.pack.outputs.path }}" --ignore-scripts --access public
 
       - name: Verify npm artifact, owner path, and provenance
         shell: bash
