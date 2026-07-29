@@ -295,7 +295,8 @@ Validation `CBT6WWEVEPT2UFGFGVJJ7ELYGLQAGRYSVGDTGMCJTRWXOH27MWUO7UJG`; Soroban R
 - **Empty or unexpected results** → the default network is **mainnet**; check `STELLAR_NETWORK`. `find_agent` matches
   via `getAgents({search})` + client-side filtering (the explorer's raw substring `/search` is unreliable), so broaden
   the query wording if a specific capability isn't surfacing.
-- **`verification.status: "unavailable"`** → the Soroban RPC was unreachable; the rest of the response is still valid.
+- **`verification.status: "unavailable"`** → the RPC/read failed or the comparable client set exceeded the
+  current five-client summary cap; the rest of the response is still declared-only data.
   Registry staleness is observable via `stellar8004://health`.
 - **Server logs interleaved with output?** They shouldn't be: stdout carries only JSON-RPC; all logs go to stderr.
 

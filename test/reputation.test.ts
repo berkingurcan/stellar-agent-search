@@ -125,6 +125,8 @@ describe("verifyAgainst: rated agent (rep sanity)", () => {
     expect(res.verified?.average).toBe(90);
     expect(res.snapshotComparable).toBe(false);
     expect(res.limitations.join(" ")).toMatch(/do not share a common revision/i);
+    expect(res.limitations.join(" ")).toMatch(/cannot prove exhaustive client history/i);
+    expect(res.reason).toBe("bounded-average-count-agreement-unversioned-snapshots");
   });
 
   it("declared diverges from on-chain beyond tolerance → 'mismatch'", async () => {
@@ -334,6 +336,29 @@ describe("probe(): a failed read is distinguishable from an unrated agent", () =
     } as unknown as ReputationClient;
 
     const p = await new ReputationVerifier(cfg, { client }).probe(16);
+
+    expect(p).toEqual({ ok: false, reason: "truncated" });
+    expect(summaryCalls).toBe(0);
+  });
+
+  it("scans beyond a missing boundary key and refuses a later retained client", async () => {
+    let summaryCalls = 0;
+    const client = {
+      get_clients_paginated: async ({ start, limit }: { start: number; limit: number }) => ({
+        result:
+          start === 0
+            ? C(5)
+            : start === 6 && limit >= 2
+              ? ["GCLIENTATINDEX7"]
+              : [],
+      }),
+      get_summary: async () => {
+        summaryCalls++;
+        throw new Error("must not summarize after a later retained client is observed");
+      },
+    } as unknown as ReputationClient;
+
+    const p = await new ReputationVerifier(cfg, { client }).probe(17);
 
     expect(p).toEqual({ ok: false, reason: "truncated" });
     expect(summaryCalls).toBe(0);

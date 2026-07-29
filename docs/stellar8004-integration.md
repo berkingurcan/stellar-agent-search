@@ -3,6 +3,9 @@
 **Status:** proposed target contract; the current implementation still uses the bounded v1 path described
 below. Consumer tracking: [P3-13](../issues/P3-13-upstream-discovery-api-v2.md). Upstream proposal:
 [trionlabs/stellar-8004#18](https://github.com/trionlabs/stellar-8004/issues/18) (filed; not yet accepted).
+Related upstream gaps are the complete bounded reputation aggregate
+[#19](https://github.com/trionlabs/stellar-8004/issues/19) and SDK service-field preservation
+[#20](https://github.com/trionlabs/stellar-8004/issues/20); neither is implemented in the current consumer.
 
 This document defines the ownership and communication boundary between this MCP server and the canonical
 [`trionlabs/stellar-8004`](https://github.com/trionlabs/stellar-8004) indexer, database, Explorer API, and
@@ -100,7 +103,9 @@ pagination/freshness, and make a later indexer correction impossible to roll out
 
 `ExplorerService` calls `ExplorerClient` from `@trionlabs/stellar8004`; the default public base URL is
 `https://stellar8004.com`. The SDK supplies typed API errors, normalization, timeout/retry behavior, and
-`Retry-After` handling. The MCP adds only process-local TTL caching and keyed single-flight.
+`Retry-After` handling. The MCP adds only process-local TTL caching and keyed single-flight. The exact current
+pin is `0.0.11`; its service normalizer has the field-preservation defect documented below, so the MCP does
+not invent the missing fields or bypass the SDK to recover them.
 
 ```text
 local MCP process -> ExplorerClient -> https://stellar8004.com/api/v1/*
@@ -149,7 +154,7 @@ The current v1 integration is useful and intentionally honest, but not globally 
 | Read boundary | `ExplorerService` wraps the upstream `ExplorerClient`; there is no Supabase dependency |
 | Network | Mainnet by default; testnet requires an explicit Explorer URL rather than silently reading mainnet |
 | Filters | Structured `x402`, `mpp`, `hasServices`, `trust`, and `minScore` are sent to the v1 agent list |
-| Text | The MCP does stem-aware matching over fetched name, description, and service text because v1 search has known recall problems |
+| Text | The v1 list projection omits `services[]`, so the bounded first-pass stem match can use only fetched agent name/description; service text is not globally searchable today |
 | Pagination | v1 uses page/offset pagination; every MCP walk has a hard page cap |
 | Coverage | Only an explicit final `hasMore: false` makes a discovery scan complete; missing or true pagination remains incomplete |
 | Reliability | SDK timeout/retries/rate-limit handling plus process-local TTL cache and single-flight |
@@ -184,6 +189,23 @@ Two other v1 limits remain explicit:
   That contract/SDK work is tracked in
   [trionlabs/stellar-8004#19](https://github.com/trionlabs/stellar-8004/issues/19) and
   [P3-14](../issues/P3-14-upstream-reputation-aggregate-v2.md).
+
+### SDK 0.0.11 service-field preservation gap
+
+The live Explorer API can serialize a service with `name`, `endpoint`, `version`, `description`, and
+`inputExample`, and the published TypeScript declaration exposes the last two as optional. However,
+`@trionlabs/stellar8004@0.0.11` rebuilds each service at runtime with only `name`, `endpoint`, and `version`.
+Consequently, even a detail hydration through `ExplorerClient.getAgent()` loses `description` and
+`inputExample` before this MCP receives the record. Combined with the v1 list projection omitting
+`services[]`, current discovery cannot honestly claim service-text search, and `list_services` can expose only
+the normalized basics as self-declared endpoint candidates.
+
+The MCP MUST NOT query Supabase, call a private API, or hand-parse a second response path to reconstruct those
+fields. The fix belongs in the upstream SDK and is tracked by
+[trionlabs/stellar-8004#20](https://github.com/trionlabs/stellar-8004/issues/20). Acceptance requires a new
+exact SDK release whose runtime output matches its declaration, fixtures proving both optional fields survive
+an API-shaped detail response, and backward-compatible normalization when either field is absent. Only after
+that release may this repo bump its exact pin and remove this limitation.
 
 ## Proposed Explorer discovery API v2
 
@@ -469,12 +491,15 @@ rate, v1 fallback rate, and public-vs-binding shadow mismatches.
 | Supabase migration/view/RPC, indexer watermark/integrity state, `/api/v2/discovery`, Worker allowlist | `trionlabs/stellar-8004` |
 | SDK v2 types/method, cursor/error normalization, injected-fetch parity tests | `trionlabs/stellar-8004` |
 | Constant-cost complete reputation aggregate + generated bindings | `trionlabs/stellar-8004` ([#19](https://github.com/trionlabs/stellar-8004/issues/19)) |
+| Preserve service `description` / `inputExample` in a post-0.0.11 SDK release | `trionlabs/stellar-8004` ([#20](https://github.com/trionlabs/stellar-8004/issues/20)) |
 | MCP v2 adapter, coverage mapping, v1 fallback label, ranking/verification integration | this repo |
 | Remote MCP Worker and Service Binding wiring | this repo, with the upstream Worker binding configured by its owner |
 
-No upstream code is vendored here. Until [upstream issue #18](https://github.com/trionlabs/stellar-8004/issues/18)
-or a resulting ADR is accepted, the full consumer acceptance contract is tracked in
-[P3-13](../issues/P3-13-upstream-discovery-api-v2.md). The upstream repo has contribution
+No upstream code is vendored here. Discovery remains gated by
+[upstream issue #18](https://github.com/trionlabs/stellar-8004/issues/18), complete bounded reputation by
+[#19](https://github.com/trionlabs/stellar-8004/issues/19), and service-field preservation by
+[#20](https://github.com/trionlabs/stellar-8004/issues/20). Until #18 or a resulting ADR is accepted, the full
+consumer discovery contract is tracked in [P3-13](../issues/P3-13-upstream-discovery-api-v2.md). The upstream repo has contribution
 mechanics, but no checked-in backlog index or API/architecture proposal acceptance gate was found; keeping the
 proposal here prevents a cross-repo dependency from becoming invisible. Retain this document as the
 MCP-side contract mirror and update it when upstream decisions change the accepted contract.

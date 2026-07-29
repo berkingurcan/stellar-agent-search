@@ -24,14 +24,14 @@
 	const HERO_CMD = 'npx -y stellar-agent-mcp find "a paid web scraper with a good reputation"';
 
 	const DESCRIPTION =
-		'A read-only, keyless MCP server for stellar-8004 agents on Stellar mainnet. It finds and ranks agents, re-derives each reputation score from the on-chain Reputation contract, and reports where the registry and the chain differ.';
+		'A read-only, keyless MCP server for stellar-8004 agents on Stellar mainnet. It finds and ranks agents, then adds bounded, field-scoped Reputation-contract evidence with explicit coverage limits.';
 
 	let activeConfig = $state(CONFIGS[0].id);
 	const config = $derived(CONFIGS.find((c) => c.id === activeConfig) ?? CONFIGS[0]);
 </script>
 
 <svelte:head>
-	<title>stellar-agent-mcp — verified agent discovery on Stellar</title>
+	<title>stellar-agent-mcp — evidence-aware agent discovery on Stellar</title>
 	<meta name="description" content={DESCRIPTION} />
 	<link rel="canonical" href={SITE} />
 	<meta property="og:title" content="stellar-agent-mcp" />
@@ -68,8 +68,8 @@
 			>
 			agents with <span class="text-text">self-declared</span> reputations. A 2026 study found
 			<span class="text-negative tabular-nums">59&ndash;91%</span> of reviewers are Sybils. This
-			server re-derives each score from the on-chain Reputation contract and reports where they
-			differ.
+			server compares bounded fields against the on-chain Reputation contract and exposes what it
+			could not verify.
 		</p>
 
 		<div class="reveal reveal-d3 max-w-2xl">
@@ -143,12 +143,12 @@
 					are Sybils.
 				</p>
 				<p>
-					A registry entry is the agent&rsquo;s own account of itself. The reputation figure in it,
-					though, originates on-chain &mdash; so it can be read back. This server reads it directly
-					from the Reputation contract
+					A registry entry is the agent&rsquo;s own account of itself. Reputation evidence originates
+					on-chain, so this server performs a bounded read from the Reputation contract
 					(<code class="font-mono text-[13px] text-text">get_summary</code> and
 					<code class="font-mono text-[13px] text-text">get_clients_paginated</code>) and reports
-					both figures side by side.
+					average and active count side by side. Active unique clients remain unverified, and the
+					indexer/RPC observations do not share a snapshot.
 				</p>
 				<p>
 					Ranking follows the same reasoning: unique clients are weighted above raw feedback volume,

@@ -55,6 +55,17 @@ describe("capability triggers", () => {
     expect(mpp.unsupported).toContain("negative-filter:mpp");
   });
 
+  it.each([
+    ["payment-free scraper", "negative-filter:x402", "x402"],
+    ["non-x402 scraper", "negative-filter:x402", "x402"],
+    ["unpaid scraper", "negative-filter:x402", "x402"],
+    ["mpp-free oracle", "negative-filter:mpp", "mpp"],
+  ])("rejects the negative payment variant %s", (raw, unsupported, field) => {
+    const q = parseQuery(raw);
+    expect(q.unsupported).toContain(unsupported);
+    expect(q.filters[field as "x402" | "mpp"]).toBeUndefined();
+  });
+
   it("recognizes common Turkish capability and quality phrases", () => {
     const q = parseQuery("iyi itibarlı ücretli çeviri servisi");
     expect(q.filters).toMatchObject({ x402: true, hasServices: true, minScore: 70 });
@@ -82,6 +93,17 @@ describe("trust models (reputation-as-trust needs explicit phrasing)", () => {
   it('"tee attested inference" → trust:tee-attestation', () => {
     expect(parseQuery("tee attested inference").filters.trust).toBe("tee-attestation");
   });
+
+  it.each([
+    "without tee scraper",
+    "not validation oracle",
+    "non-reputation trust model",
+    "tee-free inference",
+  ])("rejects negative trust intent instead of requiring that trust model: %s", (raw) => {
+    const q = parseQuery(raw);
+    expect(q.unsupported).toContain("negative-filter:trust");
+    expect(q.filters.trust).toBeUndefined();
+  });
 });
 
 describe("score / reputation thresholds", () => {
@@ -107,6 +129,19 @@ describe("score / reputation thresholds", () => {
   it("explicit number beats a qualitative phrase in the same query", () => {
     // "top-rated" would imply 80, but the explicit "rated 95" wins.
     expect(parseQuery("top-rated agent rated 95").filters.minScore).toBe(95);
+  });
+
+  it.each([
+    "score below 50 scraper",
+    "score is no higher than 50 scraper",
+    "maximum score 50 scraper",
+    "not highly rated scraper",
+    "low-rated scraper",
+    "50 ve altı puanlı çeviri",
+  ])("rejects upper-bound/negative score intent instead of making it a minimum: %s", (raw) => {
+    const q = parseQuery(raw);
+    expect(q.unsupported).toContain("negative-filter:minScore");
+    expect(q.filters.minScore).toBeUndefined();
   });
 });
 

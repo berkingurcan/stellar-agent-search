@@ -29,7 +29,7 @@ export type TrustModel = "reputation" | "validation" | "crypto-economic" | "tee-
  * Field-scoped declared-vs-on-chain reputation outcome.
  * - verified:    reserved for a future read that covers every declared reputation field
  * - partial:     current get_summary matched average/count; active uniqueClients is not derivable
- * - mismatch:    declared and on-chain diverged beyond tolerance (flag only)
+ * - mismatch:    unversioned Explorer/Soroban observations differ beyond tolerance (flag only)
  * - unavailable: verification attempted but RPC down / simulation rejected
  * - skipped:     verification not attempted (disabled or out of top-K)
  */
@@ -164,7 +164,7 @@ export interface VerificationResult {
   deltas?: { average: number; count: number; uniqueClients: number | null };
   /** Why verification was skipped/unavailable (never hidden behind a boolean). */
   reason?: string;
-  /** Exact declared fields covered by this verification attempt. */
+  /** Fields numerically covered by the bounded comparison (not a shared-snapshot proof). */
   verifiedFields?: Array<"average" | "feedbackCount" | "uniqueClients">;
   unverifiedFields?: Array<"average" | "feedbackCount" | "uniqueClients">;
   /** ISO-8601 timestamp (from the injectable clock) */

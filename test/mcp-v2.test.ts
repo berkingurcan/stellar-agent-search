@@ -99,5 +99,14 @@ describe("MCP v2 server contract", () => {
     });
     expect(negatedRequirement.isError).toBe(true);
     expect(calls).toHaveLength(1);
+
+    for (const query of ["without tee scraper", "score below 50 scraper", "payment-free scraper"]) {
+      const negativeFilter = await client.callTool({
+        name: "find_agent",
+        arguments: { query },
+      });
+      expect(negativeFilter.isError).toBe(true);
+    }
+    expect(calls).toHaveLength(1);
   });
 });

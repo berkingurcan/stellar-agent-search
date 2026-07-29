@@ -134,19 +134,20 @@ client-side, because the explorer has no server-side score sort. Rows include th
 
 ### `resolve_agent`
 
-Turn any agent reference into canonical typed identifiers. Owner G-addresses expand to every agent they own
-(the only form that requires an explorer lookup).
+Turn any agent reference into canonical typed identifiers. Owner G-addresses expand to the upstream owner
+endpoint's current page (the only form that requires an explorer lookup); inspect returned coverage.
 
 | Input | Type | Notes |
 |---|---|---|
 | `ref` | number \| string | id, numeric string, stellar handle, or owner G-address |
 
-**Output:** `{ kind: "id"|"stellarId"|"owner", network, owner, count, agents: [{ id, stellarId, caip2Id }] }`.
+**Output:** `{ kind: "id"|"stellarId"|"owner", network, owner, count, agents: [{ id, stellarId, caip2Id }], coverage? }`.
+`coverage` is present for owner lookups; only `coverageComplete: true` rules out later owner rows.
 
 ### `get_agents_by_owner`
 
-Every agent registered by a given owner G-address, ranked client-side. Useful for provenance / "show me
-this operator's fleet".
+The current owner API page (up to 20 agents) for a given G-address, ranked client-side. Useful for provenance
+without pretending an incomplete page is the operator's whole fleet.
 
 | Input | Type | Default |
 |---|---|---|
@@ -154,7 +155,7 @@ this operator's fleet".
 | `limit` | int 1–50 | `20` |
 | `verify` | boolean | `false` |
 
-**Output:** `{ owner, count, agents: RankedAgent[] }`.
+**Output:** `{ owner, count, agents: RankedAgent[], coverage }`.
 
 ### `get_agent_feedback`
 
@@ -187,8 +188,10 @@ derivable from its append-only client list, and the two reads do not share a led
 
 **Output:** `{ agentId, stellarId, verified: boolean, verification }`. Status is
 `verified | partial | mismatch | unavailable | skipped`; current healthy comparisons are `partial`, while
-`verified` is reserved for future complete-field evidence. It degrades to `unavailable` when completeness or
-RPC evidence is missing and to `skipped` when checking is disabled.
+`verified` is reserved for future complete-field evidence. Thus the top-level `verified` boolean remains
+`false` for a healthy current result. `snapshotComparable` is always `false`, and `uniqueClients` remains an
+indexer-declared field. It degrades to `unavailable` when completeness or RPC evidence is missing and to
+`skipped` when checking is disabled.
 
 ### `get_agent_card`
 
@@ -200,13 +203,14 @@ transport support, skills, or payment requirements. It is also available via the
 | Input | Type | Default | Notes |
 |---|---|---|---|
 | `agent` | id \| numeric string \| stellar handle | — | **Required** |
-| `verify` | boolean | `false` | Verify only the on-chain reputation summary; does not verify A2A or endpoints |
+| `verify` | boolean | `false` | Request the bounded average/count comparison; does not verify A2A or endpoints |
 
 **Output:** `{ card, conformance: "unverified-derived", note }`. Agent-authored name, description, URI,
 wallet, service candidates, metadata, declared capability flags, and trust claims live only under
 `card.selfDeclared`. The standard-shaped `url` is `null`, `skills[]` and capability extensions are empty,
-and no actionable x402 requirement is synthesized. `x-stellar8004.verified` is scoped exclusively to the
-reputation summary; it does not verify the agent, endpoint, or A2A implementation.
+and no actionable x402 requirement is synthesized. `x-stellar8004.verified` can become true only for a future
+complete-field reputation status; healthy current `partial` results leave it false. It does not verify the
+agent, endpoint, or A2A implementation.
 
 ### `get_registry_stats`
 
@@ -268,7 +272,7 @@ is `{ lastLedger, stale }`. A stale reputation indexer explains a temporary `una
 {
   "status": "partial",             // verified (reserved) | partial | mismatch | unavailable | skipped
   "declared": { "average": 96.75, "feedbackCount": 4, "uniqueClients": 4 },
-  "verified": { "average": 96, "count": 4, "uniqueClients": null },   // bounded chain result
+  "verified": { "average": 96, "count": 4, "uniqueClients": null },   // legacy field name; bounded chain observation
   "deltas":   { "average": 0, "count": 0, "uniqueClients": null },
   "verifiedFields": ["average", "feedbackCount"],
   "unverifiedFields": ["uniqueClients"],
@@ -277,9 +281,14 @@ is `{ lastLedger, stale }`. A stale reputation indexer explains a temporary `una
 }
 ```
 
+`verifiedFields` is also a retained schema name: it identifies the two compared fields, not synchronized or
+complete truth. `uniqueClients` is copied only under `declared`, never into the chain observation, and the
+always-false `snapshotComparable` prevents a matching pair of reads from being presented as snapshot parity.
+
 ### `AgentProfile` (from `get_agent_profile`)
 
-Superset of a `RankedAgent`: adds `agentUri`, `verified` (mirror of `verification.status === "verified"`),
+Superset of a `RankedAgent`: adds `agentUri`, `verified` (mirror of `verification.status === "verified"`;
+therefore false for current healthy `partial` results),
 `rank` (full `RankResult`), `createdAt`, `txHash`, `resolveStatus`, and the same labeled `selfDeclared`
 block. See [architecture.md](architecture.md) for the join and the ranking formula.
 
@@ -315,11 +324,11 @@ free text appears only inside a clearly labeled, sanitized "self-declared (unver
 | `stellar8004://registry` | static | contracts + `/stats` + `/health` snapshot |
 | `stellar8004://leaderboard` | static | top-20 agents in a bounded scan, client-side 3-axis rank + coverage (declared-only) |
 | `stellar8004://health` | static | per-registry indexer staleness |
-| `stellar8004://agent/{id}` | template | full `AgentProfile` (identity + declared/verified + rank) |
+| `stellar8004://agent/{id}` | template | full `AgentProfile` (identity + declared/bounded-chain evidence + rank) |
 | `stellar8004://agent/{id}/card` | template | Unverified derived A2A-shaped projection; self-declared endpoint candidates are not promoted |
 | `stellar8004://agent/{id}/feedback` | template | on-chain reviews (typed facts + labeled self-declared tags) |
-| `stellar8004://agent/{id}/reputation` | template | declared-vs-on-chain diff + deltas |
-| `stellar8004://owner/{address}` | template | all agents under an owner G-address |
+| `stellar8004://agent/{id}/reputation` | template | bounded declared-vs-chain average/count diff + limitations |
+| `stellar8004://owner/{address}` | template | current owner API page + explicit continuation coverage |
 
 The resource set is fixed at construction, so `resources.listChanged` is deliberately **not** declared — this
 server never emits `notifications/resources/list_changed`. Resource *contents* do change as the registry
@@ -337,8 +346,8 @@ interpolation.
 | Prompt | Arguments | Instructs |
 |---|---|---|
 | `find-and-vet-agent` *(flagship)* | `task*`, `budget?`, `require_x402?`, `min_score?` | discover → profile + verify + feedback → recommend exactly one with its `stellar:…#id` |
-| `vet-agent` | `agent*` | single-agent trust memo (declared-vs-verified, review themes, freshness, red flags) |
-| `compare-agents` | `agent_a*`, `agent_b*`, `agent_c?` | side-by-side table across the verified axes + a recommendation |
+| `vet-agent` | `agent*` | single-agent trust memo (declared vs bounded chain evidence, review themes, freshness, red flags) |
+| `compare-agents` | `agent_a*`, `agent_b*`, `agent_c?` | side-by-side table across declared ranking axes and bounded evidence + a recommendation |
 | `prepare-x402-call` | `agent*`, `task?` | lay out the exact x402 flow (fetch → 402 → sign → retry) and **STOP before signing** |
 | `explore-registry` | `focus?` | pull the `registry` + `leaderboard` + `health` resources and summarize registry state |
 
