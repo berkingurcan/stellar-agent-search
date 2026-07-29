@@ -53,7 +53,7 @@
 	const lines = $derived(output.split('\n').map(segment));
 </script>
 
-<figure class="m-0 overflow-hidden rounded-xl border border-border">
+<figure class="m-0 overflow-hidden rounded-md border border-border">
 	<!-- Prompt line: the exact command that produced the output below -->
 	<div class="flex items-center gap-2.5 border-b border-border bg-surface px-3.5 py-2.5">
 		<span class="font-mono text-[10px] text-text-dim select-none">$</span>

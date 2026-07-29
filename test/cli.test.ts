@@ -32,6 +32,8 @@ function fakeDeps(overrides: {
   agents?: AgentResponse[];
   getAgent?: (id: number) => Promise<{ data: AgentResponse }>;
   verifyAgainst?: (...args: unknown[]) => Promise<unknown>;
+  health?: () => Promise<{ data: unknown }>;
+  probeReachability?: (...args: unknown[]) => Promise<unknown>;
 } = {}): ToolDeps {
   const agents = overrides.agents ?? [agent(1)];
   return {
@@ -42,6 +44,20 @@ function fakeDeps(overrides: {
         coverage: { ...coverage, recordsScanned: agents.length },
       })),
       getAgent: vi.fn(overrides.getAgent ?? (async (id: number) => ({ data: agent(id) }))),
+      health: vi.fn(
+        overrides.health ??
+          (async () => ({
+            data: {
+              status: "healthy",
+              network: "mainnet",
+              indexer: {
+                identity: { lastLedger: 100, stale: false },
+                reputation: { lastLedger: 100, stale: false },
+                validation: { lastLedger: 100, stale: false },
+              },
+            },
+          })),
+      ),
     } as unknown as ToolDeps["explorer"],
     verifier: {
       verifyAgainst: vi.fn(
@@ -55,6 +71,10 @@ function fakeDeps(overrides: {
             checkedAt: "2026-07-29T00:00:00.000Z",
             opts,
           })),
+      ),
+      probeReachability: vi.fn(
+        overrides.probeReachability ??
+          (async () => ({ ok: true, observedClients: 2, start: 0, limit: 6 })),
       ),
     } as unknown as ToolDeps["verifier"],
   };
@@ -76,6 +96,7 @@ function captureWrites(): { stdout: () => string; stderr: () => string } {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe.sequential("CLI flag correctness", () => {
@@ -91,9 +112,8 @@ describe.sequential("CLI flag correctness", () => {
     ["--limit", "1.5"],
     ["--port", "0"],
     ["--port", "65536"],
-    ["--min-score", "-1"],
-    ["--min-score", "101"],
-    ["--min-score", "10.5"],
+    ["--min-explorer-score", "-1"],
+    ["--min-explorer-score", "10.5"],
   ])("rejects out-of-range or non-integer %s %s", (flag, value) => {
     expect(() => parseFlags(["find", "payments", flag, value])).toThrow(/expects an integer/);
   });
@@ -103,8 +123,11 @@ describe.sequential("CLI flag correctness", () => {
     expect(parseFlags(["find", "x", "--limit", "50"]).limit).toBe(50);
     expect(parseFlags(["serve", "--port", "1"]).port).toBe(1);
     expect(parseFlags(["serve", "--port", "65535"]).port).toBe(65_535);
-    expect(parseFlags(["find", "x", "--min-score", "0"]).minScore).toBe(0);
-    expect(parseFlags(["find", "x", "--min-score", "100"]).minScore).toBe(100);
+    expect(parseFlags(["find", "x", "--min-explorer-score", "0"]).minExplorerScore).toBe(0);
+    expect(parseFlags(["find", "x", "--min-explorer-score", "250"]).minExplorerScore).toBe(250);
+    expect(() => parseFlags(["find", "x", "--min-score", "50"])).toThrow(
+      /ambiguous.*min-explorer-score/,
+    );
   });
 });
 
@@ -226,5 +249,89 @@ describe.sequential("CLI bounded hydration and errors", () => {
     expect(code).toBe(1);
     expect(io.stdout()).toBe("");
     expect(io.stderr()).toContain("explorer unavailable");
+  });
+});
+
+describe.sequential("CLI doctor fails closed", () => {
+  function stubHealthySoroban(): void {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { status: "healthy" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+  }
+
+  it("accepts only complete, same-network, non-stale explorer health", async () => {
+    stubHealthySoroban();
+    const io = captureWrites();
+    const code = await runCli(parseFlags(["doctor", "--json"]), "0.1.0", fakeDeps());
+
+    expect(code).toBe(0);
+    const report = JSON.parse(io.stdout());
+    const explorer = report.checks.find((check: { name: string }) => check.name === "explorer");
+    expect(explorer).toMatchObject({ ok: true });
+    expect(explorer.detail).toContain("identity=100/fresh");
+    expect(explorer.detail).toContain("reputation=100/fresh");
+    expect(explorer.detail).toContain("validation=100/fresh");
+  });
+
+  it.each([
+    [
+      "wrong network",
+      {
+        status: "healthy",
+        network: "testnet",
+        indexer: {
+          identity: { lastLedger: 1, stale: false },
+          reputation: { lastLedger: 1, stale: false },
+          validation: { lastLedger: 1, stale: false },
+        },
+      },
+    ],
+    ["missing indexers", { status: "healthy", network: "mainnet", indexer: {} }],
+  ])("returns nonzero for %s health", async (_label, data) => {
+    stubHealthySoroban();
+    const io = captureWrites();
+    const code = await runCli(
+      parseFlags(["doctor", "--json"]),
+      "0.1.0",
+      fakeDeps({ health: async () => ({ data }) }),
+    );
+
+    expect(code).toBe(1);
+    const report = JSON.parse(io.stdout());
+    expect(report.checks.find((check: { name: string }) => check.name === "explorer").ok).toBe(false);
+  });
+
+  it("returns nonzero when any canonical indexer is stale", async () => {
+    stubHealthySoroban();
+    const io = captureWrites();
+    const code = await runCli(
+      parseFlags(["doctor", "--json"]),
+      "0.1.0",
+      fakeDeps({
+        health: async () => ({
+          data: {
+            status: "healthy",
+            network: "mainnet",
+            indexer: {
+              identity: { lastLedger: 100, stale: false },
+              reputation: { lastLedger: 99, stale: true },
+              validation: { lastLedger: 100, stale: false },
+            },
+          },
+        }),
+      }),
+    );
+
+    expect(code).toBe(1);
+    const report = JSON.parse(io.stdout());
+    const explorer = report.checks.find((check: { name: string }) => check.name === "explorer");
+    expect(explorer).toMatchObject({ ok: false });
+    expect(explorer.detail).toContain("reputation=99/STALE");
   });
 });

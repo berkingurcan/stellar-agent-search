@@ -28,9 +28,9 @@ export type TrustModel = "reputation" | "validation" | "crypto-economic" | "tee-
 /**
  * Field-scoped declared-vs-on-chain reputation outcome.
  * - verified:    reserved for a future read that covers every declared reputation field
- * - partial:     current get_summary matched average/count; active uniqueClients is not derivable
- * - mismatch:    unversioned Explorer/Soroban observations differ beyond tolerance (flag only)
- * - unavailable: verification attempted but RPC down / simulation rejected
+ * - partial:     reserved for a future authoritative, field-scoped comparison
+ * - mismatch:    reserved for a future authoritative comparison that diverges
+ * - unavailable: verification attempted but RPC failed, or exhaustive clients are unprovable
  * - skipped:     verification not attempted (disabled or out of top-K)
  */
 export type VerificationStatus = "verified" | "partial" | "mismatch" | "unavailable" | "skipped";
@@ -72,11 +72,13 @@ export interface AgentFlags {
   unrated: boolean;
   /** created within NEW_AGENT_DAYS */
   newAgent: boolean;
-  /** feedbackCount < MIN_FEEDBACK_FOR_CONFIDENCE */
+  /** Insufficient bounded feedback/client evidence under the local rank policy. */
+  lowEvidence: boolean;
+  /** @deprecated Compatibility alias for lowEvidence; not statistical confidence. */
   lowConfidence: boolean;
-  /** on-chain get_summary matched declared within tolerance */
+  /** future full-field verification status; current fail-closed reads never set this */
   verified: boolean;
-  /** declared vs on-chain diverged beyond tolerance */
+  /** future authoritative declared-vs-chain divergence */
   verificationMismatch: boolean;
 }
 
@@ -97,25 +99,36 @@ export interface RankAxis {
  * (Named `RankBreakdown` in modules/01; both names are exported.)
  */
 export interface RankResult {
+  /** Versioned local ordering policy; never confuse with the upstream scoreVersion. */
+  rankVersion: string;
   quality: RankAxis;
   volume: RankAxis;
   breadth: RankAxis;
 
-  /** additive bonuses (each already scaled to the [0,1] score space) */
+  /** @deprecated Compatibility alias for quality.norm. */
+  qualityUnshrunkNorm: number;
+  /** Safe declared distinct clients capped by safe active feedbackCount. */
+  effectiveUniqueClients: number;
+  /** Feedback rows counted by volume after the per-client evidence cap. */
+  effectiveFeedbackCount: number;
+  /** Fixed 0.4·volume + 0.6·breadth evidence index; not a probability. */
+  evidenceStrength: number;
+
+  /** Always 0: owner-declared payment/service capabilities do not affect trust rank. */
   paymentBonus: number;
   endpointBonus: number;
   /** Always 0: verification is evidence metadata and never inflates rank. */
   verifiedBonus: number;
 
-  /** weighted sum of the three axes, [0,1] */
+  /** @deprecated Compatibility alias for score; not an additive axis sum. */
   base: number;
-  /** final honest score incl. bonuses, [0,1] */
+  /** quality.norm × evidenceStrength, [0,1] */
   score: number;
   /** round(score * RANK_SCORE_MAX), i.e. 0..100 */
   score100: number;
-  /** ordering-only score (novelty-floored for unrated agents) */
+  /** ordering score; equals score (exploration is the explicit newest sort) */
   sortScore: number;
-  /** evidence proxy independent of quality, [0,1] */
+  /** @deprecated Compatibility alias for evidenceStrength; not statistical confidence. */
   confidence: number;
 
   flags: AgentFlags;
@@ -123,12 +136,6 @@ export interface RankResult {
 
 /** Alias kept for modules/01 naming parity. */
 export type RankBreakdown = RankResult;
-
-export interface RankWeights {
-  quality: number;
-  volume: number;
-  breadth: number;
-}
 
 // ---------------------------------------------------------------------------
 // Reputation & verification
@@ -158,13 +165,13 @@ export interface VerificationResult {
    * can still accept pre-0.1 fixtures; current server outputs always emit it.
    */
   snapshotComparable?: false;
-  /** Explicit caveats that bound what the comparison can establish. */
+  /** Explicit caveats that bound what the probe can establish. */
   limitations?: string[];
   verified?: OnchainReputation;
   deltas?: { average: number; count: number; uniqueClients: number | null };
   /** Why verification was skipped/unavailable (never hidden behind a boolean). */
   reason?: string;
-  /** Fields numerically covered by the bounded comparison (not a shared-snapshot proof). */
+  /** Future field coverage; current fail-closed probe always emits an empty array. */
   verifiedFields?: Array<"average" | "feedbackCount" | "uniqueClients">;
   unverifiedFields?: Array<"average" | "feedbackCount" | "uniqueClients">;
   /** ISO-8601 timestamp (from the injectable clock) */

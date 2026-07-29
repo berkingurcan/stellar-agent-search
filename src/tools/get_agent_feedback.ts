@@ -1,5 +1,5 @@
 /**
- * get_agent_feedback — recent on-chain feedback for one agent.
+ * get_agent_feedback — recent Explorer-indexed on-chain feedback for one agent.
  *
  * Feedback is client-authored (permissionless) → untrusted. Every row is
  * sanitized and the whole list is emitted inside a labeled `selfDeclared` slot;
@@ -52,6 +52,7 @@ const outputShape = {
     .object({
       windowComplete: z.boolean(),
       paginationExhausted: z.boolean(),
+      snapshotConsistent: z.boolean(),
       pagesScanned: z.number().int().nonnegative(),
       hasMore: z.boolean().optional(),
     })
@@ -65,7 +66,7 @@ export function registerGetAgentFeedback(server: McpServer, deps: ToolDeps): voi
     {
       title: "Get Agent Feedback",
       description:
-        "Recent on-chain feedback for one agent (client-authored, untrusted → returned in a labeled " +
+        "Recent Explorer-indexed on-chain feedback for one agent (client-authored, untrusted → returned in a labeled " +
         "`selfDeclared` slot, sanitized). Revoked entries are hidden unless includeRevoked is set.",
       inputSchema: z.object(inputShape),
       outputSchema: z.object(outputShape),

@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { ValidationError } from "@trionlabs/stellar8004";
 import { isValidOwnerAddress } from "../lib/identifier.js";
+import { V1_UNVERSIONED_PAGINATION_LIMITATION } from "../lib/explorer.js";
 import {
   handler,
   rankAndVerify,
@@ -70,7 +71,6 @@ export function registerGetAgentsByOwner(server: McpServer, deps: ToolDeps): voi
       const response = await deps.explorer.getAgentsByOwner(owner);
       const agents = response.data ?? [];
       const rows = await rankAndVerify(deps, agents, {
-        weights: deps.config.weights,
         sortBy: "score",
         verify: args.verify,
         verifyTopK: VERIFY_TOP_K,
@@ -85,12 +85,16 @@ export function registerGetAgentsByOwner(server: McpServer, deps: ToolDeps): voi
         count: rows.length,
         agents: rows,
         coverage: {
-          coverageComplete: paginationExhausted,
+          coverageComplete: false,
           paginationExhausted,
-          snapshotConsistent: true,
+          snapshotConsistent: false,
           pagesScanned: 1,
           recordsScanned: agents.length,
           ...(typeof hasMore === "boolean" ? { hasMore } : {}),
+          limitations: [
+            V1_UNVERSIONED_PAGINATION_LIMITATION,
+            ...(typeof hasMore === "boolean" ? [] : ["pagination-metadata-unavailable"]),
+          ],
         },
       });
     }),

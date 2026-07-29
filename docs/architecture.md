@@ -3,7 +3,7 @@
 `stellar-agent-mcp` has one shared TypeScript service/tool layer with two adapters: a Node (ESM, NodeNext)
 binary that is both an MCP stdio server and a human CLI, and a separate stateless Cloudflare Worker. The
 runtime uses the split MCP v2 packages (`@modelcontextprotocol/server` and `@modelcontextprotocol/client`
-2.0.0) with Zod 4 and requires Node ≥ 20 for the local binary. Both adapters are read-only and keyless.
+2.0.0) with Zod 4 and requires Node ≥ 22 for the local binary. Both adapters are read-only and keyless.
 
 The local stdio path is usable now. The Worker implementation exists, but its public route is **not deployed**;
 `https://mcp.stellar8004.com/mcp` currently returns the landing site's 404. This document distinguishes
@@ -35,9 +35,10 @@ Remote MCP client ──POST /mcp──► Cloudflare runtime Worker
   examples/x402-demo.ts  (SEPARATE process, SOLE keyed actor) — never an MCP tool
 ```
 
-**Data precedence, everywhere:** explorer (primary) → on-chain verify (overlay) → **degrade closed** to
-declared-only when the RPC is down or verification is disabled. The tools and the resources emit the **same**
-canonical `AgentProfile` join (defined once in `src/types.ts`) so they never diverge.
+**Data precedence, everywhere:** the explorer is the primary indexed source; a separate bounded contract probe
+can report reachability but does not promote any reputation field. Missing or insufficient evidence
+**degrades closed**, so reputation remains declared-only. The tools and resources emit the **same** canonical
+`AgentProfile` join (defined once in `src/types.ts`) so they never diverge.
 
 ## Dual CLI + MCP dispatch
 
@@ -62,7 +63,7 @@ HTTP lives in `worker/` as a separately built and deployed Cloudflare adapter.
 |---|---|
 | `index.ts` | bin entry + dual-mode dispatch |
 | `server.ts` | `buildServer(config)` — the MCP server factory, capabilities, `instructions` string |
-| `config.ts` | env → typed `Config` (network, contracts, RPC, weights); ignores `STELLAR_PRIVATE_KEY` |
+| `config.ts` | env → typed `Config` (network, contracts, RPC, local score scale); ignores `STELLAR_PRIVATE_KEY` |
 | `types.ts` | **frozen** shared contracts (`AgentProfile`, `RankResult`, `VerificationResult`, …) |
 | `tools/` | the read-only tool surface (one file per tool) + `shared.ts` (deps, adapters, rank+verify pipeline) |
 | `resources/` | the `stellar8004://` resource layer (dual JSON + markdown) |
@@ -79,8 +80,8 @@ The cross-registry join produced for one agent (`src/types.ts`):
   (`stellar:{pubnet|testnet}:…` for the x402/MPP layer), `network`, `owner`, `wallet`, `agentUri`. These fields
   do not prove control of a service endpoint or payment recipient.
 - **Capabilities** — `x402`, `mpp`, `hasServices`, `supportedTrust[]`.
-- **Reputation** — `scores` (declared) + bounded `verification` evidence + `verified` (a convenience boolean
-  reserved for future complete-field status; current healthy checks are `partial`).
+- **Reputation** — `scores` (Explorer-declared) + bounded contract reachability evidence + `verified` (a
+  convenience boolean reserved for a future complete-field status; current attempted checks are unavailable).
 - **Rank** — the full `RankResult` breakdown + `flags`.
 - **Provenance** — `createdAt`, `txHash`, `resolveStatus`.
 - **`selfDeclared`** — the **only** slot holding untrusted agent free text (name/description/image/
@@ -90,67 +91,65 @@ The identifiers surface both the identity-network form and the CAIP-2 form. `get
 explicitly **unverified, derived A2A-shaped projection** inside a labeled self-declared slot. It does not fetch
 an agent-published card, promote registry endpoints into invokable A2A URLs, synthesize payment requirements,
 or claim protocol/endpoint conformance. Its `x-stellar8004.verified` flag can only mirror a future full
-reputation check; `verificationStatus` and `verificationScope` expose today's partial scope.
+reputation check; `verificationStatus` and the evidence-only `verificationScope` expose today's
+unavailable/no-field result without implying that `get_summary` ran.
 
 ## The 3-axis ranking engine (`lib/ranking.ts`)
 
 Deterministic and **pure**: identical inputs (with an explicit `now` for the freshness flag) yield
-byte-identical output. Three orthogonal axes, each normalized to `[0, 1]`:
+byte-identical output. The versioned local policy is `stellar-agent-mcp-declared-evidence-v1`:
 
 ```
-quality = clamp(avg / RANK_SCORE_MAX, 0, 1)              # null/0 when unrated
-volume  = clamp(ln(1+feedbackCount)  / ln(1+50), 0, 1)   # log-saturating
-breadth = clamp(ln(1+uniqueClients)  / ln(1+25), 0, 1)   # indexer-declared Sybil-cost heuristic
+effectiveUniqueClients = min(validSafeInt(uniqueClients), validSafeInt(feedbackCount))
+breadth = clamp(ln(1+effectiveUniqueClients) / ln(1+25), 0, 1)
+quality = clamp(avg / RANK_SCORE_MAX, 0, 1)              # 0 when unrated
+effectiveFeedbackCount = min(feedbackCount, effectiveUniqueClients · 3)
+volume  = clamp(ln(1+effectiveFeedbackCount) / ln(1+50), 0, 1)
+evidenceStrength = 0.4·volume + 0.6·breadth
+score = quality · evidenceStrength
+score100 = round(score · 100)
 ```
 
-Weighted base + additive bonuses:
-
-```
-base  = wQ·quality + wV·volume + wB·breadth              # default weights 0.5 / 0.2 / 0.3 (sum 1 ⇒ [0,1])
-score = clamp(base + paymentBonus + endpointBonus, 0, 1)
-score100 = round(score · 100)                            # the displayed 0..100 score
-```
-
-Bonuses (already scaled into the `[0,1]` score space): x402 **+0.05**, mpp **+0.03**, and hasServices
-**+0.03**. Verification evidence never changes the score; the retained `verifiedBonus` response field is
-always `0` for pre-release schema continuity. Weights are env-overridable (`RANK_W_*`) or per-call
-(`rank_agent.weights`), always re-normalized to sum 1.
+Owner-declared x402, MPP, and service-presence claims never add trust points. The retained `paymentBonus`,
+`endpointBonus`, and `verifiedBonus` response fields are always `0` for pre-release schema continuity.
+The evidence weights are fixed; legacy `RANK_W_*` configuration and supplied `rank_agent.weights` are
+rejected rather than silently changing the meaning of a public score.
 
 **Why breadth > volume:** indexer-declared unique clients (breadth) are harder to fake than raw feedback
 volume. Weighting breadth above volume is a Sybil-cost hedge, not a chain-verified breadth claim,
 Sybil-resistance, or proof of personhood.
 
-**Two separated scores:** the displayed `score` is honest (an unrated agent contributes 0 on quality and is
-flagged `unrated`), while an ordering-only `sortScore` applies a `0.15` novelty floor so a capable-but-unrated
-agent is *ordered, not buried* — without inflating its shown score.
+`sortScore` equals the displayed `score`; there is no hidden novelty floor. Exploration is the explicit
+`newest` sort, not an invisible boost in default relevance ordering.
 
-**Flags:** `unrated` (feedbackCount 0), `newAgent` (created < 14 days), `lowConfidence` (< 3 feedback),
-`verified`, `verificationMismatch`. A `mismatch` is a flag with **no score penalty**. `confidence` is a
-separate evidence proxy (`0.6·volume + 0.4·breadth`), independent of quality.
+**Flags:** `unrated` (feedbackCount 0), `newAgent` (created < 14 days), `lowEvidence` (< 3 valid feedback rows
+or < 3 effective unique clients), plus reputation-evidence status flags. `lowConfidence` is a deprecated
+compatibility alias for `lowEvidence`. `evidenceStrength` is an explicitly uncalibrated declared-data index,
+not a probability; the deprecated `confidence` field is an exact alias.
 
-**Sorting** (`sortBy`): `relevance` (sortScore) · `score` · `confidence` · `newest`. Ties break by confidence
-desc, then id asc — fully deterministic.
+**Sorting** (`sortBy`): `relevance` (sortScore) · `score` · `evidence` · `newest`. `confidence` remains a
+deprecated alias for `evidence`. Ties break by evidence strength desc, then id asc — fully deterministic.
 
-## The verification overlay (`lib/reputation.ts`)
+## The fail-closed reputation-evidence layer (`lib/reputation.ts`)
 
-`ReputationVerifier.verifyAgainst(id, declared)` re-derives bounded average/count observations from the
-on-chain Reputation contract (`get_clients_paginated` + `get_summary`, via Soroban simulation) and diffs them
-against the explorer's declared numbers, producing a `VerificationResult`:
+`ReputationVerifier.verifyAgainst(id, declared)` performs one bounded
+`get_clients_paginated(agent_id, 0, 6)` Soroban simulation as a contract reachability observation. It does
+not call `get_summary` or compare Explorer fields because the observed client set cannot be proven exhaustive:
 
 | `status` | Meaning |
 |---|---|
 | `verified` | reserved for a future comparison that covers every declared reputation field |
-| `partial` | bounded on-chain average and active-count comparison matched; active unique clients remain indexer-declared |
-| `mismatch` | a compared field diverged beyond tolerance; unversioned snapshots mean this is not proof of manipulation |
-| `unavailable` | comparison attempted but the RPC failed, the client set exceeded the five-client cap, or the simulation was rejected |
+| `partial` | reserved for a future authoritative field-scoped comparison |
+| `mismatch` | reserved for a future authoritative comparison that diverges |
+| `unavailable` | attempted read failed, or it succeeded but client-set exhaustion remains unprovable (`client-set-exhaustion-unprovable`) |
 | `skipped` | not attempted (disabled via `VERIFY_ONCHAIN=false`/`--no-verify`, or outside the top-K) |
 
-Comparison is **bounded twice**: only the top-K returned rows are checked, and the current contract summary is
-usable only when the complete comparable client set is at most five. The explorer and RPC also lack a shared
-ledger-bound snapshot, so every result reports `snapshotComparable: false`. Healthy current results are
-therefore `partial`, never full `verified`. The path
-**degrades closed** — if completeness or RPC evidence is missing, the row falls back to declared-only with
-`status: "unavailable"` rather than erroring the whole call or manufacturing certainty.
+Only the caller-selected top-K agents are probed, and each receives one bounded client-list call. Expired
+`ClientAtIndex` entries can create arbitrary holes, so no finite hole probe—including an empty page or a live
+address at index 7 after a hole at index 6—proves exhaustion. Every attempted current result therefore has
+`snapshotComparable: false`, `verifiedFields: []`, and all three declared reputation fields in
+`unverifiedFields`. The path **degrades closed** rather than calling `get_summary` with an incomplete set or
+manufacturing a partial/mismatch verdict.
 
 ## Explorer access notes (`lib/explorer.ts`)
 
@@ -162,9 +161,10 @@ therefore `partial`, never full `verified`. The path
   `created_at` / `id`). Discovery therefore sends structured filters to `getAgents`, then performs text
   matching and ranking **client-side** over a bounded candidate window.
 - List walks are **hard page-capped** (never an unbounded loop on a hostile `pagination.total`).
-- Discovery tools return `coverageComplete`, `pagesScanned`, `recordsScanned`, and `hasMore` when known, so a
-  bounded window cannot be mistaken for a global result. A server-side cursor discovery API remains the
-  production-scale fix.
+- Discovery tools return `paginationExhausted`, `coverageComplete`, `snapshotConsistent`, scan counts, and
+  `hasMore` when known. In v1, `coverageComplete` and `snapshotConsistent` are always false: `hasMore=false`
+  proves only that this unversioned offset walk exhausted its reported page stream, not a registry snapshot.
+  A server-side revision-bound cursor discovery API remains the production-scale fix.
 - The service layer uses a TTL cache + single-flight and the SDK's 429/backoff handling.
 
 The scale fix belongs upstream, not in another database here. The proposed cursor-based discovery contract,
@@ -188,8 +188,8 @@ The landing Worker must be deployed first because it establishes the proxied hos
 not deployed today: `/mcp` still reaches the landing Worker and returns 404. The code therefore makes no live
 availability, interoperability, latency, or protocol-conformance claim yet.
 
-The published/local Node binary supports Node ≥ 20. The Worker build/deploy workspace currently declares
-Node ≥ 22.18 for its Agents/Wrangler development toolchain; this is a contributor/CI requirement, not a
+The published/local Node binary supports Node ≥ 22. The Worker build/deploy workspace currently declares
+Node ≥ 22.18 for its Agents/Wrangler development toolchain; that stricter patch floor is a contributor/CI requirement, not a
 requirement imposed on remote MCP clients.
 
 For each accepted `/mcp` request, Cloudflare Agents `0.20.1` calls `createMcpHandler`, constructs a **fresh**
@@ -215,14 +215,14 @@ public registry/on-chain data. That is not the same as being unguarded:
 - `/mcp` accepts `POST` (plus CORS `OPTIONS`) only, requires JSON, streams at most 256 KiB, caps JSON-RPC
   batches at 8, and rejects requests whose conservative estimated upstream cost exceeds 24.
 - The cost budget exists because Cloudflare caps a Worker invocation chain at 32. It estimates worst-case
-  calls to the bound `stellar8004-web` Worker before constructing the server. Soroban verification RPC is
+  calls to the bound `stellar8004-web` Worker before constructing the server. Soroban contract-probe RPC is
   separately bounded and cached; it is not charged to this Service Binding counter. The estimate is an
   admission heuristic, not exact billing or proof that a dependency can never change its call pattern.
-- A keyed rate-limit binding debits an IP + user-agent hash, weighted by estimated cost, at a configured
+- A keyed rate-limit binding debits only the edge-owned client IP, weighted by estimated cost, at a configured
   30 units/minute. Cloudflare's limiter is PoP-local and approximate, but a binding exception fails closed
   with 503 instead of admitting unmetered work. It is best-effort abuse friction — **not** a global quota,
-  authorization check, fairness guarantee, or accounting boundary. A caller can rotate user-agent values to
-  fragment its bucket, while unrelated users behind the same NAT and user-agent can share one; durable
+  authorization check, fairness guarantee, or accounting boundary. User-agent rotation cannot create new
+  buckets, while unrelated users behind the same NAT can share one; durable
   principal-level quotas would require an identity layer such as OAuth.
 - Explorer egress accepts only `GET` to the configured base's `/api/v1` or `/api/v2` paths, rewrites that
   request to `STELLAR8004_API`, and strips caller `Authorization`, `Cookie`, MCP, forwarding, and arbitrary
@@ -252,8 +252,8 @@ Explorer data gets two actor-neutral, best-effort cache layers in the Worker:
 A separate bounded isolate-local verifier cache (200 entries per network/RPC tuple) reuses Soroban reputation
 reads across fresh per-request servers. It is also evictable and best effort. None of these caches is a
 correctness source, global freshness guarantee, authorization boundary, billing ledger, or replacement for
-the canonical index. Soroban reads still provide the bounded average/count overlay; cache reuse does not
-upgrade declared data to verified data.
+the canonical index. Soroban reads provide only the bounded reachability probe described above; cache reuse
+does not upgrade declared data to verified data.
 
 ### Deployment gates
 
@@ -289,9 +289,11 @@ posture are in **[../SECURITY.md](../SECURITY.md)**.
 
 ### Honest limits
 
-This server surfaces indexed registry/transaction provenance and re-derives bounded reputation reads
-on-chain. It does **not** verify active `uniqueClients`, a synchronized explorer/RPC snapshot, or a service
-endpoint's liveness, ownership, protocol conformance, or payment behavior. The demo separately pins one
+This server surfaces indexed registry/transaction provenance and separately probes the Reputation contract
+read path. It does **not** verify average, feedback count, active `uniqueClients`, exhaustive client history,
+a synchronized explorer/RPC snapshot, or a service endpoint's liveness, ownership, protocol conformance, or
+payment behavior. The demo
+separately pins one
 endpoint/payment policy and is designed to bind completed feedback to validated payment transaction and
 result hashes, but its first funded, recorded mainnet run is still pending. It also does **not** solve
 **Sybil resistance / proof-of-personhood**; `uniqueClients` (breadth) is a thin, indexer-declared hedge, not a
@@ -342,13 +344,13 @@ Recorded from a spike, so the constraints are not re-discovered later.
 
 `@trionlabs/stellar8004` imports the default `@stellar/stellar-sdk` build, whose RPC transport is **axios**.
 axios below 1.16.1 issues a plain-HTTP (non-`CONNECT`) request for an `https://` URL when a proxy is configured;
-proxies answer that with **405**. The visible symptom is on-chain verification reporting `unavailable` while the
-explorer and RPC health checks pass — exactly the feature this server exists for, silently degraded.
+proxies answer that with **405**. The visible symptom is the contract probe reporting an RPC failure while the
+explorer and shallow RPC health checks pass.
 
 `doctor` surfaces this rather than hiding it:
 
 ```
-✗ verify    on-chain read FAILED (rpc-error): Request failed with status code 405
+✗ contract  read path FAILED (rpc-error): Request failed with status code 405
 ```
 
 ### The fix: reads run on the fetch-based build
@@ -365,12 +367,13 @@ silently reinstates axios for every read — it typechecks, it passes offline te
 live proxy. Each client gets its own freshly built options.
 
 Verified end to end: with the `overrides` block removed and the vulnerable `axios@1.15.0` restored, `doctor`'s
-on-chain verification passes through the same proxy that produced the `405` above.
+bounded contract reachability read passes through the same proxy that produced the `405` above. That proves
+transport compatibility, not reputation comparability.
 
 **What this does not do.** `@trionlabs/stellar8004` is a barrel — importing anything from it (including
 `getConfig` in `src/config.ts`) loads the default SDK build and therefore axios into the process, even though
 nothing on the read path uses it. The package also still appears in a consumer's `npm audit`, which is static.
-Closing that needs either the upstream range widened or every barrel import moved to a subpath
+Closing that needs a coordinated upstream range widening **and** a direct v16 bump here, or every barrel import moved to a subpath
 (`@trionlabs/stellar8004/api/explorer` is axios-free; `/bindings` is not).
 
 ### The `overrides` fix — and exactly how far it reaches
@@ -383,18 +386,21 @@ npm `overrides` block forces a patched axios into the tree instead:
 ```
 
 This is load-bearing twice over. It clears the two **high**-severity axios advisories that `npm audit` reports
-against the 1.15.0 pin, and because 1.18.1 is past the 1.16.1 proxy fix it also makes the on-chain read work
-through a proxy — `doctor` goes from the 405 above to all-green, returning agent 10's real figures.
+against the 1.15.0 pin, and because 1.18.1 is past the 1.16.1 proxy fix it also makes the bounded contract read
+work through a proxy — `doctor` goes from the 405 above to a healthy reachability check. That check returns a
+bounded address window, not verified reputation figures.
 
 **It does not reach end users.** npm honours `overrides` only from the *root* project, so a consumer who runs
 `npx -y stellar-agent-mcp` resolves our dependencies fresh and gets `@stellar/stellar-sdk@15.1.0 → axios@1.15.0`
 again. Verified by packing the tarball and installing it into a clean project. So the override protects this
 repository, its CI, and anyone who clones it — not the published artifact.
 
-The root cause is upstream: `@trionlabs/stellar8004@0.0.11` depends on `@stellar/stellar-sdk: ^15.0.0`
-(`webapp/packages/sdk/package.json` in `trionlabs/stellar-8004`), so even bumping our own direct dependency to
-`^16` just installs 15 again underneath it. Widening that range upstream, or one of the three options below, is
-what actually fixes the published package.
+The root cause crosses both packages: `@trionlabs/stellar8004@0.0.11` depends on
+`@stellar/stellar-sdk: ^15.0.0`, while this package also declares direct `@stellar/stellar-sdk: ^15`. Bumping
+only this repo installs v15 again underneath upstream; widening only upstream still lets npm hoist v15 to
+satisfy our direct range. The clean migration is upstream `^15 || ^16` plus an explicit v16 compatibility job
+and release, followed by a direct v16 bump and exact upstream pin here. A packed-consumer install must then
+prove one Stellar SDK major and no vulnerable axios before the override is removed.
 
 ### `no-axios` — verified working
 

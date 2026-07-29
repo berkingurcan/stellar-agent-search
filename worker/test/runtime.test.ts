@@ -5,6 +5,7 @@ import {
   MAX_BODY_BYTES,
   MAX_UPSTREAM_COST,
   MCP_PATH,
+  WORKER_SERVER_VERSION,
   createExplorerBindingFetch,
   createWorker,
   estimateUpstreamCost,
@@ -98,7 +99,6 @@ function workerEnv(
 ): WorkerEnv {
   return {
     STELLAR8004_API: binding,
-    VERIFY_ONCHAIN: "false",
     ...(limiter === null ? {} : { MCP_RATE_LIMITER: limiter }),
   };
 }
@@ -589,6 +589,34 @@ describe("method, body, JSON, batch, and upstream-cost admission", () => {
     ).toBe(4);
   });
 
+  it("treats dynamic resource reads/listing as heavy batch branches", async () => {
+    const binding = new ThrowingBinding();
+    const resourceRead = {
+      jsonrpc: "2.0",
+      id: 131,
+      method: "resources/read",
+      params: { uri: "stellar8004://agent/10/reputation" },
+    };
+    const resourceList = {
+      jsonrpc: "2.0",
+      id: 132,
+      method: "resources/list",
+      params: {},
+    };
+    expect(heavyToolCallCount([resourceRead, resourceList])).toBe(2);
+
+    const response = await createWorker({ cache: null }).fetch(
+      legacyRequest([resourceRead, toolCall("verify_reputation", { agent: 7 }, 133)]),
+      workerEnv(binding),
+      new TestContext(),
+    );
+    expect(response.status).toBe(413);
+    const payload = await rpcPayload(response);
+    const error = Reflect.get(payload, "error");
+    expect(isRecord(error) ? Reflect.get(error, "code") : undefined).toBe(-32012);
+    expect(binding.calls).toBe(0);
+  });
+
   it("admits one unknown modern request at, but not above, the safe budget", async () => {
     const future = {
       jsonrpc: "2.0",
@@ -772,6 +800,35 @@ describe("Explorer Service Binding egress", () => {
     expect([...cache.entries.keys()]).toEqual(["https://stellar8004.internal/api/v1/stats"]);
   });
 
+  it("bypasses both Cache API reads and writes for an explicit no-cache probe", async () => {
+    const binding = new FakeBinding("fresh-binding-body");
+    const cache = new FakeCache();
+    cache.entries.set(
+      "https://stellar8004.internal/api/v1/stats",
+      new Response("stale-cache-body", {
+        headers: { "cache-control": "public, max-age=30" },
+      }),
+    );
+    const context = new TestContext();
+    const fetcher = createExplorerBindingFetch({
+      binding,
+      publicBaseUrl: "https://stellar8004.com",
+      originalRequest: new Request("http://localhost/mcp", {
+        headers: { "cache-control": "no-cache" },
+      }),
+      context,
+      cache,
+    });
+
+    const response = await fetcher("https://stellar8004.com/api/v1/stats");
+    await context.drain();
+
+    expect(await response.text()).toBe("fresh-binding-body");
+    expect(binding.calls).toBe(1);
+    expect(cache.matches).toBe(0);
+    expect(cache.puts).toBe(0);
+  });
+
   it("does not cache private, no-store, cookie-setting, or identity-varying responses", async () => {
     const unsafeHeaders: HeadersInit[] = [
       { "cache-control": "public, private=Set-Cookie" },
@@ -845,6 +902,57 @@ describe("health and real MCP factory smoke", () => {
     expect(binding.calls).toBe(0);
   });
 
+  it.each([
+    ["disabled on-chain verification", { VERIFY_ONCHAIN: "false" }],
+    ["changed score scale", { RANK_SCORE_MAX: "1" }],
+    ["changed quality weight", { RANK_W_QUALITY: "1" }],
+    [
+      "funded simulation source",
+      { RANK_SIM_SOURCE: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF" },
+    ],
+  ])("rejects runtime policy drift: %s", async (_label, overrides) => {
+    const binding = new ThrowingBinding();
+    const env: WorkerEnv = { ...workerEnv(binding), ...overrides };
+    const response = await createWorker({ cache: null }).fetch(
+      legacyRequest(initializeBody),
+      env,
+      new TestContext(),
+    );
+    expect(response.status).toBe(503);
+    const payload = await rpcPayload(response);
+    const error = Reflect.get(payload, "error");
+    expect(isRecord(error) ? Reflect.get(error, "code") : undefined).toBe(-32050);
+    expect(binding.calls).toBe(0);
+  });
+
+  it("rejects the retired mutable SERVER_VERSION binding", async () => {
+    const binding = new ThrowingBinding();
+    const env = Object.assign(workerEnv(binding), { SERVER_VERSION: "999.0.0" });
+    const response = await createWorker({ cache: null }).fetch(
+      legacyRequest(initializeBody),
+      env,
+      new TestContext(),
+    );
+    expect(response.status).toBe(503);
+    expect(binding.calls).toBe(0);
+  });
+
+  it("accepts explicit variables only when their effective policy is canonical", async () => {
+    const env: WorkerEnv = {
+      ...workerEnv(new ThrowingBinding()),
+      STELLAR_NETWORK: "mainnet",
+      EXPLORER_BASE_URL: "https://stellar8004.com",
+      VERIFY_ONCHAIN: "true",
+      RANK_SCORE_MAX: "100",
+    };
+    const response = await createWorker({ cache: null }).fetch(
+      legacyRequest(initializeBody),
+      env,
+      new TestContext(),
+    );
+    expect(response.status).toBe(200);
+  });
+
   it("accepts the canonical Explorer with a normalized trailing slash", async () => {
     const env: WorkerEnv = {
       ...workerEnv(new ThrowingBinding()),
@@ -901,6 +1009,15 @@ describe("health and real MCP factory smoke", () => {
     expect(isRecord(serverInfo) ? Reflect.get(serverInfo, "name") : undefined).toBe(
       "stellar-agent-mcp",
     );
+    expect(isRecord(serverInfo) ? Reflect.get(serverInfo, "version") : undefined).toBe(
+      WORKER_SERVER_VERSION,
+    );
+    const capabilities = isRecord(result) ? Reflect.get(result, "capabilities") : undefined;
+    expect(capabilities).toMatchObject({
+      tools: { listChanged: false },
+      resources: { listChanged: false },
+      prompts: { listChanged: false },
+    });
   });
 
   it("lists the capped remote tool schemas over /mcp without touching the Explorer", async () => {

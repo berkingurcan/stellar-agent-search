@@ -9,6 +9,18 @@ const EXPECTED_ROUTES = new Set([
 const EXPECTED_RATE_LIMIT = 30;
 const EXPECTED_RATE_PERIOD = 60;
 
+// Optional text vars may only restate the immutable production defaults. The
+// Worker does not need overrides in production, but accepting these exact
+// values makes an explicit wrangler config equivalent to the defaulted config.
+// Everything else (notably funded simulation sources and server identity) is
+// derived from the reviewed artifact or rejected.
+const APPROVED_VARS = Object.freeze({
+  STELLAR_NETWORK: "mainnet",
+  EXPLORER_BASE_URL: "https://stellar8004.com",
+  VERIFY_ONCHAIN: "true",
+  RANK_SCORE_MAX: "100",
+});
+
 const REQUIRED_ALIASES = {
   "@stellar/stellar-sdk": "@stellar/stellar-sdk/no-axios",
   "@stellar/stellar-sdk/contract": "@stellar/stellar-sdk/no-axios/contract",
@@ -127,6 +139,17 @@ export function validateDeployConfig(rawConfig) {
   const versionMetadata = objectValue(config.version_metadata, "version_metadata");
   if (versionMetadata.binding !== "CF_VERSION_METADATA") {
     deployError("version_metadata.binding must be CF_VERSION_METADATA");
+  }
+
+  const vars = config.vars === undefined ? {} : objectValue(config.vars, "vars");
+  for (const [name, value] of Object.entries(vars)) {
+    if (!Object.hasOwn(APPROVED_VARS, name)) {
+      deployError(`vars.${name} is not an approved production Worker variable`);
+    }
+    const expected = APPROVED_VARS[name];
+    if (value !== expected) {
+      deployError(`vars.${name} must be exactly ${JSON.stringify(expected)}`);
+    }
   }
 
   if (!Array.isArray(config.routes) || config.routes.length !== EXPECTED_ROUTES.size) {

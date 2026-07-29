@@ -2,7 +2,16 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { STELLAR_PUBNET_CAIP2, USDC_PUBNET_ADDRESS } from "@x402/stellar";
 import type { PaymentRequired, SettleResponse } from "@x402/core/types";
-import { StrKey, nativeToScVal } from "@stellar/stellar-sdk";
+import {
+  Account,
+  Address,
+  Networks,
+  Operation,
+  StrKey,
+  TransactionBuilder,
+  nativeToScVal,
+  xdr,
+} from "@stellar/stellar-sdk";
 import {
   SCRAPPER_AGENT_ID,
   SCRAPPER_ALLOWED_ENDPOINTS,
@@ -13,15 +22,25 @@ import {
   assertOnchainSettlement,
   assertResultHash,
   assertTransactionHash,
+  credentialFreeChildUrl,
+  expectedScrapeUrl,
   loadConfig,
   isSuccessfulResult,
+  paymentAuthorizationHash,
   pickScrapper,
   readPaidResult,
+  redactSensitiveError,
   requireMcpStructuredContent,
   resolveEndpoint,
+  scrapeInit,
+  submitFeedbackTransaction,
+  submitSignedPaymentRequest,
   validatePaymentChallenge,
   validateSettlementResponse,
+  type FeedbackTransactionLike,
+  type PaymentAttemptContext,
   type ResolvedAgent,
+  type RunJournalEntry,
   type RunRecord,
 } from "../examples/x402-demo.js";
 
@@ -29,6 +48,44 @@ const OTHER_ACCOUNT = "GAAIBWG3M3U6PAS3IC5BATPT52XKNYXBRJXQIPHEDQUQIEFQDYH4KZY7"
 const ENDPOINT = SCRAPPER_ALLOWED_ENDPOINTS[0];
 const TX = "ab".repeat(32);
 const RESULT_HASH = "cd".repeat(32);
+
+function paymentEnvelope(nonce = 1n) {
+  const args = new xdr.InvokeContractArgs({
+    contractAddress: Address.fromString(USDC_PUBNET_ADDRESS).toScAddress(),
+    functionName: "transfer",
+    args: [
+      nativeToScVal(OTHER_ACCOUNT, { type: "address" }),
+      nativeToScVal(SCRAPPER_EXPECTED_PAY_TO, { type: "address" }),
+      nativeToScVal(1000n, { type: "i128" }),
+    ],
+  });
+  const auth = new xdr.SorobanAuthorizationEntry({
+    credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
+      new xdr.SorobanAddressCredentials({
+        address: Address.fromString(OTHER_ACCOUNT).toScAddress(),
+        nonce: xdr.Int64.fromString(nonce.toString()),
+        signatureExpirationLedger: 1_000,
+        signature: nativeToScVal(Buffer.from(`sig-${nonce}`)),
+      }),
+    ),
+    rootInvocation: new xdr.SorobanAuthorizedInvocation({
+      function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(args),
+      subInvocations: [],
+    }),
+  });
+  return new TransactionBuilder(new Account(SCRAPPER_EXPECTED_PAY_TO, "0"), {
+    fee: "100",
+    networkPassphrase: Networks.PUBLIC,
+  })
+    .addOperation(
+      Operation.invokeHostFunction({
+        func: xdr.HostFunction.hostFunctionTypeInvokeContract(args),
+        auth: [auth],
+      }),
+    )
+    .setTimeout(30)
+    .build();
+}
 
 function config(dryRun = true) {
   return loadConfig({ STELLAR_NETWORK: "mainnet", DRY_RUN: dryRun ? "1" : "0" });
@@ -65,7 +122,48 @@ function challenge(overrides: Record<string, unknown> = {}): PaymentRequired {
   } as PaymentRequired;
 }
 
+function paymentAttempt(): PaymentAttemptContext {
+  return {
+    startedAt: "2026-07-29T00:00:00.000Z",
+    payerPublicKey: OTHER_ACCOUNT,
+    agentId: SCRAPPER_AGENT_ID,
+    endpoint: ENDPOINT,
+    challengeNetwork: STELLAR_PUBNET_CAIP2,
+    asset: USDC_PUBNET_ADDRESS,
+    payTo: SCRAPPER_EXPECTED_PAY_TO,
+    price: "1000",
+  };
+}
+
+function fakeFeedbackTransaction(status: string, sendError?: Error): FeedbackTransactionLike {
+  const transaction: FeedbackTransactionLike = {
+    async sign() {
+      transaction.signed = { hash: () => Buffer.from(TX, "hex") };
+    },
+    async send() {
+      if (sendError) throw sendError;
+      return {
+        sendTransactionResponse: { hash: TX },
+        getTransactionResponse: { status, txHash: TX },
+      };
+    },
+  };
+  return transaction;
+}
+
 describe("x402 demo MCP discovery is fail-closed", () => {
+  it("never forwards credential-bearing URL configuration to the keyless MCP child", () => {
+    expect(credentialFreeChildUrl("HTTPS_PROXY", "http://proxy.example:8080")).toBe(
+      "http://proxy.example:8080",
+    );
+    expect(() => credentialFreeChildUrl("HTTPS_PROXY", "http://user:token@proxy.example:8080")).toThrow(
+      /refusing to forward/,
+    );
+    expect(() => credentialFreeChildUrl("EXPLORER_BASE_URL", "https://example.com?apiKey=secret")).toThrow(
+      /refusing to forward/,
+    );
+  });
+
   it("rejects MCP tool-level errors even when the transport returned normally", () => {
     expect(() =>
       requireMcpStructuredContent("find_agent", {
@@ -136,6 +234,13 @@ describe("x402 challenge policy", () => {
     const required = challenge();
     required.resource.url = "https://evil.example/task";
     expect(() => validatePaymentChallenge(config(false), required)).toThrow(/resource mismatch/);
+
+    // This is the exact scheme mismatch returned by the live deployment on
+    // 2026-07-29. It is an upstream blocker, never a reason to weaken the pin.
+    required.resource.url = "http://scrapper.stellar8004.com/task";
+    expect(() => validatePaymentChallenge(config(false), required)).toThrow(
+      /resource mismatch.*http:\/\/scrapper.*expected=https:\/\/scrapper/,
+    );
   });
 
   it("rejects malformed price limits rather than silently using a default", () => {
@@ -146,7 +251,203 @@ describe("x402 challenge policy", () => {
   });
 });
 
+describe("x402 one-shot submission state machines", () => {
+  it("blocks redirects before a signed header can leak to another origin", async () => {
+    const unsigned = scrapeInit(config(false));
+    const signed = scrapeInit(config(false), { "payment-signature": "signed-capability" });
+    expect(unsigned.redirect).toBe("error");
+    expect(signed.redirect).toBe("error");
+
+    const crossOriginHeaders: string[] = [];
+    const redirectingFetch = async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      // Model fetch's redirect branch: the capability reaches the second
+      // origin only if the caller allowed redirect following.
+      if (init?.redirect !== "error") {
+        const value = new Headers(init?.headers).get("payment-signature");
+        if (value) crossOriginHeaders.push(value);
+        return new Response("redirected", { status: 200 });
+      }
+      throw new TypeError("redirect mode is set to error");
+    };
+
+    await expect(redirectingFetch(ENDPOINT, signed)).rejects.toThrow(/redirect mode/);
+    expect(crossOriginHeaders).toEqual([]);
+  });
+
+  it("fsync-seams the payment-submitted record before its only fetch attempt", async () => {
+    const entries: RunJournalEntry[] = [];
+    let fetchCalls = 0;
+    const result = await submitSignedPaymentRequest(
+      ENDPOINT,
+      scrapeInit(config(false), { "payment-signature": "signed-capability" }),
+      RESULT_HASH,
+      paymentAttempt(),
+      {
+        nowMs: () => 1_700_000_000_000,
+        appendJournal: async (_startedAt, entry) => {
+          entries.push(entry);
+          return "/tmp/payment.journal.jsonl";
+        },
+        fetchImpl: async (_input, init) => {
+          fetchCalls += 1;
+          expect(entries.map((entry) => entry.event)).toEqual(["payment_submitted"]);
+          expect(init?.redirect).toBe("error");
+          return new Response("ok", { status: 200 });
+        },
+      },
+    );
+
+    expect(fetchCalls).toBe(1);
+    expect(result.journalPath).toBe("/tmp/payment.journal.jsonl");
+    expect(entries.map((entry) => entry.event)).toEqual([
+      "payment_submitted",
+      "payment_response_received",
+    ]);
+  });
+
+  it("records an unknown payment outcome after a submitted request loses its response", async () => {
+    const entries: RunJournalEntry[] = [];
+    let fetchCalls = 0;
+    await expect(
+      submitSignedPaymentRequest(ENDPOINT, scrapeInit(config(false)), RESULT_HASH, paymentAttempt(), {
+        appendJournal: async (_startedAt, entry) => {
+          entries.push(entry);
+          return "/tmp/payment.journal.jsonl";
+        },
+        fetchImpl: async () => {
+          fetchCalls += 1;
+          throw new Error("socket reset");
+        },
+      }),
+    ).rejects.toThrow(/PAYMENT_OUTCOME_UNKNOWN.*\/tmp\/payment\.journal\.jsonl.*DO NOT rerun/s);
+    expect(fetchCalls).toBe(1);
+    expect(entries.map((entry) => entry.event)).toEqual([
+      "payment_submitted",
+      "payment_outcome_unknown",
+    ]);
+  });
+
+  it("bounds a hanging signed request and routes abort through the unknown-outcome journal", async () => {
+    const entries: RunJournalEntry[] = [];
+    await expect(
+      submitSignedPaymentRequest(ENDPOINT, scrapeInit(config(false)), RESULT_HASH, paymentAttempt(), {
+        requestTimeoutMs: 10,
+        appendJournal: async (_startedAt, entry) => {
+          entries.push(entry);
+          return "/tmp/payment-timeout.journal.jsonl";
+        },
+        fetchImpl: async (_input, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            const signal = init?.signal;
+            expect(signal).toBeDefined();
+            const rejectFromAbort = () => reject(signal?.reason ?? new Error("aborted"));
+            if (signal?.aborted) rejectFromAbort();
+            else signal?.addEventListener("abort", rejectFromAbort, { once: true });
+          }),
+      }),
+    ).rejects.toThrow(/PAYMENT_OUTCOME_UNKNOWN.*payment-timeout\.journal\.jsonl.*DO NOT rerun/s);
+    expect(entries.map((entry) => entry.event)).toEqual([
+      "payment_submitted",
+      "payment_outcome_unknown",
+    ]);
+    expect(entries[1]).toMatchObject({ event: "payment_outcome_unknown", stage: "signed_request" });
+  });
+
+  it("never submits payment if the durable pre-submit journal fails", async () => {
+    let fetchCalls = 0;
+    await expect(
+      submitSignedPaymentRequest(ENDPOINT, scrapeInit(config(false)), RESULT_HASH, paymentAttempt(), {
+        appendJournal: async () => {
+          throw new Error("disk full");
+        },
+        fetchImpl: async () => {
+          fetchCalls += 1;
+          return new Response("unexpected");
+        },
+      }),
+    ).rejects.toThrow(/journal could not be durably created; refusing to submit/);
+    expect(fetchCalls).toBe(0);
+  });
+
+  it("confirms feedback only after the exact signed hash reaches SUCCESS", async () => {
+    const entries: RunJournalEntry[] = [];
+    const result = await submitFeedbackTransaction(
+      fakeFeedbackTransaction("SUCCESS"),
+      paymentAttempt().startedAt,
+      SCRAPPER_AGENT_ID,
+      {
+        appendJournal: async (_startedAt, entry) => {
+          entries.push(entry);
+          return "/tmp/feedback.journal.jsonl";
+        },
+      },
+    );
+    expect(result.feedbackTxHash).toBe(TX);
+    expect(entries.map((entry) => entry.event)).toEqual([
+      "feedback_submitted",
+      "feedback_confirmed",
+    ]);
+  });
+
+  it("journals terminal FAILED feedback without ever claiming confirmation", async () => {
+    const entries: RunJournalEntry[] = [];
+    await expect(
+      submitFeedbackTransaction(fakeFeedbackTransaction("FAILED"), paymentAttempt().startedAt, SCRAPPER_AGENT_ID, {
+        appendJournal: async (_startedAt, entry) => {
+          entries.push(entry);
+          return "/tmp/feedback.journal.jsonl";
+        },
+      }),
+    ).rejects.toThrow(new RegExp(`FEEDBACK_FAILED: tx=${TX}`));
+    expect(entries.map((entry) => entry.event)).toEqual([
+      "feedback_submitted",
+      "feedback_failed",
+    ]);
+    expect(entries.some((entry) => entry.event === "feedback_confirmed")).toBe(false);
+  });
+
+  it.each([
+    ["NOT_FOUND", undefined],
+    ["send exception", new Error("poll timed out")],
+  ])("classifies %s as unknown with the same recoverable feedback hash", async (status, sendError) => {
+    const entries: RunJournalEntry[] = [];
+    const transaction = fakeFeedbackTransaction(status === "send exception" ? "NOT_FOUND" : status, sendError);
+    await expect(
+      submitFeedbackTransaction(transaction, paymentAttempt().startedAt, SCRAPPER_AGENT_ID, {
+        appendJournal: async (_startedAt, entry) => {
+          entries.push(entry);
+          return "/tmp/feedback.journal.jsonl";
+        },
+      }),
+    ).rejects.toThrow(new RegExp(`FEEDBACK_OUTCOME_UNKNOWN: tx=${TX}.*reconcile that exact hash`, "s"));
+    expect(entries.map((entry) => entry.event)).toEqual([
+      "feedback_submitted",
+      "feedback_outcome_unknown",
+    ]);
+    expect(entries.some((entry) => entry.event === "feedback_confirmed")).toBe(false);
+  });
+});
+
 describe("x402 evidence integrity", () => {
+  it("redacts signer/facilitator secrets and credential-bearing RPC URLs from nested errors", () => {
+    const env = {
+      STELLAR_PRIVATE_KEY: "SABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVWXYZ234567",
+      X402_API_KEY: "x402-super-secret",
+      STELLAR_RPC_URL: "https://rpc.example/v1/provider-secret?token=query-secret",
+    };
+    const message = redactSensitiveError(
+      new Error(
+        `RPC ${env.STELLAR_RPC_URL} rejected signer ${env.STELLAR_PRIVATE_KEY} using ${env.X402_API_KEY}`,
+      ),
+      env,
+    );
+    expect(message).not.toContain("provider-secret");
+    expect(message).not.toContain("query-secret");
+    expect(message).not.toContain(env.STELLAR_PRIVATE_KEY);
+    expect(message).not.toContain(env.X402_API_KEY);
+    expect(message.match(/\[REDACTED\]/g)).toHaveLength(3);
+  });
+
   it("requires canonical 32-byte transaction and result hashes", () => {
     expect(assertTransactionHash("payment", TX.toUpperCase())).toBe(TX);
     expect(() => assertTransactionHash("payment", "")).toThrow(/missing or not a 32-byte hex hash/);
@@ -193,6 +494,8 @@ describe("x402 evidence integrity", () => {
 
   it("requires a final, fresh on-chain transfer matching the full tuple", () => {
     const submittedAtMs = 1_700_000_000_500;
+    const envelope = paymentEnvelope(1n);
+    const authorizationHash = paymentAuthorizationHash(envelope.toXDR(), Networks.PUBLIC);
     const transfer = {
       type: () => ({ name: "contract" }),
       contractId: () => StrKey.decodeContract(USDC_PUBNET_ADDRESS),
@@ -212,6 +515,7 @@ describe("x402 evidence integrity", () => {
       txHash: TX,
       ledger: 123,
       createdAt: 1_700_000_001,
+      envelopeXdr: envelope.toEnvelope(),
       events: { contractEventsXdr: [[transfer]] },
     };
     const expected = {
@@ -220,6 +524,8 @@ describe("x402 evidence integrity", () => {
       asset: USDC_PUBNET_ADDRESS,
       amount: "1000",
       submittedAtMs,
+      authorizationHash,
+      networkPassphrase: Networks.PUBLIC,
     };
     expect(assertOnchainSettlement(tx, TX, expected)).toEqual({
       ledger: 123,
@@ -236,13 +542,87 @@ describe("x402 evidence integrity", () => {
     );
   });
 
-  it("never promotes explicit failure objects to successful feedback", () => {
-    expect(isSuccessfulResult({ success: false, data: [1] })).toBe(false);
-    expect(isSuccessfulResult({ ok: false, data: [1] })).toBe(false);
-    expect(isSuccessfulResult({ status: "error", data: [1] })).toBe(false);
-    expect(isSuccessfulResult({ ok: true })).toBe(false);
-    expect(isSuccessfulResult({ ok: true, data: {} })).toBe(false);
-    expect(isSuccessfulResult({ ok: true, data: [1] })).toBe(true);
+  it("rejects a prior identical transfer in the same RPC second unless its signed authorization matches", () => {
+    const expectedEnvelope = paymentEnvelope(1n);
+    const priorEnvelope = paymentEnvelope(2n);
+    const transfer = {
+      type: () => ({ name: "contract" }),
+      contractId: () => StrKey.decodeContract(USDC_PUBNET_ADDRESS),
+      body: () => ({
+        v0: () => ({
+          topics: () => [
+            nativeToScVal("transfer", { type: "symbol" }),
+            nativeToScVal(OTHER_ACCOUNT, { type: "address" }),
+            nativeToScVal(SCRAPPER_EXPECTED_PAY_TO, { type: "address" }),
+          ],
+          data: () => nativeToScVal(1000n, { type: "i128" }),
+        }),
+      }),
+    };
+    const submittedAtMs = 1_700_000_000_999;
+    const priorSameSecond = {
+      status: "SUCCESS",
+      txHash: TX,
+      ledger: 122,
+      createdAt: 1_700_000_000,
+      envelopeXdr: priorEnvelope.toEnvelope(),
+      events: { contractEventsXdr: [[transfer]] },
+    };
+    expect(() =>
+      assertOnchainSettlement(priorSameSecond, TX, {
+        payer: OTHER_ACCOUNT,
+        payTo: SCRAPPER_EXPECTED_PAY_TO,
+        asset: USDC_PUBNET_ADDRESS,
+        amount: "1000",
+        submittedAtMs,
+        authorizationHash: paymentAuthorizationHash(expectedEnvelope.toXDR(), Networks.PUBLIC),
+        networkPassphrase: Networks.PUBLIC,
+      }),
+    ).toThrow(/does not contain this payment's signed Soroban authorization/);
+  });
+
+  it("binds the same Soroban authorization across facilitator rebuilds and fee bumps", () => {
+    const inner = paymentEnvelope(7n);
+    const feeBump = TransactionBuilder.buildFeeBumpTransaction(
+      OTHER_ACCOUNT,
+      "100",
+      inner,
+      Networks.PUBLIC,
+    );
+    expect(paymentAuthorizationHash(feeBump.toXDR(), Networks.PUBLIC)).toBe(
+      paymentAuthorizationHash(inner.toXDR(), Networks.PUBLIC),
+    );
+    expect(paymentAuthorizationHash(paymentEnvelope(8n).toXDR(), Networks.PUBLIC)).not.toBe(
+      paymentAuthorizationHash(inner.toXDR(), Networks.PUBLIC),
+    );
+  });
+
+  it("admits only the deployed Scrapper's terminal success envelope and output format", () => {
+    const output = "URL: https://example.com\nTitle: Example\n\nContent:\nHello";
+    expect(isSuccessfulResult({ success: true, data: output }, "https://example.com")).toBe(true);
+    expect(isSuccessfulResult({ success: true, data: output }, "https://other.example")).toBe(false);
+
+    expect(isSuccessfulResult({ success: false, data: output })).toBe(false);
+    expect(isSuccessfulResult({ success: true, data: "job-1", status: "pending" })).toBe(false);
+    expect(isSuccessfulResult({ success: true, data: output, status: "queued" })).toBe(false);
+    expect(isSuccessfulResult({ success: true, data: output, code: 200 })).toBe(false);
+    expect(isSuccessfulResult({ code: 500, data: ["error"] })).toBe(false);
+    expect(isSuccessfulResult({ ok: true, data: [1] })).toBe(false);
+    expect(isSuccessfulResult({ arbitrary: "non-empty" })).toBe(false);
+    expect(isSuccessfulResult(["not a Scrapper envelope"])).toBe(false);
+    expect(isSuccessfulResult({ success: true, data: "URL: https://example.com\nno content section" })).toBe(false);
+  });
+
+  it("pins a valid Scrapper request before payment", () => {
+    expect(expectedScrapeUrl(config(false))).toBe("https://example.com");
+    expect(() => expectedScrapeUrl({ ...config(false), scrapeMethod: "GET" })).toThrow(/requires POST/);
+    expect(() => expectedScrapeUrl({ ...config(false), scrapeBody: "not-json" })).toThrow(/must be valid JSON/);
+    expect(() =>
+      expectedScrapeUrl({
+        ...config(false),
+        scrapeBody: JSON.stringify({ url: "https://example.com", evaluationMode: true }),
+      }),
+    ).toThrow(/evaluationMode/);
   });
 
   it("will not write an incomplete or unsuccessful full evidence receipt", () => {
@@ -258,6 +638,7 @@ describe("x402 evidence integrity", () => {
       payTo: SCRAPPER_EXPECTED_PAY_TO,
       price: "1000",
       paymentTxHash: TX,
+      paymentAuthorizationHash: "12".repeat(32),
       settlementLedger: 123,
       settlementConfirmedAt: "2026-07-29T00:00:00.500Z",
       resultHash: RESULT_HASH,
@@ -269,6 +650,9 @@ describe("x402 evidence integrity", () => {
     };
     expect(() => assertCompleteEvidenceRecord(rec)).not.toThrow();
     expect(() => assertCompleteEvidenceRecord({ ...rec, paymentTxHash: "" })).toThrow(/paymentTxHash/);
+    expect(() => assertCompleteEvidenceRecord({ ...rec, paymentAuthorizationHash: "" })).toThrow(
+      /lowercase SHA-256/,
+    );
     expect(() => assertCompleteEvidenceRecord({ ...rec, payerPublicKey: null })).toThrow(/payerPublicKey/);
     expect(() => assertCompleteEvidenceRecord({ ...rec, resultOk: false })).toThrow(/not usable/);
     expect(() => assertCompleteEvidenceRecord({ ...rec, feedbackTxHash: "" })).toThrow(/feedbackTxHash/);

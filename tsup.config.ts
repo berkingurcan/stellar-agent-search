@@ -3,7 +3,7 @@ import { defineConfig } from "tsup";
 export default defineConfig({
   entry: ["src/index.ts"],
   format: ["esm"],
-  target: "node20",
+  target: "node22",
   clean: true,
   sourcemap: true,
   // The bin needs a shebang; inject via banner (not in source, to avoid a

@@ -26,6 +26,7 @@ export const zFlags = z
   .object({
     unrated: z.boolean(),
     newAgent: z.boolean(),
+    lowEvidence: z.boolean(),
     lowConfidence: z.boolean(),
     verified: z.boolean(),
     verificationMismatch: z.boolean(),
@@ -73,6 +74,8 @@ export const zRankedAgent = z
     id: z.number(),
     rank: z.number(),
     score: z.number(),
+    rankVersion: z.string(),
+    evidenceStrength: z.number(),
     stellarId: z.string(),
     caip2Id: z.string(),
     network: z.string(),

@@ -82,6 +82,51 @@ describe("fail-closed Worker deploy config validation", () => {
     expect(() => validateDeployConfig(config)).toThrow(/version_metadata/);
   });
 
+  it("allows only exact, canonical production vars", () => {
+    const canonical = deployableConfig();
+    canonical.vars = {
+      STELLAR_NETWORK: "mainnet",
+      EXPLORER_BASE_URL: "https://stellar8004.com",
+      VERIFY_ONCHAIN: "true",
+      RANK_SCORE_MAX: "100",
+    };
+    expect(validateDeployConfig(canonical)).toMatchObject({ namespaceId: "8675309" });
+
+    for (const [name, value] of [
+      ["VERIFY_ONCHAIN", "false"],
+      ["RANK_SCORE_MAX", "1"],
+    ]) {
+      const changed = deployableConfig();
+      changed.vars = { [name]: value };
+      expect(() => validateDeployConfig(changed)).toThrow(new RegExp(`vars\\.${name} must be exactly`));
+    }
+  });
+
+  it.each([
+    "RANK_W_QUALITY",
+    "RANK_W_VOLUME",
+    "RANK_W_BREADTH",
+    "RANK_SIM_SOURCE",
+    "SERVER_VERSION",
+    "STELLAR_RPC_URL",
+    "UNREVIEWED_VAR",
+  ])(
+    "rejects unapproved production var %s",
+    (name) => {
+      const config = deployableConfig();
+      config.vars = { [name]: "attacker-controlled" };
+      expect(() => validateDeployConfig(config)).toThrow(
+        new RegExp(`vars\\.${name} is not an approved`),
+      );
+    },
+  );
+
+  it("rejects a malformed vars container", () => {
+    const config = deployableConfig();
+    config.vars = [];
+    expect(() => validateDeployConfig(config)).toThrow(/vars must be an object/);
+  });
+
   it("rejects the wrong service target or an axios-capable Stellar SDK alias", () => {
     const wrongService = deployableConfig();
     wrongService.services[0].service = "public-indexer-copy";

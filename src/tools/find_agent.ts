@@ -20,7 +20,8 @@ import {
   summarizeRanked,
   toolResult,
   zLimit,
-  zMinScore,
+  zLegacyMinScore,
+  zMinExplorerScore,
   zSort,
   zTrust,
   READ_ANNOTATIONS,
@@ -49,12 +50,19 @@ const inputShape = {
     .optional()
     .describe("When present, require owner-declared service endpoint candidates."),
   trust: zTrust.optional().describe("Require a trust model."),
-  minScore: zMinScore.optional().describe("Minimum declared reputation score (0..100)."),
+  minExplorerScore: zMinExplorerScore
+    .optional()
+    .describe("Minimum upstream v1 Explorer total_score in protocol units; not local rank."),
+  minScore: zLegacyMinScore
+    .optional()
+    .describe("Deprecated ambiguous input; rejected. Use minExplorerScore."),
   sortBy: zSort.default("relevance"),
   verify: z
     .boolean()
     .default(false)
-    .describe("On-chain-verify the top results (slower; default off for discovery)."),
+    .describe(
+      "Probe the Reputation contract for the top results (slower; current probe verifies no reputation fields).",
+    ),
 };
 
 type Args = z.infer<z.ZodObject<typeof inputShape>>;
@@ -81,6 +89,11 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
       annotations: { title: "Find Agent", ...READ_ANNOTATIONS },
     },
     handler<Args>(async (args) => {
+      if (args.minScore !== undefined) {
+        throw new ValidationError(
+          "minScore is ambiguous and no longer supported; use minExplorerScore for the upstream v1 Explorer total_score filter.",
+        );
+      }
       const parsed = parseQuery(args.query);
       if (parsed.unsupported.length > 0) {
         throw new ValidationError(
@@ -93,7 +106,7 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
         mpp: args.mpp ?? parsed.filters.mpp,
         hasServices: args.hasServices ?? parsed.filters.hasServices,
         trust: args.trust ? canonicalTrust(args.trust) : parsed.filters.trust,
-        minScore: args.minScore ?? parsed.filters.minScore,
+        minExplorerScore: args.minExplorerScore ?? parsed.filters.minExplorerScore,
       };
 
       const filters: Omit<NonNullable<GetAgentsParams>, "search" | "page"> = {
@@ -103,7 +116,9 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
       if (effective.mpp !== undefined) filters.mpp = effective.mpp;
       if (effective.hasServices !== undefined) filters.hasServices = effective.hasServices;
       if (effective.trust !== undefined) filters.trust = effective.trust;
-      if (effective.minScore !== undefined) filters.minScore = effective.minScore;
+      if (effective.minExplorerScore !== undefined) {
+        filters.minScore = effective.minExplorerScore;
+      }
 
       const searchText = parsed.keywords.join(" ");
       const discovery = await deps.explorer.findAgentsWithCoverage(searchText, {
@@ -113,7 +128,6 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
       });
 
       const rows = await rankAndVerify(deps, discovery.agents, {
-        weights: deps.config.weights,
         sortBy: args.sortBy,
         verify: args.verify,
         verifyTopK: VERIFY_TOP_K,

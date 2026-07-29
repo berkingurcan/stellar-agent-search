@@ -30,6 +30,14 @@ export class ExplorerScopeError extends Error {
   }
 }
 
+/** Explorer returned HTTP success with a malformed or impossible data payload. */
+export class UpstreamDataError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UpstreamDataError";
+  }
+}
+
 /** True when `err` is one of the SDK's typed API errors. */
 export function isSdkError(err: unknown): err is ApiError {
   return err instanceof ApiError;
@@ -37,6 +45,9 @@ export function isSdkError(err: unknown): err is ApiError {
 
 /** Classify any thrown value into a stable, typed error body. */
 export function classifyError(err: unknown): ToolErrorBody {
+  if (err instanceof UpstreamDataError) {
+    return { error: err.message, code: "UPSTREAM_ERROR", detail: "malformed explorer payload" };
+  }
   if (err instanceof ExplorerScopeError) {
     return { error: err.message, code: "UPSTREAM_ERROR", detail: "chain/network scope mismatch" };
   }

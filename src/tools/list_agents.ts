@@ -3,12 +3,16 @@
  *
  * A straight browse primitive: fetch one page from the explorer with the given
  * filters, then rank the page with the deterministic engine (declared-only by
- * default; on-chain verify optional and bounded).
+ * default; the optional on-chain probe is bounded and verifies no current fields).
  */
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import type { GetAgentsParams } from "../lib/explorer.js";
+import { ValidationError } from "@trionlabs/stellar8004";
+import {
+  V1_UNVERSIONED_PAGINATION_LIMITATION,
+  type GetAgentsParams,
+} from "../lib/explorer.js";
 import {
   canonicalTrust,
   handler,
@@ -16,7 +20,8 @@ import {
   summarizeRanked,
   toolResult,
   zLimit,
-  zMinScore,
+  zLegacyMinScore,
+  zMinExplorerScore,
   zSort,
   zTrust,
   READ_ANNOTATIONS,
@@ -30,11 +35,19 @@ const inputShape = {
   mpp: z.literal(true).optional().describe("When present, require indexed MPP support."),
   hasServices: z.literal(true).optional(),
   trust: zTrust.optional(),
-  minScore: zMinScore.optional(),
+  minExplorerScore: zMinExplorerScore.optional().describe(
+    "Minimum upstream v1 Explorer total_score in protocol units; not local rank.",
+  ),
+  minScore: zLegacyMinScore
+    .optional()
+    .describe("Deprecated ambiguous input; rejected. Use minExplorerScore."),
   sortBy: zSort.default("score"),
   limit: zLimit(20),
   page: z.number().int().min(1).default(1),
-  verify: z.boolean().default(false).describe("On-chain-verify the top results (slower)."),
+  verify: z
+    .boolean()
+    .default(false)
+    .describe("Probe the Reputation contract for the top results; current probe verifies no reputation fields."),
 };
 
 type Args = z.infer<z.ZodObject<typeof inputShape>>;
@@ -59,19 +72,24 @@ export function registerListAgents(server: McpServer, deps: ToolDeps): void {
       title: "List Agents",
       description:
         "Paginated, filterable listing of registered agents, ranked by the 3-axis engine. Filter by " +
-        "x402/mpp/hasServices/trust/minScore. Self-declared text lives in each row's labeled " +
+        "x402/mpp/hasServices/trust/minExplorerScore. Self-declared text lives in each row's labeled " +
         "`selfDeclared` slot.",
       inputSchema: z.object(inputShape),
       outputSchema: z.object(outputShape),
       annotations: { title: "List Agents", ...READ_ANNOTATIONS },
     },
     handler<Args>(async (args) => {
+      if (args.minScore !== undefined) {
+        throw new ValidationError(
+          "minScore is ambiguous and no longer supported; use minExplorerScore for the upstream v1 Explorer total_score filter.",
+        );
+      }
       const params: GetAgentsParams = { page: args.page, limit: args.limit };
       if (args.x402 !== undefined) params.x402 = args.x402;
       if (args.mpp !== undefined) params.mpp = args.mpp;
       if (args.hasServices !== undefined) params.hasServices = args.hasServices;
       if (args.trust !== undefined) params.trust = canonicalTrust(args.trust);
-      if (args.minScore !== undefined) params.minScore = args.minScore;
+      if (args.minExplorerScore !== undefined) params.minScore = args.minExplorerScore;
 
       const response = await deps.explorer.getAgents(params);
       const agents = response.data ?? [];
@@ -79,7 +97,6 @@ export function registerListAgents(server: McpServer, deps: ToolDeps): void {
       const hasMore = typeof pagination?.hasMore === "boolean" ? pagination.hasMore : undefined;
 
       const rows = await rankAndVerify(deps, agents, {
-        weights: deps.config.weights,
         sortBy: args.sortBy,
         verify: args.verify,
         verifyTopK: VERIFY_TOP_K,
@@ -97,13 +114,17 @@ export function registerListAgents(server: McpServer, deps: ToolDeps): void {
           hasMore: hasMore ?? null,
         },
         coverage: {
-          coverageComplete: hasMore === false,
+          coverageComplete: false,
           paginationExhausted: hasMore === false,
-          snapshotConsistent: true,
+          snapshotConsistent: false,
           pagesScanned: 1,
           recordsScanned: agents.length,
           ...(hasMore !== undefined ? { hasMore } : {}),
-          ...(hasMore === undefined ? { limitations: ["pagination-metadata-unavailable"] } : {}),
+          limitations: [
+            V1_UNVERSIONED_PAGINATION_LIMITATION,
+            ...(args.page > 1 ? ["prior-pages-not-scanned"] : []),
+            ...(hasMore === undefined ? ["pagination-metadata-unavailable"] : []),
+          ],
         },
         agents: rows,
       });

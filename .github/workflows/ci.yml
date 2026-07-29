@@ -22,7 +22,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        node: ['20', '22', '24']
+        node: ['22', '24']
 
     steps:
       - name: Checkout
@@ -54,8 +54,7 @@ jobs:
 
   # web/ is a separate npm project on purpose: it is never published (the root
   # package.json `files` field ships dist/ only), and its toolchain floor is
-  # higher than the package's — the server supports Node 20+, while this job
-  # follows the landing toolchain on Node 22.
+  # aligned with the package's Node 22+ runtime floor and the landing toolchain.
   # So it gets one job on one Node version rather than a slot in the matrix.
   web:
     name: landing page
@@ -82,6 +81,10 @@ jobs:
 
       - name: Build
         run: npm run build
+        working-directory: web
+
+      - name: Assert pre-release/published command boundary in built assets
+        run: npm run check:release-surface
         working-directory: web
 
   worker:

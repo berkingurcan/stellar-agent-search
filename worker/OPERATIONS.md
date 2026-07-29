@@ -39,7 +39,9 @@ node worker/scripts/canary.mjs \
 ```
 
 The script proves the version override, shallow health, MCP initialization, and
-one real `get_registry_health` call through the Explorer Service Binding. It
+one uncached `get_registry_health` call through the Explorer Service Binding.
+The MCP probe sends `Cache-Control: no-cache`; the Worker gives it request-local
+cache state, bypasses Cache API, and rejects MCP tool-level error results. It
 does **not** claim to prove caller identity. Compare the two short canary
 windows in `stellar8004-web` logs and require distinct trusted
 `CF-Connecting-IP`/rate-limit actors. A label or User-Agent is not acceptable

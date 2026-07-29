@@ -38,6 +38,7 @@ function profileOn(network: "mainnet" | "testnet" = "mainnet"): AgentProfile {
     flags: {
       unrated: false,
       newAgent: false,
+      lowEvidence: true,
       lowConfidence: true,
       verified: true,
       verificationMismatch: false,
@@ -113,7 +114,7 @@ describe("derived AgentCard trust boundary", () => {
     const card = toAgentCard(profileOn());
     const ext = card["x-stellar8004"];
     expect(ext.verified).toBe(true);
-    expect(ext.verificationScope).toBe("reputation-summary-only");
+    expect(ext.verificationScope).toBe("reputation-reachability-only");
     expect(ext.provenance.a2aProtocolConformanceVerified).toBe(false);
     expect(ext.provenance.endpointOwnershipVerified).toBe(false);
     expect(ext.wallet).toBeNull();

@@ -1,254 +1,289 @@
 /**
- * ranking.test.ts — GOLDEN snapshot tests for the deterministic 3-axis ranking
- * engine (src/lib/ranking.ts). Every expected number here was computed by hand
- * from the frozen formula (modules/01 §3) at RANK_SCORE_MAX = 100:
+ * Golden tests for stellar-agent-mcp-declared-evidence-v1.
  *
- *   quality = clamp(avg / 100, 0, 1)              (null when unrated)
- *   volume  = ln1p(fc)      / ln1p(VOL_SAT=50)
- *   breadth = ln1p(uc)      / ln1p(BREADTH_SAT=25)
- *   base    = 0.5*q + 0.2*v + 0.3*b
- *   score   = clamp(base + payment + endpoint bonuses, 0, 1)
- *   score100= round(score * 100)
- *
- * These are golden constants, not a re-implementation: if the formula or a
- * tunable constant changes, these break loudly (as intended).
+ *   q     = clamp(avg / 100, 0, 1), or 0 when unrated
+ *   effUc = min(validSafeInt(uniqueClients), validSafeInt(feedbackCount))
+ *   effFc = min(feedbackCount, 3 * effUc)
+ *   v     = ln1p(effFc) / ln1p(50)
+ *   b     = ln1p(effUc) / ln1p(25)
+ *   e     = 0.4*v + 0.6*b
+ *   score = q*e
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  scoreAgent,
-  rankAgents,
-  qualityNorm,
-  volumeNorm,
   breadthNorm,
-  normalizeWeights,
   clamp,
+  qualityNorm,
+  rankAgents,
   RANKING,
+  scoreAgent,
+  volumeNorm,
   type RankInput,
 } from "../src/lib/ranking.js";
-import { RANK_SCORE_MAX, DEFAULT_WEIGHTS } from "../src/config.js";
+import { RANK_SCORE_MAX } from "../src/config.js";
+import { declaredReputation } from "../src/tools/shared.js";
 
-// A fixed "now" so the newAgent flag is deterministic. 2026-07-01T00:00:00Z.
 const NOW = Date.parse("2026-07-01T00:00:00.000Z");
 const OPTS = { now: NOW, scoreMax: RANK_SCORE_MAX } as const;
 
-describe("pure axis normalizers", () => {
-  it("quality is null when unrated (no feedback or no average)", () => {
+function input(overrides: Partial<RankInput> = {}): RankInput {
+  return {
+    id: 1,
+    avg: 80,
+    feedbackCount: 10,
+    uniqueClients: 5,
+    x402: false,
+    mpp: false,
+    hasServices: false,
+    createdAt: "2025-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("pure normalizers", () => {
+  it("distinguishes unrated from a zero rating", () => {
     expect(qualityNorm(null, 0)).toBeNull();
-    expect(qualityNorm(90, 0)).toBeNull(); // avg present but zero feedback
-    expect(qualityNorm(null, 5)).toBeNull(); // feedback present but no average
+    expect(qualityNorm(90, 0)).toBeNull();
+    expect(qualityNorm(null, 5)).toBeNull();
+    expect(qualityNorm(0, 5)).toBe(0);
   });
 
-  it("quality normalizes against scoreMax=100", () => {
-    expect(qualityNorm(96.75, 8, RANK_SCORE_MAX)).toBeCloseTo(0.9675, 10);
-    expect(qualityNorm(50, 3, 100)).toBeCloseTo(0.5, 10);
-    // above scale clamps to 1
+  it("normalizes and clamps quality against the local display scale", () => {
+    expect(qualityNorm(96.75, 8, 100)).toBeCloseTo(0.9675, 10);
     expect(qualityNorm(150, 3, 100)).toBe(1);
+    expect(qualityNorm(-10, 3, 100)).toBe(0);
   });
 
-  it("volume is log-saturating: 0 at fc=0, exactly 1 at VOL_SAT", () => {
+  it("uses the documented log saturation points", () => {
     expect(volumeNorm(0)).toBe(0);
     expect(volumeNorm(RANKING.VOL_SAT)).toBeCloseTo(1, 12);
-    expect(volumeNorm(8)).toBeCloseTo(0.5588306254, 9);
-  });
-
-  it("breadth is log-saturating: 0 at uc=0, exactly 1 at BREADTH_SAT", () => {
     expect(breadthNorm(0)).toBe(0);
     expect(breadthNorm(RANKING.BREADTH_SAT)).toBeCloseTo(1, 12);
-    expect(breadthNorm(4)).toBeCloseTo(0.4939810388, 9);
   });
 
-  it("clamp handles NaN by returning the low bound", () => {
-    expect(clamp(NaN, 0, 1)).toBe(0);
+  it("clamps NaN and out-of-range values", () => {
+    expect(clamp(Number.NaN, 0, 1)).toBe(0);
     expect(clamp(5, 0, 1)).toBe(1);
     expect(clamp(-5, 0, 1)).toBe(0);
   });
+});
 
-  it("normalizeWeights renormalizes to sum 1 and falls back on all-zero", () => {
-    const w = normalizeWeights({ quality: 2, volume: 1, breadth: 1 });
-    expect(w.quality + w.volume + w.breadth).toBeCloseTo(1, 12);
-    expect(w.quality).toBeCloseTo(0.5, 12);
-    expect(normalizeWeights({ quality: 0, volume: 0, breadth: 0 })).toEqual(DEFAULT_WEIGHTS);
+describe("Explorer reputation adapter", () => {
+  it("fails malformed numeric fields closed before ranking", () => {
+    const declared = declaredReputation({
+      scores: {
+        feedbackCount: Number.POSITIVE_INFINITY,
+        uniqueClients: Number.NaN,
+        average: Number.POSITIVE_INFINITY,
+      },
+    } as never);
+    expect(declared).toEqual({ average: null, feedbackCount: 0, uniqueClients: 0 });
   });
 });
 
-describe("GOLDEN: Scrapper-like high-reputation agent (avg 96.75, 8 fb, 4 uc)", () => {
-  const input: RankInput = {
+describe("golden high-rated example", () => {
+  const example = input({
     id: 10,
     avg: 96.75,
     feedbackCount: 8,
     uniqueClients: 4,
     x402: true,
-    mpp: false,
     hasServices: true,
-    createdAt: "2025-01-01T00:00:00.000Z", // old ⇒ not newAgent
-  };
+  });
 
-  it("produces the exact golden breakdown", () => {
-    const r = scoreAgent(input, OPTS);
+  it("returns the exact versioned q × evidence breakdown", () => {
+    const r = scoreAgent(example, OPTS);
+    expect(r.rankVersion).toBe("stellar-agent-mcp-declared-evidence-v1");
     expect(r.quality.raw).toBe(96.75);
     expect(r.quality.norm).toBeCloseTo(0.9675, 10);
-    expect(r.volume.raw).toBe(8);
-    expect(r.volume.norm).toBeCloseTo(0.5588306254, 9);
-    expect(r.breadth.raw).toBe(4);
-    expect(r.breadth.norm).toBeCloseTo(0.4939810388, 9);
-    expect(r.paymentBonus).toBe(RANKING.P_X402); // x402 only
-    expect(r.endpointBonus).toBe(RANKING.P_SERVICES);
-    expect(r.verifiedBonus).toBe(0);
-    expect(r.base).toBeCloseTo(0.74371, 5);
-    expect(r.score).toBeCloseTo(0.82371, 5);
-    expect(r.score100).toBe(82);
-    expect(r.confidence).toBeCloseTo(0.532891, 5);
+    expect(r.quality.weight).toBe(1);
+    expect(r.quality.weighted).toBeCloseTo(0.9675, 10);
+    expect(r.effectiveUniqueClients).toBe(4);
+    expect(r.effectiveFeedbackCount).toBe(8);
+    expect(r.volume.norm).toBeCloseTo(0.5588306254094444, 12);
+    expect(r.volume.weight).toBe(0.4);
+    expect(r.volume.weighted).toBeCloseTo(0.2235322501637778, 12);
+    expect(r.breadth.norm).toBeCloseTo(0.49398103882196526, 12);
+    expect(r.breadth.weight).toBe(0.6);
+    expect(r.breadth.weighted).toBeCloseTo(0.29638862329317915, 12);
+    expect(r.evidenceStrength).toBeCloseTo(0.5199208734569569, 12);
+    expect(r.score).toBeCloseTo(0.5030234450696058, 12);
+    expect(r.score100).toBe(50);
+    expect(r.base).toBe(r.score);
+    expect(r.confidence).toBe(r.evidenceStrength);
   });
 
-  it("is well clear of the mid-range: a strong agent scores high", () => {
-    expect(scoreAgent(input, OPTS).score100).toBeGreaterThanOrEqual(80);
+  it("does not turn declarations or verification state into points", () => {
+    const baseline = scoreAgent(example, OPTS);
+    for (const candidate of [
+      { ...example, x402: false, mpp: false, hasServices: false },
+      { ...example, verificationStatus: "verified" as const },
+      { ...example, verificationStatus: "mismatch" as const },
+    ]) {
+      const r = scoreAgent(candidate, OPTS);
+      expect(r.score).toBe(baseline.score);
+      expect(r.paymentBonus).toBe(0);
+      expect(r.endpointBonus).toBe(0);
+      expect(r.verifiedBonus).toBe(0);
+    }
   });
 
-  it("flags are honest: rated, confident, not new", () => {
-    const r = scoreAgent(input, OPTS);
-    expect(r.flags).toEqual({
+  it("exposes lowEvidence and its deprecated alias unambiguously", () => {
+    expect(scoreAgent(example, OPTS).flags).toEqual({
       unrated: false,
       newAgent: false,
+      lowEvidence: false,
       lowConfidence: false,
       verified: false,
       verificationMismatch: false,
     });
   });
-
-  it("full verification is a flag, never a score-inflating bonus", () => {
-    const r = scoreAgent({ ...input, verificationStatus: "verified" }, OPTS);
-    expect(r.verifiedBonus).toBe(0);
-    expect(r.score100).toBe(82);
-    expect(r.flags.verified).toBe(true);
-  });
-
-  it("a mismatch is a flag only — no bonus, no penalty", () => {
-    const r = scoreAgent({ ...input, verificationStatus: "mismatch" }, OPTS);
-    expect(r.verifiedBonus).toBe(0);
-    expect(r.score100).toBe(82); // identical to the unverified score
-    expect(r.flags.verificationMismatch).toBe(true);
-  });
 });
 
-describe("GOLDEN: unrated agent is flagged but NOT buried", () => {
-  const unrated: RankInput = {
-    id: 99,
-    avg: null,
-    feedbackCount: 0,
-    uniqueClients: 0,
-    x402: true,
-    mpp: false,
-    hasServices: true,
-    createdAt: "2026-06-25T00:00:00.000Z", // within NEW_AGENT_DAYS of NOW
-  };
-  // A genuinely poor but rated agent that the unrated one should still out-rank.
-  const badRated: RankInput = {
-    id: 7,
-    avg: 1,
-    feedbackCount: 1,
-    uniqueClients: 1,
-    x402: false,
-    mpp: false,
-    hasServices: false,
-    createdAt: "2025-01-01T00:00:00.000Z",
-  };
-
-  it("displayed score stays honest (quality contributes 0)", () => {
-    const r = scoreAgent(unrated, OPTS);
-    expect(r.quality.raw).toBeNull();
-    expect(r.quality.norm).toBe(0);
-    expect(r.score100).toBe(8); // only the capability bonuses
-    expect(r.flags.unrated).toBe(true);
-    expect(r.flags.lowConfidence).toBe(true);
-    expect(r.flags.newAgent).toBe(true);
+describe("evidence cannot manufacture quality", () => {
+  it("gives no novelty floor to an unrated new agent", () => {
+    const r = scoreAgent(
+      input({
+        id: 99,
+        avg: null,
+        feedbackCount: 0,
+        uniqueClients: 0,
+        x402: true,
+        hasServices: true,
+        createdAt: "2026-06-25T00:00:00.000Z",
+      }),
+      OPTS,
+    );
+    expect(r.score).toBe(0);
+    expect(r.sortScore).toBe(0);
+    expect(r.evidenceStrength).toBe(0);
+    expect(r.flags).toMatchObject({ unrated: true, newAgent: true, lowEvidence: true });
   });
 
-  it("sortScore is novelty-floored to NOVELTY_FLOOR while score is not", () => {
-    const r = scoreAgent(unrated, OPTS);
-    expect(r.sortScore).toBeCloseTo(RANKING.NOVELTY_FLOOR, 12);
-    expect(r.sortScore).toBeGreaterThan(r.score);
+  it("keeps a broad zero-rated agent at zero", () => {
+    const r = scoreAgent(input({ avg: 0, feedbackCount: 50, uniqueClients: 25 }), OPTS);
+    expect(r.evidenceStrength).toBe(1);
+    expect(r.score100).toBe(0);
   });
 
-  it("ranks ABOVE a rated-but-terrible agent despite a lower displayed score", () => {
-    const [first, second] = rankAgents([badRated, unrated], OPTS);
-    expect(first.id).toBe(99); // unrated, floored to 0.15
-    expect(second.id).toBe(7); // rated but score ~0.104 < 0.15
-    // ...and honesty is preserved: the #1 row's displayed score is the lower one.
-    expect(first.result.score100).toBe(8);
-    expect(second.result.score100).toBe(10);
-    expect(first.result.score100).toBeLessThan(second.result.score100);
-  });
-});
-
-describe("GOLDEN: sybil resistance — breadth outweighs raw volume", () => {
-  const base = { avg: 90, feedbackCount: 40, x402: false, mpp: false, hasServices: false } as const;
-  // Same average + same feedback count; only the unique-client breadth differs.
-  const sybil: RankInput = { id: 1, uniqueClients: 1, ...base }; // 40 fb from ONE client
-  const broad: RankInput = { id: 2, uniqueClients: 20, ...base }; // 40 fb from 20 clients
-
-  it("the sybil agent scores materially lower (70 vs 92)", () => {
-    const s = scoreAgent(sybil, OPTS);
-    const b = scoreAgent(broad, OPTS);
-    expect(s.score100).toBe(70);
-    expect(b.score100).toBe(92);
-    expect(b.score100 - s.score100).toBeGreaterThanOrEqual(20);
-  });
-
-  it("volume axis is identical; only breadth separates them", () => {
-    const s = scoreAgent(sybil, OPTS);
-    const b = scoreAgent(broad, OPTS);
-    expect(s.volume.norm).toBeCloseTo(b.volume.norm, 12);
-    expect(b.breadth.norm).toBeGreaterThan(s.breadth.norm);
-  });
-
-  it("ranking orders the broad agent first under every score-based mode", () => {
-    for (const sortBy of ["relevance", "score", "confidence"] as const) {
-      const ranked = rankAgents([sybil, broad], { ...OPTS, sortBy });
-      expect(ranked[0].id).toBe(2);
-      expect(ranked[0].rank).toBe(1);
+  it("never lets the final score exceed normalized quality", () => {
+    for (const candidate of [
+      input({ avg: 1, feedbackCount: 1, uniqueClients: 1 }),
+      input({ avg: 90, feedbackCount: 40, uniqueClients: 1 }),
+      input({ avg: 90, feedbackCount: 40, uniqueClients: 20 }),
+    ]) {
+      const r = scoreAgent(candidate, OPTS);
+      expect(r.score).toBeLessThanOrEqual(r.quality.norm);
     }
   });
 });
 
-describe("ranking ordering + determinism", () => {
-  const inputs: RankInput[] = [
-    { id: 1, avg: 90, feedbackCount: 40, uniqueClients: 20, x402: false, mpp: false, hasServices: false },
-    { id: 2, avg: 96.75, feedbackCount: 8, uniqueClients: 4, x402: true, mpp: false, hasServices: true },
-    { id: 3, avg: 90, feedbackCount: 40, uniqueClients: 1, x402: false, mpp: false, hasServices: false },
+describe("bounded declared-evidence proxy", () => {
+  const repeated = input({ id: 1, avg: 90, feedbackCount: 40, uniqueClients: 1 });
+  const broad = input({ id: 2, avg: 90, feedbackCount: 40, uniqueClients: 20 });
+
+  it("caps repeated rows and separates one-client from broad evidence", () => {
+    const one = scoreAgent(repeated, OPTS);
+    const many = scoreAgent(broad, OPTS);
+    expect(one.effectiveFeedbackCount).toBe(3);
+    expect(one.evidenceStrength).toBeCloseTo(0.26868077964312354, 12);
+    expect(one.score100).toBe(24);
+    expect(one.flags.lowEvidence).toBe(true);
+    expect(many.effectiveFeedbackCount).toBe(40);
+    expect(many.evidenceStrength).toBeCloseTo(0.9384651296727772, 12);
+    expect(many.score100).toBe(84);
+    expect(many.flags.lowEvidence).toBe(false);
+  });
+
+  it("keeps quality independent of breadth", () => {
+    expect(scoreAgent(repeated, OPTS).quality.norm).toBe(0.9);
+    expect(scoreAgent(broad, OPTS).quality.norm).toBe(0.9);
+  });
+
+  it("orders by evidence and supports confidence only as a deprecated alias", () => {
+    const evidence = rankAgents([repeated, broad], { ...OPTS, sortBy: "evidence" });
+    const legacy = rankAgents([repeated, broad], { ...OPTS, sortBy: "confidence" });
+    expect(evidence.map((r) => r.id)).toEqual([2, 1]);
+    expect(legacy).toEqual(evidence);
+  });
+});
+
+describe("malformed aggregate hardening", () => {
+  it("cannot buy any evidence with uniqueClients when feedbackCount is zero", () => {
+    const r = scoreAgent(input({ avg: null, feedbackCount: 0, uniqueClients: 25 }), OPTS);
+    expect(r.breadth.raw).toBe(25);
+    expect(r.effectiveUniqueClients).toBe(0);
+    expect(r.effectiveFeedbackCount).toBe(0);
+    expect(r.evidenceStrength).toBe(0);
+    expect(r.score100).toBe(0);
+    expect(r.flags).toMatchObject({ unrated: true, lowEvidence: true });
+  });
+
+  it("cannot buy breadth with an impossible unique-client tuple", () => {
+    const r = scoreAgent(input({ feedbackCount: 1, uniqueClients: 100 }), OPTS);
+    expect(r.breadth.raw).toBe(100);
+    expect(r.effectiveUniqueClients).toBe(1);
+    expect(r.breadth.norm).toBeCloseTo(breadthNorm(1), 12);
+    expect(r.flags.lowEvidence).toBe(true);
+  });
+
+  it.each([
+    [Number.NaN, 4],
+    [Number.POSITIVE_INFINITY, 4],
+    [-1, 4],
+    [1.5, 4],
+    [4, Number.NaN],
+    [4, Number.POSITIVE_INFINITY],
+    [4, -1],
+    [4, 1.5],
+  ])("fails closed for malformed counts fc=%s uc=%s", (feedbackCount, uniqueClients) => {
+    const r = scoreAgent(input({ feedbackCount, uniqueClients }), OPTS);
+    expect(Number.isFinite(r.score)).toBe(true);
+    expect(Number.isFinite(r.evidenceStrength)).toBe(true);
+    if (!Number.isSafeInteger(feedbackCount) || feedbackCount <= 0) {
+      expect(r.score100).toBe(0);
+      expect(r.effectiveFeedbackCount).toBe(0);
+      expect(r.effectiveUniqueClients).toBe(0);
+    }
+    if (!Number.isSafeInteger(uniqueClients) || uniqueClients <= 0) {
+      expect(r.effectiveUniqueClients).toBe(0);
+      expect(r.evidenceStrength).toBe(0);
+    }
+  });
+});
+
+describe("ordering and determinism", () => {
+  const inputs = [
+    input({ id: 1, avg: 90, feedbackCount: 40, uniqueClients: 20 }),
+    input({ id: 2, avg: 96.75, feedbackCount: 8, uniqueClients: 4 }),
+    input({ id: 3, avg: 90, feedbackCount: 40, uniqueClients: 1 }),
   ];
 
-  it("assigns dense 1-based ranks in sorted order", () => {
+  it("assigns deterministic 1-based ranks", () => {
     const ranked = rankAgents(inputs, { ...OPTS, sortBy: "score" });
     expect(ranked.map((r) => r.rank)).toEqual([1, 2, 3]);
-    // broad(92) > scrapper(82) > sybil(70)
     expect(ranked.map((r) => r.id)).toEqual([1, 2, 3]);
+    expect(rankAgents(inputs, OPTS)).toEqual(rankAgents(inputs, OPTS));
   });
 
-  it("is fully deterministic given an explicit now", () => {
-    const a = rankAgents(inputs, OPTS);
-    const b = rankAgents(inputs, OPTS);
-    expect(a).toEqual(b);
-    expect(scoreAgent(inputs[1], OPTS)).toEqual(scoreAgent(inputs[1], OPTS));
-  });
-
-  it("newest sorts by createdAt desc, missing dates last", () => {
-    const withDates: RankInput[] = [
-      { ...inputs[0], id: 1, createdAt: "2025-01-01T00:00:00Z" },
-      { ...inputs[1], id: 2, createdAt: "2026-01-01T00:00:00Z" },
-      { ...inputs[2], id: 3, createdAt: null },
-    ];
-    const ranked = rankAgents(withDates, { ...OPTS, sortBy: "newest" });
+  it("newest is an explicit exploration order", () => {
+    const ranked = rankAgents(
+      [
+        input({ id: 1, createdAt: "2025-01-01T00:00:00Z" }),
+        input({ id: 2, createdAt: "2026-01-01T00:00:00Z" }),
+        input({ id: 3, createdAt: null }),
+      ],
+      { ...OPTS, sortBy: "newest" },
+    );
     expect(ranked.map((r) => r.id)).toEqual([2, 1, 3]);
   });
 
-  it("ties break by confidence desc then id asc", () => {
-    // Two identical agents ⇒ same score/confidence ⇒ id asc decides.
-    const twins: RankInput[] = [
-      { id: 5, avg: 80, feedbackCount: 10, uniqueClients: 5, x402: false, mpp: false, hasServices: false },
-      { id: 2, avg: 80, feedbackCount: 10, uniqueClients: 5, x402: false, mpp: false, hasServices: false },
-    ];
-    const ranked = rankAgents(twins, { ...OPTS, sortBy: "score" });
+  it("breaks exact ties by id", () => {
+    const ranked = rankAgents([input({ id: 5 }), input({ id: 2 })], {
+      ...OPTS,
+      sortBy: "score",
+    });
     expect(ranked.map((r) => r.id)).toEqual([2, 5]);
   });
 });

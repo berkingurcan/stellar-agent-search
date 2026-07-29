@@ -15,7 +15,7 @@
  *   Every agent-authored value is emitted ONLY below `selfDeclared`, which also
  *   carries source + verification markers. Top-level A2A-shaped fields contain
  *   server-derived neutral values or null/empty values. `x-stellar8004` carries
- *   typed indexed identity and explicitly scoped reputation verification; its
+ *   typed indexed identity and explicitly scoped reputation-evidence status; its
  *   marker does not claim that the agent or endpoint is A2A-conformant.
  */
 
@@ -43,7 +43,7 @@ export interface AgentCardCapabilities {
 
 /** A2A `provider` block. organization is the typed owner address, not an org claim. */
 export interface AgentCardProvider {
-  /** Owner G-address (typed/verified). Not a human-readable org name. */
+  /** Owner G-address from the typed indexed record. Not endpoint-control or human-identity proof. */
   organization: string;
   url: string | null;
 }
@@ -83,7 +83,7 @@ export interface AgentCardSelfDeclared {
   supportedTrust: string[];
 }
 
-/** The `x-stellar8004` extension — typed identity + scoped reputation facts. */
+/** The `x-stellar8004` extension — typed identity + scoped reputation evidence. */
 export interface StellarAgentCardExtension {
   conformance: AgentCardConformance;
   provenance: AgentCardProvenance;
@@ -97,19 +97,26 @@ export interface StellarAgentCardExtension {
   /** Deprecated compatibility keys: never promote unverified metadata here. */
   wallet: null;
   agentUri: null;
-  /** Reputation-summary verification only; NOT agent/A2A/endpoint verification. */
+  /** Reputation-evidence status only; NOT agent/A2A/endpoint verification. */
   verified: boolean;
   verificationStatus: string;
-  verificationScope: "reputation-summary-only";
+  /** Legacy schema label; it does not mean the current release calls get_summary. */
+  verificationScope: "reputation-reachability-only";
+  /** Current v1 Explorer and Soroban reads never share a revision. */
+  snapshotComparable: false;
+  /** Machine-readable caveats copied from the fail-closed evidence result. */
+  verificationLimitations: string[];
+  /** Numerically compared fields; empty in the current fail-closed implementation. */
+  comparedFields: string[];
   /** No trust model or protocol capability has been independently verified. */
   supportedTrust: string[];
   capabilities: { x402: boolean; mpp: boolean };
   reputation: {
-    /** indexer-declared average, 0..RANK_SCORE_MAX (null when unrated) */
+    /** Raw indexer-declared average in protocol units (null when unrated). */
     declaredAverage: number | null;
-    /** on-chain re-derived average when a chain read returned, interpreted with verificationStatus */
+    /** Future-compatible chain observation; null in the current implementation. */
     onchainAverage: number | null;
-    /** on-chain non-revoked count from get_summary, when available */
+    /** Future-compatible get_summary count; null because current code never calls get_summary. */
     onchainFeedbackCount: number | null;
     declaredFeedbackCount: number;
     /** Indexer-declared only; the contract's append-only client list cannot verify this. */
@@ -118,7 +125,11 @@ export interface StellarAgentCardExtension {
   /** 3-axis ranking breakdown (present only when the profile carries a rank). */
   rank: {
     provenance: "derived-from-indexed-signals";
+    rankVersion: string;
     score100: number;
+    /** Declared-evidence index, not a calibrated probability. */
+    evidenceStrength: number;
+    /** @deprecated Compatibility alias for evidenceStrength. */
     confidence: number;
     quality: number | null;
     volume: number | null;
@@ -195,7 +206,9 @@ export function toAgentCard(profile: AgentProfile, options: AgentCardOptions = {
   const rank = profile.rank
     ? {
         provenance: "derived-from-indexed-signals" as const,
+        rankVersion: profile.rank.rankVersion,
         score100: profile.rank.score100,
+        evidenceStrength: profile.rank.evidenceStrength,
         confidence: profile.rank.confidence,
         quality: profile.rank.quality.raw,
         volume: profile.rank.volume.raw,
@@ -255,7 +268,10 @@ export function toAgentCard(profile: AgentProfile, options: AgentCardOptions = {
       agentUri: null,
       verified: profile.verified,
       verificationStatus: profile.verification.status,
-      verificationScope: "reputation-summary-only",
+      verificationScope: "reputation-reachability-only",
+      snapshotComparable: false,
+      verificationLimitations: [...(profile.verification.limitations ?? [])],
+      comparedFields: [...(profile.verification.verifiedFields ?? [])],
       supportedTrust: [],
       capabilities: {
         x402: false,

@@ -9,6 +9,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { ValidationError } from "@trionlabs/stellar8004";
 import { MAX_AGENT_ID, parseAgentRef } from "../lib/identifier.js";
+import { V1_UNVERSIONED_PAGINATION_LIMITATION } from "../lib/explorer.js";
 import {
   agentIds,
   handler,
@@ -86,12 +87,16 @@ export function registerResolveAgent(server: McpServer, deps: ToolDeps): void {
           count: resolved.length,
           agents: resolved,
           coverage: {
-            coverageComplete: paginationExhausted,
+            coverageComplete: false,
             paginationExhausted,
-            snapshotConsistent: true,
+            snapshotConsistent: false,
             pagesScanned: 1,
             recordsScanned: resolved.length,
             ...(typeof hasMore === "boolean" ? { hasMore } : {}),
+            limitations: [
+              V1_UNVERSIONED_PAGINATION_LIMITATION,
+              ...(typeof hasMore === "boolean" ? [] : ["pagination-metadata-unavailable"]),
+            ],
           },
         });
       }

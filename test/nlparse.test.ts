@@ -59,6 +59,8 @@ describe("capability triggers", () => {
     ["payment-free scraper", "negative-filter:x402", "x402"],
     ["non-x402 scraper", "negative-filter:x402", "x402"],
     ["unpaid scraper", "negative-filter:x402", "x402"],
+    ["x402 disabled scraper", "negative-filter:x402", "x402"],
+    ["doesn't accept x402", "negative-filter:x402", "x402"],
     ["mpp-free oracle", "negative-filter:mpp", "mpp"],
   ])("rejects the negative payment variant %s", (raw, unsupported, field) => {
     const q = parseQuery(raw);
@@ -68,7 +70,7 @@ describe("capability triggers", () => {
 
   it("recognizes common Turkish capability and quality phrases", () => {
     const q = parseQuery("iyi itibarlı ücretli çeviri servisi");
-    expect(q.filters).toMatchObject({ x402: true, hasServices: true, minScore: 70 });
+    expect(q.filters).toMatchObject({ x402: true, hasServices: true, minExplorerScore: 70 });
     expect(q.keywords).toEqual(["ceviri"]);
   });
 });
@@ -83,7 +85,7 @@ describe("trust models (reputation-as-trust needs explicit phrasing)", () => {
   it('"good reputation" is a QUALITY phrase, NOT a trust filter', () => {
     const q = parseQuery("a scraper with a good reputation");
     expect(q.filters.trust).toBeUndefined();
-    expect(q.filters.minScore).toBe(70); // routed to minScore instead
+    expect(q.filters.minExplorerScore).toBe(70); // routed to the upstream Explorer filter instead
   });
 
   it('"validated data provider" → trust:validation', () => {
@@ -99,6 +101,7 @@ describe("trust models (reputation-as-trust needs explicit phrasing)", () => {
     "not validation oracle",
     "non-reputation trust model",
     "tee-free inference",
+    "TEE disabled inference",
   ])("rejects negative trust intent instead of requiring that trust model: %s", (raw) => {
     const q = parseQuery(raw);
     expect(q.unsupported).toContain("negative-filter:trust");
@@ -107,48 +110,50 @@ describe("trust models (reputation-as-trust needs explicit phrasing)", () => {
 });
 
 describe("score / reputation thresholds", () => {
-  it('"most reputable" → implied minScore 70', () => {
+  it('"most reputable" → implied minExplorerScore 70', () => {
     const q = parseQuery("the most reputable scraper");
-    expect(q.filters.minScore).toBe(70);
+    expect(q.filters.minExplorerScore).toBe(70);
     expect(q.keywords).toContain("scraper");
   });
 
-  it('"top-rated" → implied minScore 80', () => {
-    expect(parseQuery("a top-rated translation agent").filters.minScore).toBe(80);
+  it('"top-rated" → implied minExplorerScore 80', () => {
+    expect(parseQuery("a top-rated translation agent").filters.minExplorerScore).toBe(80);
   });
 
   it('an explicit number wins: "score above 90" → 90', () => {
-    expect(parseQuery("an agent with score above 90").filters.minScore).toBe(90);
+    expect(parseQuery("an agent with score above 90").filters.minExplorerScore).toBe(90);
   });
 
-  it('"above 85" (bare threshold) → 85 and clamps to 0..100', () => {
-    expect(parseQuery("a data agent above 85").filters.minScore).toBe(85);
-    expect(parseQuery("rated 250").filters.minScore).toBe(100); // clamped
+  it('"above 85" (bare threshold) → 85 without inventing a 0..100 protocol cap', () => {
+    expect(parseQuery("a data agent above 85").filters.minExplorerScore).toBe(85);
+    expect(parseQuery("rated 250").filters.minExplorerScore).toBe(250);
   });
 
   it("explicit number beats a qualitative phrase in the same query", () => {
     // "top-rated" would imply 80, but the explicit "rated 95" wins.
-    expect(parseQuery("top-rated agent rated 95").filters.minScore).toBe(95);
+    expect(parseQuery("top-rated agent rated 95").filters.minExplorerScore).toBe(95);
   });
 
   it.each([
     "score below 50 scraper",
     "score is no higher than 50 scraper",
+    "score <= 50 scraper",
+    "score should not exceed 50 scraper",
     "maximum score 50 scraper",
     "not highly rated scraper",
     "low-rated scraper",
     "50 ve altı puanlı çeviri",
   ])("rejects upper-bound/negative score intent instead of making it a minimum: %s", (raw) => {
     const q = parseQuery(raw);
-    expect(q.unsupported).toContain("negative-filter:minScore");
-    expect(q.filters.minScore).toBeUndefined();
+    expect(q.unsupported).toContain("negative-filter:minExplorerScore");
+    expect(q.filters.minExplorerScore).toBeUndefined();
   });
 });
 
 describe("compound queries", () => {
-  it('"a paid web scraper with a good reputation" → x402 + minScore 70 + [web,scraper]', () => {
+  it('"a paid web scraper with a good reputation" → x402 + minExplorerScore 70 + [web,scraper]', () => {
     const q = parseQuery("a paid web scraper with a good reputation");
-    expect(q.filters).toMatchObject({ x402: true, minScore: 70 });
+    expect(q.filters).toMatchObject({ x402: true, minExplorerScore: 70 });
     expect(q.keywords).toEqual(["web", "scraper"]);
   });
 
@@ -158,7 +163,7 @@ describe("compound queries", () => {
       x402: true,
       hasServices: true,
       trust: "reputation",
-      minScore: 75,
+      minExplorerScore: 75,
     });
     expect(q.keywords).toContain("scraper");
   });

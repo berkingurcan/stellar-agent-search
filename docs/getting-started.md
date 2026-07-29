@@ -11,12 +11,13 @@
 - **Client bootstrap** — the idempotent `setup` command registers that server with Claude Code, Cursor, or Codex.
 - **Human CLI** — subcommands (`find`, `rank`, `profile`, `services`, `doctor`) for a plain terminal.
 
-It is **read-only and keyless**: it reads the stellar-8004 explorer API and simulates bounded Soroban view
-calls that compare average and active feedback count. It never signs, never writes, and holds no private keys.
+It is **read-only and keyless**: it reads the stellar-8004 Explorer API and performs one bounded Soroban
+client-page simulation as a contract reachability probe. Because that page cannot prove client-set exhaustion,
+the current release compares no reputation fields. It never signs, never writes, and holds no private keys.
 
 ## Requirements
 
-- **Node.js ≥ 20**.
+- **Node.js ≥ 22** (required by the x402 Stellar dependency chain).
 - Outbound HTTPS to `https://stellar8004.com` (explorer) and `https://mainnet.sorobanrpc.com` (Soroban RPC).
 - No account, no API key, no wallet.
 
@@ -29,10 +30,10 @@ npx -y stellar-agent-mcp@0.1.0 find "a paid web scraper with a good reputation"
 # Only agents that accept x402 (USDC pay-per-call)
 npx -y stellar-agent-mcp@0.1.0 find "scraper" --x402
 
-# Full profile for a specific agent (declared vs bounded chain evidence, capabilities, services)
+# Full profile for a specific agent (declared reputation + contract-probe limits, capabilities, services)
 npx -y stellar-agent-mcp@0.1.0 profile 10
 
-# Rank a query's candidates or an explicit id set, with bounded chain comparison on
+# Rank a query's candidates or an explicit id set; attempted contract probes fail closed
 npx -y stellar-agent-mcp@0.1.0 rank "scraping agents"
 npx -y stellar-agent-mcp@0.1.0 rank 10 12 15
 
@@ -53,12 +54,12 @@ npx -y stellar-agent-mcp@0.1.0 doctor
 does not work:
 
 ```
-✔ node      v20.11.0 (>=20 required)
+✔ node      v22.18.0 (>=22 required)
 ✔ network   mainnet
 ✔ read-only keyless (no signer, no writes)
 ✔ explorer  https://stellar8004.com  status=healthy  identity ledger 63,699,173 (fresh)
 ✔ soroban   https://mainnet.sorobanrpc.com  healthy
-✔ verify    on-chain reputation read OK (sampled agent #10: avg 96, 8 comparable feedback; active unique clients are not derived by this read)
+✔ contract  read path OK (sample #10 returned 4 address(es) from bounded indices 0..5; not an exhaustive client count; verification unavailable)
 ✔ tools     find_agent, rank_agent, get_agent_profile, list_services (+ list_agents, leaderboard)
 ℹ server    stellar-agent-mcp  ·  @modelcontextprotocol/server 2.0.0  ·  spec 2025-11-25
 ```
@@ -100,7 +101,7 @@ does not expose a project-scoped MCP add operation. Asking for `--client codex -
 exits non-zero, and prints the exact `[mcp_servers.stellar-agent]` TOML to merge into `.codex/config.toml`.
 
 Optionally install the **skill** as well. It is the usage guide your agent reads before it calls anything —
-which tools exist, when to request bounded chain evidence, and how to read a snapshot-unversioned mismatch:
+which tools exist, when to request the bounded contract probe, and why current attempts return unavailable:
 
 ```bash
 npx skills add berkingurcan/stellar-agent-mcp --skill mcp
@@ -129,9 +130,9 @@ request, cache, trust, and rollout boundaries.
 ### First things to try in-client
 
 1. Run the flagship prompt **`/find-and-vet-agent`** with a task like "scrape a website and return JSON".
-2. Ask the model to **rank** the candidates and compare the top one's average/count with the bounded
-   Reputation-contract read. A healthy result is `partial`, with `snapshotComparable: false`; it does not
-   verify `uniqueClients`.
+2. Ask the model to **rank** the candidates and inspect the top one's evidence block. A reachable contract
+   path still returns `unavailable` with `reason: client-set-exhaustion-unprovable`, `verifiedFields: []`, and
+   `snapshotComparable: false`; average, feedback count, and unique clients all remain Explorer-declared.
 3. Pin **`@stellar-agent:stellar8004://leaderboard`** to keep the current top agents in context.
 
 ## Optional install (faster cold start)
@@ -158,12 +159,13 @@ also raise `MCP_TIMEOUT` for the client.
 |---|---|---|
 | `STELLAR_NETWORK` | `mainnet` | `mainnet` or `testnet` (`testnet` also requires `EXPLORER_BASE_URL`) |
 | `EXPLORER_BASE_URL` | `https://stellar8004.com` | Explorer HTTP API base — **indexes mainnet only** |
-| `STELLAR_RPC_URL` | `https://mainnet.sorobanrpc.com` | Soroban RPC for verification |
-| `VERIFY_ONCHAIN` | `true` | `false` = skip Soroban reads (faster, declared-only) |
-| `RANK_SCORE_MAX` | `100` | Feedback score scale |
-| `RANK_W_QUALITY` / `RANK_W_VOLUME` / `RANK_W_BREADTH` | `0.5` / `0.2` / `0.3` | Ranking axis weights |
+| `STELLAR_RPC_URL` | `https://mainnet.sorobanrpc.com` | Soroban RPC for the bounded Reputation-contract reachability probe |
+| `VERIFY_ONCHAIN` | `true` | `false` = skip the probe; reputation remains declared-only either way |
+| `RANK_SCORE_MAX` | `100` | Normalization scale for the displayed ranking quality axis |
 
-CLI flags override env (`--network`, `--explorer-url`, `--rpc-url`, `--no-verify`, `--limit`, `--min-score`,
+The fixed `stellar-agent-mcp-declared-evidence-v1` rank policy uses evidence weights volume `0.4` and breadth
+`0.6`; retired `RANK_W_*` variables are rejected. CLI flags override env (`--network`, `--explorer-url`,
+`--rpc-url`, `--no-verify`, `--limit`, `--min-explorer-score`,
 `--x402`, `--mpp`, `--json`). Setup adds `--client`, `--scope`, `--check`, `--dry-run`, and `--handshake`.
 Precedence is **flag → env → default**.
 

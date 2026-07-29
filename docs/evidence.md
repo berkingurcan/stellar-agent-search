@@ -26,7 +26,7 @@ checked in a browser in about five minutes.
 | # | What to check | Where | Expected |
 |---|---|---|---|
 | 1 | The code is public and MIT-licensed | [github.com/berkingurcan/stellar-agent-mcp](https://github.com/berkingurcan/stellar-agent-mcp) | Repository opens; `LICENSE` says MIT |
-| 2 | Automated tests pass | Repo → **Actions** tab | Latest CI run green across Node 20/22/24 on Linux + macOS, plus the Worker job |
+| 2 | Automated tests pass | Repo → **Actions** tab | Latest CI run green across Node 22/24 on Linux + macOS, plus the Worker job |
 | 3 | The four SOW tools exist and are documented | [docs/tools.md](tools.md) | `find_agent`, `rank_agent`, `get_agent_profile`, `list_services` each documented with inputs and outputs |
 | 4 | The x402 reference script exists | [examples/x402-demo.ts](../examples/x402-demo.ts) | TypeScript file in `/examples`, as the SOW specifies |
 | 5 | The registry data is real | [stellar8004.com](https://stellar8004.com) → agent **10** ("Scrapper") | Same agent the tools return, live on mainnet |
@@ -63,44 +63,45 @@ Additional: `list_agents`, `leaderboard`, `resolve_agent`, `get_agents_by_owner`
 `verify_reputation`, `get_agent_card`, `get_registry_stats`, `get_registry_health`. Plus 8 MCP **resources**
 (`stellar8004://…`) and 5 **prompts** (slash-command workflows), neither of which the SOW required.
 
-### Beyond scope: bounded reputation evidence, not blind reporting
+### Beyond scope: fail closed instead of promoting a plausible subset
 
-The SOW asked for ranking by reputation. This server does not blindly relabel the indexer's values as proof: it
-reads the Reputation contract (`get_summary` + `get_clients_paginated`) and performs a bounded, field-scoped
-comparison. It works on default mainnet with **no funded account and no private key**. Current healthy results
-are `partial`, because active unique clients cannot be derived from the append-only client list and the
-explorer/RPC reads do not share a ledger-bound snapshot.
+The SOW asked for ranking by reputation. The ranking inputs remain explicitly Explorer-declared. This server
+also performs one bounded `get_clients_paginated(agent_id, 0, 6)` simulation with **no funded account and no
+private key**, but uses it only to test contract-path reachability. The compacted result cannot prove client-set
+exhaustion: an expired slot can be skipped while a later retained client still exists. Supplying that unproven
+set to `get_summary` could create a plausible but false match or mismatch, so production code does not call
+`get_summary` and verifies no reputation field. A reachable attempt returns `unavailable` with
+`reason: client-set-exhaustion-unprovable`, `verifiedFields: []`, and every reputation field unverified.
 
-Reviewer check, on agent 10 (confirmed against mainnet on 2026-07-28):
+For historical debugging only, a **manual bounded-subset observation** was recorded against agent 10 on
+2026-07-28. It is not MCP/CLI verification, is not consumed by ranking, and must not be used as a trust or
+payment gate:
 
-| Source | Average score | Feedback count | Unique clients |
-|---|---|---|---|
-| Explorer (declared) | 96.75 | 8 | 4 |
-| Reputation contract (bounded read) | 96 | 8 | not derivable |
-| Result | **`partial`** | average + count compared | unique clients remain indexer-declared; `snapshotComparable: false` |
+| Manual source | Average score | Feedback count | Unique clients |
+|---|---:|---:|---|
+| Explorer snapshot (declared) | 96.75 | 8 | 4 |
+| `get_summary` supplied with the 4 addresses observed in one requested window | 96 | 8 | not derivable |
+| Product verdict | **no comparison** | `unavailable` | `verifiedFields: []`; client-set exhaustion unprovable |
 
-This is independently reproducible without our code. Simulate two read calls against the Reputation contract
-`CBOIAIMMWAXI57OATLX6BWVDQLCC4YU55HV6MZXFRP6CBSGAMXSTEPPA` on `https://mainnet.sorobanrpc.com`:
+The manual observation can be reproduced without this code by simulating two calls against the Reputation
+contract `CBOIAIMMWAXI57OATLX6BWVDQLCC4YU55HV6MZXFRP6CBSGAMXSTEPPA` on
+`https://mainnet.sorobanrpc.com`: `get_clients_paginated(agent_id: 10, start: 0, limit: 20)` returned four
+addresses in that requested window, and a separate manual `get_summary` supplied with exactly those addresses
+returned `summary_value 96`, `summary_value_decimals 0`, and `count 8`. Both calls are read-only simulations,
+but the second result describes only its caller-supplied subset. It does not prove that the subset is complete,
+that it shares a snapshot with the Explorer, or that the reviewers are Sybil-resistant.
 
-- `get_clients_paginated(agent_id: 10, start: 0, limit: 20)` → 4 addresses, beginning
-  `GAAIBWG3M3U6PAS3IC5BATPT52XKNYXBRJXQIPHEDQUQIEFQDYH4KZY7`
-- `get_summary(agent_id: 10, client_addresses: <those 4>, tag1: "", tag2: "")` →
-  `summary_value 96`, `summary_value_decimals 0`, `count 8`
-
-Both are read-only simulations: no account, no funds, no signature. Matching values are useful evidence, not
-proof of a synchronized snapshot or Sybil resistance.
-
-> **Note for anyone running behind an HTTP proxy.** The reputation read deliberately uses Stellar SDK's
+> **Note for anyone running behind an HTTP proxy.** The contract reachability read deliberately uses Stellar SDK's
 > fetch-based `no-axios` transport, so the historical axios/proxy `405` failure is not an accepted explanation
-> anymore. If `doctor` reports `✗ verify on-chain read FAILED`, treat the RPC/simulation path as unhealthy and
+> anymore. If `doctor` reports `✗ contract read path FAILED`, treat the RPC/simulation path as unhealthy and
 > investigate it. Tool calls still degrade to `unavailable` rather than guessing.
 
 ### How to verify yourself
 
 ```bash
-npx -y stellar-agent-mcp@0.1.0 doctor              # self-check: environment, explorer, RPC, bounded chain read
+npx -y stellar-agent-mcp@0.1.0 doctor              # self-check: environment, explorer, RPC, contract reachability
 npx -y stellar-agent-mcp@0.1.0 find "web scraper"  # the find_agent tool from the terminal
-npx -y stellar-agent-mcp@0.1.0 profile 10          # full profile incl. declared-vs-bounded-chain block
+npx -y stellar-agent-mcp@0.1.0 profile 10          # declared profile + fail-closed evidence block
 ```
 
 Inside an MCP client, install with one line and call the tools directly:
@@ -131,8 +132,8 @@ run procedure.
 ### What the script does, in order
 
 1. **Discover** — calls the MCP server's discovery path to find the Scrapper agent (id 10) by capability.
-2. **Vet** — compares bounded average/count evidence from the Reputation contract before spending anything;
-   it does not verify active unique clients or endpoint behavior.
+2. **Constrain** — records that current reputation evidence is unavailable and cannot authorize payment;
+   separately requires the reviewed/pinned identity, endpoint, owner, payee, network, asset, and budget policy.
 3. **Call** — requests the agent's endpoint; receives HTTP **402 Payment Required** with a payment challenge.
 4. **Pay** — checks the untrusted challenge against a reviewed exact tuple, signs once, never auto-retries,
    then independently verifies finality and the exact USDC transfer through Stellar RPC.
@@ -233,7 +234,7 @@ exercise Claude Code, and Recording 3 must exercise Cursor. Both links remain �
 | Line item from the budget rationale | Status | Evidence |
 |---|---|---|
 | Multi-client integration testing | 🟡 | [docs/integration.md](integration.md) contains per-client config and caveats; real clean-environment evidence for Claude Code + one additional client is still required |
-| CI/CD setup | ✅ | [.github/workflows/ci.yml](../.github/workflows/ci.yml) — Node 20/22/24 × Linux/macOS; typecheck, build, test, pack; separate Worker typecheck/test/bundle audit |
+| CI/CD setup | ✅ | [.github/workflows/ci.yml](../.github/workflows/ci.yml) — Node 22/24 × Linux/macOS; typecheck, build, test, pack; separate Worker typecheck/test/bundle audit |
 | Remote Streamable HTTP Worker | 🟡 | [`worker/`](../worker/) — implemented behind exact `/mcp` and `/healthz` Cloudflare routes, but deliberately not claimed live until namespace configuration and production canary pass |
 | npm publishing setup | ✅ | [.github/workflows/publish.yml](../.github/workflows/publish.yml) — tag-triggered, OIDC Trusted Publishing with Sigstore provenance, plus MCP Registry publish |
 | Skill packaging + distribution | ✅ | [`skills/mcp/SKILL.md`](../skills/mcp/SKILL.md) — ships in the repository, where `npx skills add` fetches it; deliberately kept out of the npm tarball (`files` in [package.json](../package.json)) so the published package stays lean |
@@ -243,7 +244,7 @@ exercise Claude Code, and Recording 3 must exercise Cursor. Both links remain �
 Registry manifests are in place for three directories: [`server.json`](../server.json) (official MCP Registry),
 [`smithery.yaml`](../smithery.yaml), [`glama.json`](../glama.json).
 
-**Quality signals not required by the SOW:** a full automated suite green on every push across Node 20/22/24 ×
+**Quality signals not required by the SOW:** a full automated suite green on every push across Node 22/24 ×
 Linux/macOS (count and result in the [Actions tab](https://github.com/berkingurcan/stellar-agent-mcp/actions) —
 deliberately not restated here, so it cannot go stale), clean TypeScript typecheck, and automated/internal
 adversarial review passes. The repository has **not** had an independent external human code review; the

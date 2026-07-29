@@ -7,10 +7,11 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
+	"check:release-surface": "node scripts/assert-release-surface.mjs",
     "preview": "vite preview",
     "prepare": "svelte-kit sync || echo ''",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "npm run build && npm run check:release-surface && wrangler deploy"
   },
   "dependencies": {
     "shiki": "^4.0.2"

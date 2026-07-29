@@ -151,6 +151,9 @@ export type SearchParams = Parameters<ExplorerClient["search"]>[1];
  */
 export type ExplorerStatsResponse = StatsResponse & { agentsWithMpp?: number };
 
+/** v1 offset pages have no revision token and are not transactional snapshots. */
+export const V1_UNVERSIONED_PAGINATION_LIMITATION = "v1-unversioned-offset-pagination";
+
 export interface ExplorerServiceOptions {
   clock?: Clock;
   logger?: Logger;
@@ -327,23 +330,27 @@ export class ExplorerService {
     }
 
     const paginationExhausted = hasMore === false;
-    // Offset pages are separate HTTP snapshots. Inserts/updates between page
-    // reads can shift boundaries and omit a row even when the final page says
-    // hasMore=false. Only a one-request exhaustion is snapshot-complete until
-    // the upstream v2 API supplies a revision-bound cursor.
-    const snapshotConsistent = pagesScanned === 1;
+    // v1 has no revision token. Even one HTTP response is assembled from
+    // independent upstream queries, so hasMore=false proves only pagination
+    // exhaustion reported by that response, never a transactional snapshot.
+    const snapshotConsistent = false;
     // The v1 Explorer preselects at most 500 ids for minScore before it paginates.
     // hasMore=false therefore proves only that the capped qualifier set ended,
     // not that every matching registry row was visible.
     const qualifierMayBeCapped = typeof filters.minScore === "number" && filters.minScore > 0;
+    const limitations = [
+      V1_UNVERSIONED_PAGINATION_LIMITATION,
+      ...(hasMore === undefined ? ["pagination-metadata-unavailable"] : []),
+      ...(qualifierMayBeCapped ? ["v1-minScore-qualifier-cap-500"] : []),
+    ];
     const coverage: DiscoveryCoverage = {
-      coverageComplete: paginationExhausted && snapshotConsistent && !qualifierMayBeCapped,
+      coverageComplete: false,
       paginationExhausted,
       snapshotConsistent,
       pagesScanned,
       recordsScanned: collected.length,
       ...(hasMore !== undefined ? { hasMore } : {}),
-      ...(qualifierMayBeCapped ? { limitations: ["v1-minScore-qualifier-cap-500"] } : {}),
+      limitations,
     };
 
     // De-dupe by id (pages can overlap under concurrent indexer writes).
@@ -412,7 +419,7 @@ export interface DiscoveryCoverage {
   coverageComplete: boolean;
   /** The final observed page explicitly reported `hasMore=false`. */
   paginationExhausted: boolean;
-  /** True only when the window came from one response or a revision-bound cursor. */
+  /** v1 is always false; true requires a future revision-bound cursor/snapshot. */
   snapshotConsistent: boolean;
   pagesScanned: number;
   recordsScanned: number;

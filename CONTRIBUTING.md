@@ -15,7 +15,7 @@ npm test           # vitest
 npm run typecheck  # tsc --noEmit
 ```
 
-Requires **Node.js ≥ 20**. No API keys, no wallet, no `.env` needed — the defaults read Stellar **mainnet**.
+Requires **Node.js ≥ 22**. No API keys, no wallet, no `.env` needed — the defaults read Stellar **mainnet**.
 
 Try it end to end without installing anything into a client:
 
@@ -107,7 +107,7 @@ fixing a bug, add the failing case first — `test/fixes.test.ts` collects regre
 - Conventional-commit prefixes: `feat:`, `fix:`, `docs:`, `test:`, `chore:`, `refactor:`.
 - One logical change per PR; explain **why**, not just what.
 - Before pushing: `npm run typecheck && npm test && npm run build`.
-- CI runs the matrix Node 20/22/24 × ubuntu/macOS plus a `npm pack --dry-run`; the Worker gets a separate
+- CI runs the matrix Node 22/24 × ubuntu/macOS plus a `npm pack --dry-run`; the Worker gets a separate
   Node 22 typecheck/test/bundle audit. Green CI is required to merge.
 - User-visible changes get a `CHANGELOG.md` entry under `## Unreleased`.
 
@@ -175,8 +175,9 @@ Then create/push `v0.1.0` from a green commit already on `main`. The workflow pu
 tested, verifies its registry integrity and GitHub provenance, and only then attempts the MCP Registry record.
 After both registry records are independently readable, follow
 [`issues/P0-03-first-npm-publish.md`](issues/P0-03-first-npm-publish.md#3-verify-first-then-expose-onboarding):
-flip `web/src/lib/surface.ts`'s `PACKAGE_PUBLISHED` in a reviewed follow-up and remove the dated pre-release
-warnings. Keep persistent MCP launches exact-version pinned.
+switch `web/src/lib/install.ts` from the pending to the published re-export in a reviewed follow-up, then build
+and run the release-surface scan before deployment. This keeps executable package commands out of pre-release
+JavaScript entirely. Keep persistent MCP launches exact-version pinned.
 
 ## Reporting security issues
 

@@ -14,8 +14,9 @@ It composes the three pillars of the project:
 - **x402 (payment)** — the manual HTTP-402 flow (`@x402/fetch` + `@x402/stellar`) settles real USDC.
   The challenge's `payTo` is accepted only when it matches the reviewed, source-pinned Scrapper payee.
 - **stellar-8004 (reputation)** — `@trionlabs/stellar8004` `give_feedback` writes on-chain reputation for the
-  canonical indexer to project. This MCP can later compare bounded average/count fields; it does not turn the
-  indexer-declared active-client breadth or the service endpoint into verified facts.
+  canonical indexer to project. The current MCP only probes a bounded client-address window for contract
+  reachability; it does not call `get_summary` or turn average, count, active-client breadth, or the service
+  endpoint into verified facts.
 
 ## Security boundary (non-negotiable)
 
@@ -46,7 +47,7 @@ endpoint. A dry-run with failed discovery is therefore never printed or recorded
 
 ## Prerequisites
 
-- Node ≥ 20.
+- Node ≥ 22 (required by `@x402/stellar` and its Stellar SDK dependency).
 - The MCP server built: from the repo root run `npm run build` (produces `../dist/index.js`).
 - Demo deps installed at the repo root (`@x402/core`, `@x402/fetch`, `@x402/stellar`, `@stellar/stellar-sdk`,
   `@trionlabs/stellar8004`, `dotenv`, `@modelcontextprotocol/client`).
@@ -90,9 +91,14 @@ Key vars (full list in `.env.example`): `STELLAR_PRIVATE_KEY`, `STELLAR_NETWORK`
 
 > **What the challenge may ask for is not trusted.** The resource server writes the 402 challenge, so the
 > demo requires exactly one `exact` requirement and checks every server-controlled field before a signature
-> exists: network must be `stellar:pubnet`, asset must be the mainnet USDC SAC `@x402/stellar` publishes,
-> `payTo` must equal the source-pinned expected payee (and not the payer), amount must be a positive base-unit
-> integer, and price must be at or below `MAX_PRICE_USDC` (default `0.10`). A funded evidence run is mainnet-only.
+> exists: resource URL must be the pinned HTTPS endpoint, network must be `stellar:pubnet`, asset must be the
+> mainnet USDC SAC `@x402/stellar` publishes, `payTo` must equal the source-pinned expected payee (and not the
+> payer), amount must be a positive base-unit integer, timeout must be bounded, fee sponsorship must be explicit,
+> and price must be at or below `MAX_PRICE_USDC` (default `0.10`). A funded evidence run is mainnet-only.
+>
+> **Current funded-run gate (2026-07-29):** the live HTTPS endpoint still advertises an `http://.../task`
+> `resource.url`. The client correctly rejects it. Fix the upstream trusted-proxy/public URL configuration and
+> re-capture the unpaid 402 before funding; do not relax or canonicalize the local HTTPS pin.
 
 ## Run
 
@@ -111,15 +117,21 @@ npx tsx examples/x402-demo.ts | tee examples/run-$(date +%Y%m%d).log
 
 ## Output & evidence
 
-On a full run the script prints **two mainnet tx hashes** with Stellar Expert links and writes
-`examples/run-<timestamp>.json` (**no secrets** — network, payer G-address, pinned identity/endpoint,
+On a full run the script first creates and fsyncs an append-only crash-recovery journal at
+`examples/run-<timestamp>.journal.jsonl` **before the signed request leaves the process**. It appends HTTP response,
+independent settlement, and result-hash stages as each becomes known. Before broadcasting feedback it signs locally,
+computes the canonical transaction hash, and fsyncs `feedback_submitted`; only an RPC terminal `SUCCESS` appends
+`feedback_confirmed`. Terminal `FAILED` and uncertain send/poll outcomes get distinct recovery entries. It then prints **two
+mainnet tx hashes** with Stellar Expert links and writes `examples/run-<timestamp>.json` (**no secrets** — network,
+payer G-address, pinned identity/endpoint,
 challenge network/asset/payTo/price, payment tx hash, exact response-body SHA-256, feedback tx hash,
 timestamps, Expert links). Dry-run writes the same record with empty payment/result/feedback fields.
 
 The full receipt is written only when the initial response was exactly HTTP 402, the settlement header reports
 success with the expected payer/network/amount, Stellar RPC independently confirms a fresh final transaction
-with the exact USDC asset/payer/payee/amount transfer, the paid body was non-empty and usable, its SHA-256 was recorded,
-and `give_feedback` returned a valid 32-byte transaction hash. An invalid paid result may still receive a
+with this run's signed Soroban authorization and the exact USDC asset/payer/payee/amount transfer, the paid body
+matches the Scrapper's exact `{ success: true, data: "URL: …\\n…\\nContent:\\n…" }` contract, its SHA-256 was recorded,
+and the exact signed `give_feedback` transaction reached RPC terminal `SUCCESS`. An invalid paid result may still receive a
 below-expectation feedback entry, but it is not labeled or written as successful acceptance evidence.
 
 - Payment tx: `https://stellar.expert/explorer/public/tx/<hash>` — USDC transfer to the scrapper's payTo.
@@ -133,8 +145,8 @@ below-expectation feedback entry, but it is not labeled or written as successful
 |---|---|---|
 | 1 | `runPreflight` | Horizon balances (USDC trustline? USDC ≥ `MIN_USDC`? XLM ≥ `MIN_XLM`?), RPC health, payer ≠ scrapper owner. Aborts before spend (balance/key/RPC checks advisory in dry-run). |
 | 2 | `discoverScrapper` | Spawns the read-only MCP server (secret-free env), requires successful structured results, finds agent 10, fetches its profile, then validates x402 + pinned owner + endpoint without fallback. |
-| 3/4 | `payForService` | `fetch` → require 402 → validate exact/pubnet/USDC/amount/timeout/sponsorship/pinned payTo → sign once → validate settlement response → independently verify the exact final transfer via RPC → hash exact result bytes. Never auto-retries a submitted payment. |
-| 5 | `writeFeedback` | `createClients(...).reputation.give_feedback({...})` via `wrapBasicSigner` — the only key/signing site besides the payment. |
+| 3/4 | `payForService` | Fail-closed, no-redirect `fetch` → require 402 → validate exact/pubnet/USDC/amount/timeout/sponsorship/pinned payTo → sign once → fsync the authorization hash → submit once → validate settlement response → independently verify the exact final transfer via RPC → hash exact result bytes. Never auto-retries a submitted payment. |
+| 5 | `writeFeedback` | `createClients(...).reputation.give_feedback({...})` via `wrapBasicSigner` — signs, fsyncs the canonical tx hash before send, and requires final `SUCCESS`; this is the only key/signing site besides the payment. |
 | 6 | `recordEvidence` | Revalidates the complete receipt, prints 2 tx hashes + result SHA-256 + Expert links, then writes `run.json` (no secrets). |
 
 ## Troubleshooting
@@ -144,7 +156,12 @@ below-expectation feedback entry, but it is not labeled or written as successful
 | `USDC trustline missing` | Add the trustline before running — USDC otherwise fails silently. |
 | `expected 402, got <n>` | Scrapper is not currently x402-gated or the deployment changed. HTTP 200 is not accepted as paid evidence. |
 | `network mismatch` | The 402 challenge network ≠ your `STELLAR_NETWORK`. |
+| `resource mismatch: challenge=http://... expected=https://...` | Upstream proxy/public URL is wrong. Do not fund or weaken the HTTPS pin; fix the deployment and re-capture the unpaid 402. |
 | `owner/endpoint/payTo mismatch` | Registry or deployment facts changed. Verify independently, then make a reviewed source change; do not bypass the pin at runtime. |
+| `PAYMENT_OUTCOME_UNKNOWN` | The request may have settled despite the missing response. Do not rerun; reconcile the signed authorization/ledger first. |
+| `PAYMENT_ALREADY_SETTLED` | Resume feedback/evidence from the named `.journal.jsonl`; do not create another payment. |
+| `FEEDBACK_OUTCOME_UNKNOWN` | Reconcile the exact journaled feedback tx hash. Do not submit another feedback while its send/poll outcome is uncertain. |
+| `FEEDBACK_FAILED` | RPC returned terminal `FAILED`; no confirmation or acceptance receipt is written. Review the failure before authorizing a new feedback. |
 | `settlement transaction ...` | The response receipt or independent RPC finality/transfer check failed. Inspect the ledger before any rerun; the script will not auto-pay twice. |
 | `payment rejected by facilitator` | Inspect whether settlement happened before rerunning. The client deliberately does not auto-retry a submitted payment. |
 | `SelfFeedback` revert | Payer key == scrapper owner/wallet — use a different key. |

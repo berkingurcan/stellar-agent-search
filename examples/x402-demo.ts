@@ -13,7 +13,8 @@
  *   [4] RECEIVE     — the scraped result in the 200 body.
  *   [5] FEEDBACK    — write on-chain reputation via @trionlabs/stellar8004 give_feedback. THIS is the
  *                     ONLY place a private key / signing exists.
- *   [6] EVIDENCE    — print 2 mainnet tx hashes + Stellar Expert links; write run.json (NO secrets).
+ *   [6] EVIDENCE    — append a crash-safe payment/feedback journal, print 2 mainnet tx hashes + Stellar Expert
+ *                     links, then write the final run.json acceptance receipt (NO secrets/result body).
  *
  * SECURITY BOUNDARY (non-negotiable): the MCP server is READ-ONLY and holds NO private keys. Every
  * signing operation (the x402 USDC payment AND give_feedback) happens ONLY in THIS process, using
@@ -30,7 +31,7 @@
 import { createHash } from "node:crypto";
 import { dirname, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
-import { writeFile } from "node:fs/promises";
+import { open, writeFile } from "node:fs/promises";
 import { config as loadDotenv } from "dotenv";
 
 import { Client } from "@modelcontextprotocol/client";
@@ -46,7 +47,7 @@ import {
   USDC_PUBNET_ADDRESS,
   USDC_TESTNET_ADDRESS,
 } from "@x402/stellar";
-import type { PaymentRequired, PaymentRequirements, SettleResponse } from "@x402/core/types";
+import type { PaymentPayload, PaymentRequired, PaymentRequirements, SettleResponse } from "@x402/core/types";
 
 import {
   createClients,
@@ -55,7 +56,15 @@ import {
   TESTNET_CONFIG,
 } from "@trionlabs/stellar8004";
 import type { StellarConfig } from "@trionlabs/stellar8004";
-import { Address, Keypair, rpc, scValToNative, xdr } from "@stellar/stellar-sdk";
+import {
+  Address,
+  FeeBumpTransaction,
+  Keypair,
+  TransactionBuilder,
+  rpc,
+  scValToNative,
+  xdr,
+} from "@stellar/stellar-sdk";
 
 // ---------------------------------------------------------------------------
 // Constants (mainnet — CONTEXT §1 / §7 LIVE-VERIFIED)
@@ -88,6 +97,9 @@ const USDC_DECIMALS = 7;
 const MAX_CHALLENGE_TIMEOUT_SECONDS = 300;
 /** A paid endpoint is still untrusted; never buffer an unlimited response. */
 const MAX_PAID_RESULT_BYTES = 1_048_576;
+/** Bound both service calls; only the signed-call timeout is a settlement-unknown state. */
+const UNPAID_CHALLENGE_TIMEOUT_MS = 15_000;
+const SIGNED_SERVICE_TIMEOUT_MS = 60_000;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -120,6 +132,28 @@ export interface DemoConfig {
   /** HTTP method + JSON body used to invoke the scrapper task endpoint. */
   scrapeMethod: string;
   scrapeBody: string | null;
+}
+
+/**
+ * Convert an arbitrary failure into an operator-safe message. RPC/client
+ * libraries may include the request URL in their own errors, and provider URLs
+ * commonly carry API keys in a path or query string.
+ */
+export function redactSensitiveError(
+  error: unknown,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  let message = error instanceof Error ? error.message : String(error);
+  const sensitiveValues = [env.STELLAR_PRIVATE_KEY, env.X402_API_KEY, env.STELLAR_RPC_URL]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value));
+
+  for (const value of sensitiveValues) {
+    message = message.split(value).join("[REDACTED]");
+    const encoded = encodeURIComponent(value);
+    if (encoded !== value) message = message.split(encoded).join("[REDACTED]");
+  }
+  return message;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): DemoConfig {
@@ -231,7 +265,9 @@ async function runPreflight(cfg: DemoConfig): Promise<void> {
     [
       "RPC reachable + healthy",
       async () => {
-        if (!(await rpcHealthy(cfg))) throw new Error(`RPC ${cfg.rpcUrl} not healthy`);
+        // The configured RPC URL may carry a provider API key in its path or
+        // query string. Never echo it into CI/operator logs on a health failure.
+        if (!(await rpcHealthy(cfg))) throw new Error("configured Stellar RPC endpoint is not healthy");
       },
     ],
     [
@@ -293,7 +329,7 @@ async function runPreflight(cfg: DemoConfig): Promise<void> {
       await fn();
       process.stderr.write("OK\n");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = redactSensitiveError(err);
       if (advisory) {
         process.stderr.write(`WARN (${msg})\n`);
       } else {
@@ -393,6 +429,27 @@ function assertPublicKey(label: string, value: string | null): string {
   return value;
 }
 
+/** Never reclassify a credential-bearing URL as safe merely because its env-key name looks harmless. */
+export function credentialFreeChildUrl(label: string, value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`${label} must be an absolute URL before it can be forwarded to the MCP child`);
+  }
+  if (
+    !/^https?:$/.test(parsed.protocol) ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    (parsed.pathname !== "" && parsed.pathname !== "/")
+  ) {
+    throw new Error(`${label} is credential-bearing or non-canonical; refusing to forward it to the MCP child`);
+  }
+  return value;
+}
+
 /** Pin every identity/routing fact before a real evidence run can sign. */
 export function assertEvidenceTarget(cfg: DemoConfig, agent: ResolvedAgent): void {
   if (!agent.x402Enabled) throw new Error("discovered Scrapper does not advertise x402 — aborting");
@@ -416,21 +473,24 @@ async function discoverScrapper(cfg: DemoConfig): Promise<ResolvedAgent> {
   // Secret-free child env: ONLY non-secret config. STELLAR_PRIVATE_KEY / X402_API_KEY are NEVER included.
   const childEnv: Record<string, string> = { STELLAR_NETWORK: cfg.network };
   if (process.env.PATH) childEnv.PATH = process.env.PATH; // let the child resolve `node`
-  if (cfg.explorerBaseUrl) childEnv.EXPLORER_BASE_URL = cfg.explorerBaseUrl;
-  if (process.env.STELLAR_RPC_URL) childEnv.STELLAR_RPC_URL = process.env.STELLAR_RPC_URL;
-  // Forward NON-SECRET network/proxy/TLS config so the read-only server can still reach
-  // the explorer + Soroban RPC behind a corporate or sandboxed HTTPS proxy. These are not
-  // secrets; the secret assertion below still guarantees STELLAR_PRIVATE_KEY / X402_API_KEY
-  // are NEVER placed in the child env.
+  if (cfg.explorerBaseUrl) {
+    childEnv.EXPLORER_BASE_URL = credentialFreeChildUrl("EXPLORER_BASE_URL", cfg.explorerBaseUrl);
+  }
+  // Discovery does not need the keyed process's RPC override. In particular,
+  // provider URLs frequently carry API keys in a path/query, so forwarding
+  // STELLAR_RPC_URL would make the "secret-free child" boundary false.
+  // Forward only proxy URLs proven credential-free plus non-secret bypass/CA
+  // settings needed in corporate and sandboxed networks.
   for (const k of [
     "HTTPS_PROXY",
     "HTTP_PROXY",
-    "NO_PROXY",
     "https_proxy",
     "http_proxy",
-    "no_proxy",
-    "NODE_EXTRA_CA_CERTS",
   ]) {
+    const v = process.env[k];
+    if (v) childEnv[k] = credentialFreeChildUrl(k, v);
+  }
+  for (const k of ["NO_PROXY", "no_proxy", "NODE_EXTRA_CA_CERTS"]) {
     const v = process.env[k];
     if (v) childEnv[k] = v;
   }
@@ -490,15 +550,36 @@ async function discoverScrapper(cfg: DemoConfig): Promise<ResolvedAgent> {
 // ---------------------------------------------------------------------------
 
 interface PayResult {
-  result: unknown;
   resultHash: string;
+  resultOk: boolean;
   paymentTxHash: string;
+  /** SHA-256 of the signed Soroban invocation + authorization entries. */
+  paymentAuthorizationHash: string;
   settlementLedger: number;
   settlementConfirmedAt: string;
   payTo: string;
   price: string;
   asset: string;
   challengeNetwork: string;
+  journalPath: string;
+}
+
+export interface PaymentSubmission {
+  response: Response;
+  authorizationHash: string;
+  submittedAtMs: number;
+  journalPath: string;
+}
+
+export interface PaymentAttemptContext {
+  startedAt: string;
+  payerPublicKey: string;
+  agentId: number;
+  endpoint: string;
+  challengeNetwork: string;
+  asset: string;
+  payTo: string;
+  price: string;
 }
 
 export interface ValidatedChallenge {
@@ -519,9 +600,14 @@ function buildX402(cfg: DemoConfig): { client: x402Client; http: x402HTTPClient 
   return { client, http: new x402HTTPClient(client) };
 }
 
-function scrapeInit(cfg: DemoConfig, extraHeaders?: Record<string, string>): RequestInit {
+/**
+ * Build a request that cannot follow a redirect. In particular, a signed
+ * PAYMENT-SIGNATURE header is a bearer-like capability and must never be
+ * replayed by fetch to another origin after a 30x response.
+ */
+export function scrapeInit(cfg: DemoConfig, extraHeaders?: Record<string, string>): RequestInit {
   const headers: Record<string, string> = { ...(extraHeaders ?? {}) };
-  const init: RequestInit = { method: cfg.scrapeMethod, headers };
+  const init: RequestInit = { method: cfg.scrapeMethod, headers, redirect: "error" };
   if (cfg.scrapeMethod !== "GET" && cfg.scrapeMethod !== "HEAD" && cfg.scrapeBody != null) {
     headers["content-type"] = "application/json";
     init.body = cfg.scrapeBody;
@@ -529,13 +615,23 @@ function scrapeInit(cfg: DemoConfig, extraHeaders?: Record<string, string>): Req
   return init;
 }
 
-async function payForService(cfg: DemoConfig, agent: ResolvedAgent): Promise<PayResult> {
+async function payForService(
+  cfg: DemoConfig,
+  agent: ResolvedAgent,
+  startedAt: string,
+  expectedUrl: string,
+): Promise<PayResult> {
   assertEvidenceTarget(cfg, agent);
   const { client, http } = buildX402(cfg);
   const url = agent.endpoint;
 
   // 1) First request — expect HTTP 402.
-  const first = await fetch(url, scrapeInit(cfg));
+  let first: Response;
+  try {
+    first = await fetchWithTimeout(fetch, url, scrapeInit(cfg), UNPAID_CHALLENGE_TIMEOUT_MS);
+  } catch (error) {
+    throw new Error(`initial unpaid x402 challenge request failed: ${redactSensitiveError(error)}`);
+  }
   if (first.status !== 402) {
     throw new Error(`expected 402 from ${url}, got ${first.status}`);
   }
@@ -560,49 +656,86 @@ async function payForService(cfg: DemoConfig, agent: ResolvedAgent): Promise<Pay
   // We deliberately do NOT auto-resubmit on a post-payment 402: a 402 returned
   // AFTER submitting a payment can mean the facilitator already settled on-chain
   // but the HTTP response failed downstream, and minting a second signed payload
-  // would double-spend real USDC. Surface it for a human to inspect the ledger
-  // and re-run manually instead of silently paying twice.
-  const submittedAtMs = Date.now();
-  const paid = await settleOnce(client, http, url, cfg, validated.required);
-  if (paid.status === 402) {
-    const retry = http.getPaymentRequiredResponse((name) => paid.headers.get(name));
-    throw new Error(
-      "payment not accepted (HTTP 402 after submitting payment). NOT retrying, to avoid a " +
-        "double-spend: check whether a payment settled on-chain before re-running. " +
-        `Challenge: ${JSON.stringify(retry)}`,
-    );
-  }
-  if (!paid.ok) throw new Error(`service error after payment: ${paid.status}`);
-
-  // 5) Treat PAYMENT-RESPONSE as an untrusted claim. Validate its full
-  // SettleResponse tuple, then independently require a successful RPC transaction
-  // containing exactly the expected USDC transfer before consuming the result or
-  // writing reputation.
-  const settlement = decodeSettlementResponse(paid.headers.get("PAYMENT-RESPONSE"));
-  const paymentTxHash = validateSettlementResponse(settlement, {
-    payer: assertPublicKey("payer", cfg.payerPublicKey),
-    network: accept.network,
-    amount: accept.amount,
-  });
-  const onchain = await verifySettlementOnchain(cfg, paymentTxHash, {
-    payer: assertPublicKey("payer", cfg.payerPublicKey),
-    payTo,
+  // would double-spend real USDC. Create a durable journal before submission,
+  // then surface it for ledger reconciliation; never mint a second payment.
+  const payerPublicKey = assertPublicKey("payer", cfg.payerPublicKey);
+  const submission = await settleOnce(client, http, url, cfg, validated.required, {
+    startedAt,
+    payerPublicKey,
+    agentId: agent.agentId,
+    endpoint: agent.endpoint,
+    challengeNetwork: accept.network,
     asset: accept.asset,
-    amount: accept.amount,
-    submittedAtMs,
-  });
-  const { result, resultHash } = await readPaidResult(paid);
-  return {
-    result,
-    resultHash,
-    paymentTxHash,
     payTo,
     price,
-    asset: accept.asset,
-    challengeNetwork: accept.network,
-    settlementLedger: onchain.ledger,
-    settlementConfirmedAt: onchain.confirmedAt,
-  };
+  });
+  const paid = submission.response;
+  try {
+    if (paid.status === 402) {
+      throw new Error("HTTP 402 after submitting the signed payment; settlement is unknown");
+    }
+    if (!paid.ok) throw new Error(`service error after payment: ${paid.status}`);
+
+    // 5) Treat PAYMENT-RESPONSE as an untrusted claim. Validate its full
+    // SettleResponse tuple, then independently require a successful RPC transaction
+    // containing exactly the expected USDC transfer before consuming the result or
+    // writing reputation.
+    const settlement = decodeSettlementResponse(paid.headers.get("PAYMENT-RESPONSE"));
+    const paymentTxHash = validateSettlementResponse(settlement, {
+      payer: payerPublicKey,
+      network: accept.network,
+      amount: accept.amount,
+    });
+    const onchain = await verifySettlementOnchain(cfg, paymentTxHash, {
+      payer: payerPublicKey,
+      payTo,
+      asset: accept.asset,
+      amount: accept.amount,
+      submittedAtMs: submission.submittedAtMs,
+      authorizationHash: submission.authorizationHash,
+      networkPassphrase: cfg.stellar.networkPassphrase,
+    });
+    await appendRunJournal(startedAt, {
+      event: "settlement_confirmed",
+      recordedAt: new Date().toISOString(),
+      paymentTxHash,
+      settlementLedger: onchain.ledger,
+      settlementConfirmedAt: onchain.confirmedAt,
+    });
+    const { result, resultHash } = await readPaidResult(paid);
+    const resultOk = isSuccessfulResult(result, expectedUrl);
+    await appendRunJournal(startedAt, {
+      event: "result_hashed",
+      recordedAt: new Date().toISOString(),
+      resultHash,
+      resultOk,
+    });
+    return {
+      resultHash,
+      resultOk,
+      paymentTxHash,
+      paymentAuthorizationHash: submission.authorizationHash,
+      payTo,
+      price,
+      asset: accept.asset,
+      challengeNetwork: accept.network,
+      settlementLedger: onchain.ledger,
+      settlementConfirmedAt: onchain.confirmedAt,
+      journalPath: submission.journalPath,
+    };
+  } catch (error) {
+    const markerFailure = await appendRecoveryMarker(appendRunJournal, startedAt, {
+      event: "payment_outcome_unknown",
+      recordedAt: new Date().toISOString(),
+      stage: "post_response_processing",
+      httpStatus: paid.status,
+    });
+    throw new Error(
+      `PAYMENT_SUBMITTED: recover from ${submission.journalPath}; DO NOT rerun or create another payment. ` +
+        `${markerFailure ? `Recovery marker also failed: ${markerFailure}. ` : ""}` +
+        `Cause: ${redactSensitiveError(error)}`,
+    );
+  }
 }
 
 function maxPriceBaseUnits(cfg: DemoConfig): bigint {
@@ -688,21 +821,162 @@ export function validatePaymentChallenge(cfg: DemoConfig, required: PaymentRequi
   };
 }
 
+export type RunJournalAppender = (startedAt: string, entry: RunJournalEntry) => Promise<string>;
+
+export interface PaymentSubmissionDependencies {
+  /** Unit-test seam; production always uses the process-global fetch. */
+  fetchImpl?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+  /** Unit-test seam; production always uses the fsync-backed appendRunJournal. */
+  appendJournal?: RunJournalAppender;
+  nowMs?: () => number;
+  /** Unit-test seam; production uses SIGNED_SERVICE_TIMEOUT_MS. */
+  requestTimeoutMs?: number;
+}
+
+async function fetchWithTimeout(
+  fetchImpl: (input: string | URL | Request, init?: RequestInit) => Promise<Response>,
+  input: string | URL | Request,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error(`service request timeout must be a positive integer; got ${String(timeoutMs)}`);
+  }
+  const controller = new AbortController();
+  const upstreamSignal = init.signal;
+  const relayAbort = () => controller.abort(upstreamSignal?.reason);
+  if (upstreamSignal?.aborted) relayAbort();
+  else upstreamSignal?.addEventListener("abort", relayAbort, { once: true });
+  const timer = setTimeout(
+    () => controller.abort(new Error(`service request timed out after ${timeoutMs}ms`)),
+    timeoutMs,
+  );
+  try {
+    return await fetchImpl(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+    upstreamSignal?.removeEventListener("abort", relayAbort);
+  }
+}
+
+async function appendRecoveryMarker(
+  appendJournal: RunJournalAppender,
+  startedAt: string,
+  entry: Extract<RunJournalEntry, { event: "payment_outcome_unknown" | "feedback_outcome_unknown" }>,
+): Promise<string | null> {
+  try {
+    await appendJournal(startedAt, entry);
+    return null;
+  } catch (error) {
+    return redactSensitiveError(error);
+  }
+}
+
+/**
+ * Persist the signed-payment identity before the first byte can leave this
+ * process, then submit exactly once. This narrow seam is deliberately free of
+ * signing logic so the crash/retry state machine can be tested without keys or
+ * network access.
+ */
+export async function submitSignedPaymentRequest(
+  url: string,
+  init: RequestInit,
+  authorizationHash: string,
+  attempt: PaymentAttemptContext,
+  dependencies: PaymentSubmissionDependencies = {},
+): Promise<PaymentSubmission> {
+  const appendJournal = dependencies.appendJournal ?? appendRunJournal;
+  const fetchImpl = dependencies.fetchImpl ?? fetch;
+  const nowMs = dependencies.nowMs ?? Date.now;
+  const requestTimeoutMs = dependencies.requestTimeoutMs ?? SIGNED_SERVICE_TIMEOUT_MS;
+  const submittedAtMs = nowMs();
+  let journalPath: string;
+  try {
+    journalPath = await appendJournal(attempt.startedAt, {
+      event: "payment_submitted",
+      recordedAt: new Date(submittedAtMs).toISOString(),
+      payerPublicKey: attempt.payerPublicKey,
+      agentId: attempt.agentId,
+      endpoint: attempt.endpoint,
+      challengeNetwork: attempt.challengeNetwork,
+      asset: attempt.asset,
+      payTo: attempt.payTo,
+      price: attempt.price,
+      paymentAuthorizationHash: authorizationHash,
+    });
+  } catch (error) {
+    throw new Error(
+      `payment journal could not be durably created; refusing to submit: ${redactSensitiveError(error)}`,
+    );
+  }
+
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(fetchImpl, url, init, requestTimeoutMs);
+  } catch (error) {
+    const markerFailure = await appendRecoveryMarker(appendJournal, attempt.startedAt, {
+      event: "payment_outcome_unknown",
+      recordedAt: new Date(nowMs()).toISOString(),
+      stage: "signed_request",
+    });
+    throw new Error(
+      "PAYMENT_OUTCOME_UNKNOWN: the signed payment request was submitted but no HTTP response was received. " +
+        `It may already have settled. Recover from ${journalPath}; DO NOT rerun or create a second payment until ` +
+        `the ledger is reconciled.${markerFailure ? ` Recovery marker also failed: ${markerFailure}.` : ""} ` +
+        `Cause: ${redactSensitiveError(error)}`,
+    );
+  }
+
+  try {
+    await appendJournal(attempt.startedAt, {
+      event: "payment_response_received",
+      recordedAt: new Date(nowMs()).toISOString(),
+      httpStatus: response.status,
+    });
+  } catch (error) {
+    const markerFailure = await appendRecoveryMarker(appendJournal, attempt.startedAt, {
+      event: "payment_outcome_unknown",
+      recordedAt: new Date(nowMs()).toISOString(),
+      stage: "response_journal",
+      httpStatus: response.status,
+    });
+    throw new Error(
+      `PAYMENT_OUTCOME_UNKNOWN: HTTP ${response.status} was received, but recovery journal ${journalPath} ` +
+        `could not be advanced. DO NOT rerun or create another payment.` +
+        `${markerFailure ? ` Recovery marker also failed: ${markerFailure}.` : ""} ` +
+        `Cause: ${redactSensitiveError(error)}`,
+    );
+  }
+
+  return { response, authorizationHash, submittedAtMs, journalPath };
+}
+
 async function settleOnce(
   client: x402Client,
   http: x402HTTPClient,
   url: string,
   cfg: DemoConfig,
   required: PaymentRequired,
-): Promise<Response> {
-  let payload;
+  attempt: PaymentAttemptContext,
+): Promise<PaymentSubmission> {
+  let payload: PaymentPayload;
   try {
     payload = await client.createPaymentPayload(required);
   } catch (err) {
     throw new Error(`payment creation failed (USDC/trustline/RPC?): ${err instanceof Error ? err.message : String(err)}`);
   }
+  const transactionXdr = payload.payload.transaction;
+  if (typeof transactionXdr !== "string" || transactionXdr.length === 0) {
+    throw new Error("payment creation returned no Stellar transaction XDR");
+  }
+  const authorizationHash = paymentAuthorizationHash(transactionXdr, cfg.stellar.networkPassphrase);
   const paymentHeaders = http.encodePaymentSignatureHeader(payload);
-  return fetch(url, scrapeInit(cfg, paymentHeaders));
+  return submitSignedPaymentRequest(
+    url,
+    scrapeInit(cfg, paymentHeaders),
+    authorizationHash,
+    attempt,
+  );
 }
 
 function decodeSettlementResponse(header: string | null): SettleResponse {
@@ -761,11 +1035,40 @@ interface OnchainSettlementExpectation {
   asset: string;
   amount: string;
   submittedAtMs: number;
+  authorizationHash: string;
+  networkPassphrase: string;
 }
 
 interface OnchainSettlementProof {
   ledger: number;
   confirmedAt: string;
+}
+
+/**
+ * Bind a facilitator-built settlement envelope back to the exact invocation
+ * authorized by this client. The facilitator legitimately changes the source
+ * account/sequence and may fee-bump the transaction, so whole-transaction hash
+ * equality would reject compliant x402 settlements. The signed Soroban auth
+ * entry and host function are preserved across that rebuild and are the stable
+ * one-shot authorization identity.
+ */
+export function paymentAuthorizationHash(
+  envelope: string | xdr.TransactionEnvelope,
+  networkPassphrase: string,
+): string {
+  const parsed = TransactionBuilder.fromXDR(envelope, networkPassphrase);
+  const transaction = parsed instanceof FeeBumpTransaction ? parsed.innerTransaction : parsed;
+  if (transaction.operations.length !== 1 || transaction.operations[0]?.type !== "invokeHostFunction") {
+    throw new Error("payment transaction must contain exactly one invokeHostFunction operation");
+  }
+  const operation = transaction.operations[0];
+  if (!Array.isArray(operation.auth) || operation.auth.length !== 1) {
+    throw new Error(`payment transaction must contain exactly one Soroban authorization entry; got ${operation.auth?.length ?? 0}`);
+  }
+  const hash = createHash("sha256");
+  hash.update(operation.func.toXDR());
+  hash.update(operation.auth[0].toXDR());
+  return hash.digest("hex");
 }
 
 function transferFacts(transaction: Record<string, any>): TransferFact[] {
@@ -817,8 +1120,22 @@ export function assertOnchainSettlement(
   if (!Number.isFinite(transaction.createdAt)) {
     throw new Error("settlement transaction has no valid close time");
   }
-  // SDK v15 exposes `createdAt` as Unix seconds. Reject a replay that predates
-  // this one-shot submission (allow only sub-second representation rounding).
+  if (!/^[0-9a-f]{64}$/.test(expected.authorizationHash)) {
+    throw new Error("expected payment authorization hash is invalid");
+  }
+  if (!(transaction.envelopeXdr instanceof xdr.TransactionEnvelope)) {
+    throw new Error("settlement transaction has no parsed envelope XDR");
+  }
+  const confirmedAuthorizationHash = paymentAuthorizationHash(
+    transaction.envelopeXdr,
+    expected.networkPassphrase,
+  );
+  if (confirmedAuthorizationHash !== expected.authorizationHash) {
+    throw new Error("settlement transaction does not contain this payment's signed Soroban authorization");
+  }
+  // SDK v15 exposes `createdAt` only as whole Unix seconds. This check cannot
+  // distinguish two events inside one second, so authorizationHash above is the
+  // replay boundary; time remains defense-in-depth for older-ledger receipts.
   if (transaction.createdAt < Math.floor(expected.submittedAtMs / 1_000)) {
     throw new Error("settlement transaction predates this payment submission");
   }
@@ -911,37 +1228,51 @@ export async function readPaidResult(res: Response): Promise<{ result: unknown; 
 }
 
 /**
- * Did the paid call return a genuinely usable result, or a 200 with an empty /
- * garbage body? We must NOT write a top on-chain reputation score for a failed
- * outcome — that would corrupt the very signal this registry is about.
+ * The deployed Scrapper contract is deliberately narrow: its HTTP wrapper
+ * returns exactly `{ success: true, data: string }`, and the string emitted by
+ * `formatOutput()` begins with `URL:` and contains a `Content:` section. Generic
+ * truthy JSON, queue acknowledgements, arrays, and status/code objects are not
+ * completed scrapes and must never earn acceptance evidence or a 95 score.
  */
-export function isSuccessfulResult(result: unknown): boolean {
-  if (result == null || typeof result !== "object") return false;
-  const r = result as Record<string, unknown>;
-  if (r.success === false || r.ok === false) return false;
-  if ("error" in r && r.error != null && r.error !== "") return false;
-  if (
-    typeof r.status === "string" &&
-    ["error", "failed", "failure", "rejected", "cancelled", "canceled"].includes(
-      r.status.trim().toLowerCase(),
-    )
-  ) {
+export function isSuccessfulResult(result: unknown, expectedUrl?: string): boolean {
+  if (!isRecord(result) || Array.isArray(result)) return false;
+  const keys = Object.keys(result);
+  if (keys.length !== 2 || !keys.includes("success") || !keys.includes("data")) return false;
+  if (result.success !== true || typeof result.data !== "string" || result.data.trim().length === 0) {
     return false;
   }
-  const keys = Object.keys(r);
-  // safeJson wraps a non-JSON body as { raw: "…" } — not a structured result.
-  if (keys.length === 0 || (keys.length === 1 && keys[0] === "raw")) return false;
-  // Require at least one non-empty field.
-  return keys
-    .filter((k) => !["success", "ok", "status", "message"].includes(k))
-    .some((k) => {
-      const v = r[k];
-      if (v == null) return false;
-      if (typeof v === "string") return v.trim().length > 0;
-      if (Array.isArray(v)) return v.length > 0;
-      if (typeof v === "object") return Object.keys(v as Record<string, unknown>).length > 0;
-      return true;
-    });
+  const match = /^URL: (https?:\/\/[^\r\n]+)\r?\n/.exec(result.data);
+  if (!match || !/\r?\nContent:\r?\n/.test(result.data)) return false;
+  return expectedUrl === undefined || match[1] === expectedUrl;
+}
+
+/** Parse and pin the request whose response is about to receive on-chain credit. */
+export function expectedScrapeUrl(cfg: DemoConfig): string {
+  if (cfg.scrapeMethod !== "POST" || cfg.scrapeBody == null) {
+    throw new Error("the funded Scrapper evidence run requires POST with a JSON body");
+  }
+  let body: unknown;
+  try {
+    body = JSON.parse(cfg.scrapeBody);
+  } catch {
+    throw new Error("SCRAPE_BODY must be valid JSON before any payment is attempted");
+  }
+  if (!isRecord(body) || typeof body.url !== "string" || body.url.length === 0) {
+    throw new Error('SCRAPE_BODY must be an object with a non-empty string "url"');
+  }
+  if (body.evaluationMode === true) {
+    throw new Error("evaluationMode has a different response contract and is not valid acceptance evidence");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(body.url);
+  } catch {
+    throw new Error("SCRAPE_BODY.url must be an absolute HTTP(S) URL");
+  }
+  if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password || parsed.hash) {
+    throw new Error("SCRAPE_BODY.url must be HTTP(S) and contain no credentials or fragment");
+  }
+  return body.url;
 }
 
 // ---------------------------------------------------------------------------
@@ -957,7 +1288,143 @@ interface FeedbackInput {
   feedbackUri: string;
 }
 
-async function writeFeedback(cfg: DemoConfig, p: FeedbackInput): Promise<string> {
+export interface FeedbackTransactionLike {
+  sign(): Promise<void>;
+  signed?: { hash(): Uint8Array };
+  send(): Promise<{
+    sendTransactionResponse?: { hash?: string };
+    getTransactionResponse?: { status?: string; txHash?: string };
+  }>;
+}
+
+export interface FeedbackSubmissionDependencies {
+  /** Unit-test seam; production always uses the fsync-backed appendRunJournal. */
+  appendJournal?: RunJournalAppender;
+  nowMs?: () => number;
+}
+
+export interface FeedbackSubmission {
+  feedbackTxHash: string;
+  journalPath: string;
+}
+
+/**
+ * Sign first, durably record the canonical signed transaction hash, then send
+ * exactly once and require an RPC terminal SUCCESS before confirming it. There
+ * is intentionally no signing or network implementation in this helper, which
+ * keeps failed/unknown state transitions unit-testable.
+ */
+export async function submitFeedbackTransaction(
+  transaction: FeedbackTransactionLike,
+  startedAt: string,
+  agentId: number,
+  dependencies: FeedbackSubmissionDependencies = {},
+): Promise<FeedbackSubmission> {
+  const appendJournal = dependencies.appendJournal ?? appendRunJournal;
+  const nowMs = dependencies.nowMs ?? Date.now;
+
+  await transaction.sign();
+  const signed = transaction.signed;
+  if (!signed) throw new Error("feedback signing completed without a signed transaction; refusing to submit");
+  const feedbackTxHash = assertTransactionHash(
+    "signed give_feedback transaction",
+    Buffer.from(signed.hash()).toString("hex"),
+  );
+
+  let journalPath: string;
+  try {
+    journalPath = await appendJournal(startedAt, {
+      event: "feedback_submitted",
+      recordedAt: new Date(nowMs()).toISOString(),
+      agentId,
+      feedbackTxHash,
+    });
+  } catch (error) {
+    throw new Error(
+      `feedback journal could not be durably created; refusing to submit ${feedbackTxHash}: ${redactSensitiveError(error)}`,
+    );
+  }
+
+  const outcomeUnknown = async (stage: string, cause: unknown): Promise<never> => {
+    const markerFailure = await appendRecoveryMarker(appendJournal, startedAt, {
+      event: "feedback_outcome_unknown",
+      recordedAt: new Date(nowMs()).toISOString(),
+      stage,
+      feedbackTxHash,
+    });
+    throw new Error(
+      `FEEDBACK_OUTCOME_UNKNOWN: tx=${feedbackTxHash}; recover from ${journalPath} and reconcile that exact hash. ` +
+        `DO NOT submit another feedback until reconciliation.` +
+        `${markerFailure ? ` Recovery marker also failed: ${markerFailure}.` : ""} ` +
+        `Cause: ${redactSensitiveError(cause)}`,
+    );
+  };
+
+  let sent: Awaited<ReturnType<FeedbackTransactionLike["send"]>>;
+  try {
+    sent = await transaction.send();
+  } catch (error) {
+    return outcomeUnknown("send_or_poll", error);
+  }
+
+  try {
+    for (const [label, candidate] of [
+      ["sendTransaction hash", sent.sendTransactionResponse?.hash],
+      ["getTransaction hash", sent.getTransactionResponse?.txHash],
+    ] as const) {
+      if (candidate != null && assertTransactionHash(label, candidate) !== feedbackTxHash) {
+        throw new Error(`${label} does not match the durably journaled signed transaction`);
+      }
+    }
+  } catch (error) {
+    return outcomeUnknown("response_integrity", error);
+  }
+
+  const finalStatus = sent.getTransactionResponse?.status;
+  if (finalStatus === "FAILED") {
+    let journalFailure: string | null = null;
+    try {
+      await appendJournal(startedAt, {
+        event: "feedback_failed",
+        recordedAt: new Date(nowMs()).toISOString(),
+        agentId,
+        feedbackTxHash,
+      });
+    } catch (error) {
+      journalFailure = redactSensitiveError(error);
+    }
+    throw new Error(
+      `FEEDBACK_FAILED: tx=${feedbackTxHash} reached terminal FAILED; no feedback was confirmed and no ` +
+        `acceptance receipt may be written. Recover from ${journalPath}; any new feedback requires explicit review.` +
+        `${journalFailure ? ` Failure marker also failed: ${journalFailure}.` : ""}`,
+    );
+  }
+  if (finalStatus !== "SUCCESS") {
+    return outcomeUnknown("final_status", new Error(`expected SUCCESS, got ${String(finalStatus ?? "missing")}`));
+  }
+
+  try {
+    await appendJournal(startedAt, {
+      event: "feedback_confirmed",
+      recordedAt: new Date(nowMs()).toISOString(),
+      agentId,
+      feedbackTxHash,
+    });
+  } catch (error) {
+    throw new Error(
+      `FEEDBACK_SUBMITTED: tx=${feedbackTxHash} reached SUCCESS, but ${journalPath} could not be finalized. ` +
+        `Recover using that exact hash; DO NOT submit another feedback. Cause: ${redactSensitiveError(error)}`,
+    );
+  }
+
+  return { feedbackTxHash, journalPath };
+}
+
+async function writeFeedback(
+  cfg: DemoConfig,
+  p: FeedbackInput,
+  startedAt: string,
+): Promise<FeedbackSubmission> {
   const secret = process.env.STELLAR_PRIVATE_KEY;
   if (!secret) throw new Error("STELLAR_PRIVATE_KEY required to sign give_feedback");
   const kp = Keypair.fromSecret(secret);
@@ -979,9 +1446,7 @@ async function writeFeedback(cfg: DemoConfig, p: FeedbackInput): Promise<string>
     feedback_hash: feedbackHash,
   });
 
-  const sent = await tx.signAndSend(); // simulate → assemble → sign → send → poll
-  const hash = sent.sendTransactionResponse?.hash;
-  return assertTransactionHash("give_feedback transaction", hash);
+  return submitFeedbackTransaction(tx, startedAt, p.agentId);
 }
 
 // ---------------------------------------------------------------------------
@@ -1010,6 +1475,7 @@ export interface RunRecord {
   payTo: string;
   price: string;
   paymentTxHash: string;
+  paymentAuthorizationHash: string;
   settlementLedger: number;
   settlementConfirmedAt: string;
   resultHash: string;
@@ -1036,6 +1502,7 @@ export function assertCompleteEvidenceRecord(rec: RunRecord): void {
   if (payer === rec.owner || payer === rec.payTo) throw new Error("evidence payer must differ from owner/payTo");
   if (!/^\d+$/.test(rec.price) || BigInt(rec.price) <= 0n) throw new Error("evidence receipt price is invalid");
   const paymentTxHash = assertTransactionHash("evidence paymentTxHash", rec.paymentTxHash);
+  assertResultHash(rec.paymentAuthorizationHash);
   if (!Number.isSafeInteger(rec.settlementLedger) || rec.settlementLedger <= 0) {
     throw new Error("evidence receipt settlement ledger is invalid");
   }
@@ -1046,6 +1513,81 @@ export function assertCompleteEvidenceRecord(rec: RunRecord): void {
   if (rec.resultOk !== true) throw new Error("paid result was not usable; refusing to label the run as acceptance evidence");
   const feedbackTxHash = assertTransactionHash("evidence feedbackTxHash", rec.feedbackTxHash);
   if (paymentTxHash === feedbackTxHash) throw new Error("payment and feedback must be two distinct transactions");
+}
+
+export type RunJournalEntry =
+  | {
+      event: "payment_submitted";
+      recordedAt: string;
+      payerPublicKey: string;
+      agentId: number;
+      endpoint: string;
+      challengeNetwork: string;
+      asset: string;
+      payTo: string;
+      price: string;
+      paymentAuthorizationHash: string;
+    }
+  | {
+      event: "payment_response_received";
+      recordedAt: string;
+      httpStatus: number;
+    }
+  | {
+      event: "payment_outcome_unknown";
+      recordedAt: string;
+      stage: string;
+      httpStatus?: number;
+    }
+  | {
+      event: "settlement_confirmed";
+      recordedAt: string;
+      paymentTxHash: string;
+      settlementLedger: number;
+      settlementConfirmedAt: string;
+    }
+  | {
+      event: "result_hashed";
+      recordedAt: string;
+      resultHash: string;
+      resultOk: boolean;
+    }
+  | {
+      event: "feedback_submitted";
+      recordedAt: string;
+      agentId: number;
+      feedbackTxHash: string;
+    }
+  | {
+      event: "feedback_failed";
+      recordedAt: string;
+      agentId: number;
+      feedbackTxHash: string;
+    }
+  | {
+      event: "feedback_outcome_unknown";
+      recordedAt: string;
+      stage: string;
+      feedbackTxHash: string;
+    }
+  | {
+      event: "feedback_confirmed";
+      recordedAt: string;
+      agentId: number;
+      feedbackTxHash: string;
+    };
+
+/** Append-only crash-recovery trail; contains hashes and public chain facts only. */
+async function appendRunJournal(startedAt: string, entry: RunJournalEntry): Promise<string> {
+  const out = resolve(HERE, `run-${startedAt.replace(/[:.]/g, "-")}.journal.jsonl`);
+  const handle = await open(out, "a", 0o600);
+  try {
+    await handle.appendFile(`${JSON.stringify(entry)}\n`, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  return out;
 }
 
 async function recordEvidence(cfg: DemoConfig, rec: RunRecord): Promise<string> {
@@ -1095,6 +1637,7 @@ async function main(): Promise<void> {
       payTo: "",
       price: "",
       paymentTxHash: "",
+      paymentAuthorizationHash: "",
       settlementLedger: 0,
       settlementConfirmedAt: "",
       resultHash: "",
@@ -1111,30 +1654,35 @@ async function main(): Promise<void> {
     return;
   }
 
-  // [3/4] Pay via x402 and receive the scraped result (real mainnet USDC).
+  // [3/4] Pin the exact request/result contract before spending, then pay via
+  // x402 and receive the scraped result (real mainnet USDC).
+  const scrapeUrl = expectedScrapeUrl(cfg);
   const {
-    result,
     resultHash,
+    resultOk,
     paymentTxHash,
+    paymentAuthorizationHash,
     payTo,
     price,
     asset,
     challengeNetwork,
     settlementLedger,
     settlementConfirmedAt,
-  } = await payForService(cfg, agent);
+    journalPath,
+  } = await payForService(cfg, agent, startedAt, scrapeUrl);
   console.log(`[pay] settled. payTo=${payTo} price=${price} paymentTx=${paymentTxHash}`);
-  console.log(`[result] sha256=${resultHash} ${JSON.stringify(result).slice(0, 240)}...`);
 
   // [5] Write on-chain reputation. The score reflects the ACTUAL outcome — a 200
   // with a garbage/empty body must not earn a top score.
-  const resultOk = isSuccessfulResult(result);
+  console.log(`[result] sha256=${resultHash} schemaAccepted=${resultOk}`);
   const value = resultOk ? 95 : 40;
   if (!resultOk) {
     process.stderr.write(
       "[feedback] warning: paid result did not look like a valid scrape — recording a below-expectation score, not 95\n",
     );
   }
+  console.log(`[evidence] provisional payment journal: ${journalPath}`);
+
   const evidenceUri = `data:application/json;base64,${Buffer.from(
     JSON.stringify({
       agentId: agent.agentId,
@@ -1145,6 +1693,7 @@ async function main(): Promise<void> {
       payTo,
       price,
       paymentTxHash,
+      paymentAuthorizationHash,
       settlementLedger,
       settlementConfirmedAt,
       resultHash,
@@ -1152,15 +1701,35 @@ async function main(): Promise<void> {
       ts: startedAt,
     }),
   ).toString("base64")}`;
-  const feedbackTxHash = await writeFeedback(cfg, {
-    agentId: agent.agentId,
-    value,
-    tag1: resultOk ? "starred" : "belowExpectation",
-    tag2: "successRate",
-    endpoint: agent.endpoint,
-    feedbackUri: evidenceUri,
-  });
+  let feedbackTxHash: string;
+  try {
+    ({ feedbackTxHash } = await writeFeedback(
+      cfg,
+      {
+        agentId: agent.agentId,
+        value,
+        tag1: resultOk ? "starred" : "belowExpectation",
+        tag2: "successRate",
+        endpoint: agent.endpoint,
+        feedbackUri: evidenceUri,
+      },
+      startedAt,
+    ));
+  } catch (error) {
+    throw new Error(
+      `PAYMENT_ALREADY_SETTLED: feedback failed. Resume from ${journalPath}; DO NOT rerun payment. ` +
+        `Cause: ${redactSensitiveError(error)}`,
+    );
+  }
   console.log(`[feedback] on-chain. feedbackTx=${feedbackTxHash}`);
+
+  if (!resultOk) {
+    process.stderr.write(
+      `[evidence] payment and below-expectation feedback are journaled at ${journalPath}; ` +
+        "no acceptance receipt will be written\n",
+    );
+    return;
+  }
 
   const receipt: RunRecord = {
     network: cfg.network,
@@ -1174,6 +1743,7 @@ async function main(): Promise<void> {
     payTo,
     price,
     paymentTxHash,
+    paymentAuthorizationHash,
     settlementLedger,
     settlementConfirmedAt,
     resultHash,
@@ -1188,16 +1758,26 @@ async function main(): Promise<void> {
       usdcContract: expertContractLink(cfg, USDC_CONTRACT_MAINNET),
     },
   };
-  // Do not print an acceptance-evidence banner until every receipt field has
-  // passed validation. recordEvidence repeats this check before touching disk.
-  assertCompleteEvidenceRecord(receipt);
+  // Receipt validation and persistence are one post-settlement recovery
+  // boundary. Either failure must point to the pre-submit journal and must not
+  // tempt an operator into replaying either transaction.
+  let out: string;
+  try {
+    assertCompleteEvidenceRecord(receipt);
+    out = await recordEvidence(cfg, receipt);
+  } catch (error) {
+    throw new Error(
+      `PAYMENT_AND_FEEDBACK_SETTLED: final receipt failed; recover from ${journalPath}. ` +
+        `DO NOT rerun either transaction. Cause: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
   // [6] Evidence — two mainnet tx hashes + Stellar Expert links + run.json.
+  // Do not print the acceptance banner until the complete receipt is durable.
   console.log(`\n=== EVIDENCE (${cfg.network}) ===`);
   console.log(`payment  tx: ${paymentTxHash}\n             ${expertTxLink(cfg, paymentTxHash)}`);
   console.log(`result sha256: ${resultHash}`);
   console.log(`feedback tx: ${feedbackTxHash}\n             ${expertTxLink(cfg, feedbackTxHash)}`);
-  const out = await recordEvidence(cfg, receipt);
   console.log(`\n[evidence] wrote ${out}`);
 }
 
@@ -1207,7 +1787,7 @@ if (invokedDirectly) {
   // direct CLI execution so a unit-test import never hydrates a real .env key.
   loadDotenv({ path: resolve(HERE, ".env") });
   main().catch((e) => {
-    console.error("FATAL:", e instanceof Error ? e.message : e);
+    console.error("FATAL:", redactSensitiveError(e));
     process.exit(1);
   });
 }

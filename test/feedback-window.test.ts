@@ -52,9 +52,10 @@ describe("collectFeedbackWindow coverage", () => {
     expect(window.coverage).toEqual({
       windowComplete: true,
       paginationExhausted: true,
-      snapshotConsistent: true,
+      snapshotConsistent: false,
       pagesScanned: 1,
       hasMore: false,
+      limitations: ["v1-unversioned-offset-pagination"],
     });
   });
 
@@ -77,6 +78,28 @@ describe("collectFeedbackWindow coverage", () => {
       snapshotConsistent: false,
       pagesScanned: 2,
       hasMore: false,
+      limitations: ["v1-unversioned-offset-pagination"],
+    });
+  });
+
+  it("fails closed when an empty page contradicts explicit hasMore=true", async () => {
+    const window = await collectFeedbackWindow(
+      depsWithPages({ 1: { data: [], hasMore: true } }),
+      12,
+      { page: 1, limit: 10, includeRevoked: false },
+    );
+
+    expect(window.rows).toEqual([]);
+    expect(window.coverage).toEqual({
+      windowComplete: false,
+      paginationExhausted: false,
+      snapshotConsistent: false,
+      pagesScanned: 1,
+      hasMore: true,
+      limitations: [
+        "v1-unversioned-offset-pagination",
+        "upstream-pagination-contradiction",
+      ],
     });
   });
 });

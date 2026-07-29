@@ -226,7 +226,7 @@ jobs:
           mkdir -p "$consumer"
           cd "$consumer"
           npm init -y
-          npm install --ignore-scripts --save-exact "$package_name@$package_version"
+          npm install --ignore-scripts --no-audit --no-fund --save-exact "$package_name@$package_version"
           npm audit signatures
 
       - name: Install checksum-pinned mcp-publisher

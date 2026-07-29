@@ -39,7 +39,7 @@ export const SERVER_INSTRUCTIONS =
   "Stellar 8004 on-chain registry (Identity / Reputation / Validation contracts, " +
   "Stellar mainnet by default). Use these when the user wants to find an agent for " +
   "a task (scraping, rendering, data, inference), compare or rank agents by " +
-  "indexed reputation with bounded on-chain checks, inspect an agent's profile / services / wallet, " +
+  "indexed, declared reputation with a fail-closed contract reachability probe, inspect an agent's profile / services / wallet, " +
   "or prepare an x402 (USDC pay-per-call) payment. Start with find_agent for " +
   "natural-language discovery, then rank_agent for a per-axis breakdown and " +
   "get_agent_profile for full detail; list_services enumerates self-declared endpoint candidates. " +
@@ -47,9 +47,10 @@ export const SERVER_INSTRUCTIONS =
   "API and simulates Soroban view calls. Agent names, descriptions, service labels " +
   "and metadata are self-declared and UNVERIFIED: they live only in labeled " +
   "`selfDeclared` slots of the structured output, never in the summary text. " +
-  "The contract re-derives average and non-revoked feedback count only; active unique-client " +
-  "breadth is not derivable from its append-only client list, so healthy checks are labeled partial " +
-  "and never receive a ranking bonus.";
+  "The contract client index has no authoritative count/cursor and expired entries can hide later retained " +
+  "clients. This release therefore probes one bounded client page but does not call get_summary or compare " +
+  "reputation fields: attempted checks are unavailable, verifiedFields is empty, and rankings remain " +
+  "Explorer-declared. Reserved verification statuses never add a ranking bonus.";
 
 export interface BuildServerOptions {
   /** Version reported in the MCP initialize handshake (defaults from package.json). */
