@@ -1,10 +1,5 @@
 @import 'tailwindcss';
 
-/* ─────────────────────────────────────────────────────────────────────────
-   Cinematic minimalism. Type scale does the work. Dense prose lives
-   inside <details> — visible text is one sentence per beat.
-   ───────────────────────────────────────────────────────────────────── */
-
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
 :root {
@@ -18,58 +13,32 @@
 
 	--color-surface: oklch(0.11 0.002 250);
 	--color-surface-raised: oklch(0.14 0.002 250);
-	--color-surface-overlay: oklch(0.17 0.002 250);
-
 	--color-border: oklch(0.21 0.003 250);
 	--color-border-subtle: oklch(0.16 0.002 250);
-
 	--color-text: oklch(0.94 0 250);
 	--color-text-muted: oklch(0.62 0.002 250);
 	--color-text-dim: oklch(0.50 0.002 250);
-
 	--color-accent: oklch(0.72 0.08 250);
-	--color-accent-soft: oklch(0.72 0.08 250 / 0.06);
 	--color-accent-medium: oklch(0.72 0.08 250 / 0.12);
-
 	--color-positive: oklch(0.72 0.08 162);
-	--color-positive-soft: oklch(0.72 0.08 162 / 0.1);
-	--color-warning: oklch(0.74 0.09 80);
-	--color-warning-soft: oklch(0.74 0.09 80 / 0.1);
-	--color-negative: oklch(0.68 0.11 25);
-	--color-negative-soft: oklch(0.68 0.11 25 / 0.1);
-
 	--color-code: oklch(0.095 0.002 250);
 }
 
 [data-theme='light'] {
 	--color-surface: oklch(0.985 0 0);
 	--color-surface-raised: oklch(0.965 0 0);
-	--color-surface-overlay: oklch(0.94 0 0);
-
 	--color-border: oklch(0.88 0 0);
 	--color-border-subtle: oklch(0.92 0 0);
-
 	--color-text: oklch(0.16 0 0);
 	--color-text-muted: oklch(0.42 0 0);
 	--color-text-dim: oklch(0.52 0 0);
-
 	--color-accent: oklch(0.28 0 0);
-	--color-accent-soft: oklch(0.28 0 0 / 0.05);
 	--color-accent-medium: oklch(0.28 0 0 / 0.1);
-
 	--color-positive: oklch(0.5 0.11 162);
-	--color-positive-soft: oklch(0.5 0.11 162 / 0.08);
-	--color-warning: oklch(0.52 0.1 75);
-	--color-warning-soft: oklch(0.52 0.1 75 / 0.08);
-	--color-negative: oklch(0.5 0.14 25);
-	--color-negative-soft: oklch(0.5 0.14 25 / 0.08);
-
 	--color-code: oklch(0.965 0 0);
 }
 
-* {
-	border-color: var(--color-border);
-}
+* { border-color: var(--color-border); }
 
 html {
 	-webkit-font-smoothing: antialiased;
@@ -79,9 +48,7 @@ html {
 }
 
 @media (prefers-reduced-motion: reduce) {
-	html {
-		scroll-behavior: auto;
-	}
+	html { scroll-behavior: auto; }
 }
 
 body {
@@ -90,189 +57,39 @@ body {
 	font-family: var(--font-sans);
 }
 
-::selection {
-	background: var(--color-accent-medium);
-	color: var(--color-text);
-}
+::selection { background: var(--color-accent-medium); color: var(--color-text); }
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; border-radius: 2px; }
 
-:focus-visible {
-	outline: 2px solid var(--color-accent);
-	outline-offset: 3px;
-	border-radius: 2px;
-}
-
-/* ── Reveal ── */
 @keyframes reveal-up {
-	from {
-		opacity: 0;
-		transform: translateY(8px);
-	}
-	to {
-		opacity: 1;
-		transform: none;
-	}
+	from { opacity: 0; transform: translateY(6px); }
+	to { opacity: 1; transform: none; }
 }
-.reveal {
-	/* Only fill backwards so the finished transform does not keep creating a
-	 * containing block for viewport-fixed mobile tooltips. */
-	animation: reveal-up 0.5s var(--ease-out-expo) backwards;
-}
-.reveal-d1 {
-	animation-delay: 60ms;
-}
-.reveal-d2 {
-	animation-delay: 120ms;
-}
-.reveal-d3 {
-	animation-delay: 180ms;
-}
+.reveal { animation: reveal-up 0.5s var(--ease-out-expo) backwards; }
+.reveal-d1 { animation-delay: 60ms; }
+.reveal-d2 { animation-delay: 120ms; }
 
 @media (prefers-reduced-motion: reduce) {
-	.reveal {
-		animation: none;
-		opacity: 1;
-		transform: none;
-	}
-	*,
-	*::before,
-	*::after {
+	.reveal { animation: none; opacity: 1; }
+	*, *::before, *::after {
 		animation-duration: 0.01ms !important;
-		animation-iteration-count: 1 !important;
 		transition-duration: 0.01ms !important;
 	}
 }
 
-/* ── Nav link ── */
 .nav-link {
-	align-items: center;
-	gap: 4px;
 	padding: 5px 10px;
 	border-radius: 6px;
 	font-size: 12px;
 	font-weight: 500;
 	color: var(--color-text-muted);
 	text-decoration: none;
-	transition:
-		color 0.2s var(--ease-standard),
-		background 0.2s var(--ease-standard);
+	transition: color 0.2s var(--ease-standard), background 0.2s var(--ease-standard);
 }
-.nav-link:hover {
-	color: var(--color-text);
-	background: var(--color-surface-raised);
-}
+.nav-link:hover { color: var(--color-text); background: var(--color-surface-raised); }
 
-/* ── Theme transition ── */
 html.theme-transitioning,
 html.theme-transitioning *:not(svg *):not(path):not(rect):not(circle):not(line),
 html.theme-transitioning *:not(svg *)::before,
 html.theme-transitioning *:not(svg *)::after {
-	transition:
-		background-color 0.2s var(--ease-standard),
-		color 0.2s var(--ease-standard),
-		border-color 0.2s var(--ease-standard) !important;
-}
-
-/* ── Expandable details ── */
-details.expand {
-	border-top: 1px solid var(--color-border-subtle);
-}
-details.expand > summary {
-	list-style: none;
-	cursor: pointer;
-	padding: 16px 0;
-	font-size: 12px;
-	color: var(--color-text-dim);
-	transition: color 0.2s var(--ease-standard);
-	display: flex;
-	align-items: center;
-	gap: 6px;
-}
-details.expand > summary::-webkit-details-marker {
-	display: none;
-}
-details.expand > summary::before {
-	content: '+';
-	font-size: 13px;
-	width: 14px;
-	text-align: center;
-	color: var(--color-text-dim);
-}
-details.expand[open] > summary::before {
-	content: '−';
-}
-details.expand > summary:hover {
-	color: var(--color-text-muted);
-}
-details.expand > div {
-	padding-bottom: 20px;
-}
-
-/* ── Inline tooltip (CSS-only, tap-to-show on mobile via :focus) ── */
-.tip {
-	position: relative;
-	border-bottom: 1px dotted var(--color-text-dim);
-	cursor: help;
-	outline: none;
-	-webkit-tap-highlight-color: transparent;
-	transition: border-color 0.15s var(--ease-standard);
-}
-.tip::before {
-	content: attr(data-tooltip);
-	position: absolute;
-	top: calc(100% + 8px);
-	left: 50%;
-	transform: translateX(-50%) translateY(-4px);
-	background: var(--color-surface-overlay);
-	color: var(--color-text);
-	border: 1px solid var(--color-border);
-	border-radius: 6px;
-	padding: 8px 11px;
-	font-size: 12px;
-	font-weight: 400;
-	line-height: 1.5;
-	white-space: normal;
-	text-align: left;
-	width: max-content;
-	max-width: 248px;
-	opacity: 0;
-	pointer-events: none;
-	z-index: 100;
-	box-shadow: 0 10px 30px -12px oklch(0 0 0 / 0.55);
-	transition:
-		opacity 0.15s var(--ease-standard),
-		transform 0.15s var(--ease-standard);
-}
-.tip:hover::before,
-.tip:focus::before {
-	opacity: 1;
-	transform: translateX(-50%) translateY(0);
-}
-.tip:hover,
-.tip:focus {
-	border-color: var(--color-text-muted);
-}
-@media (max-width: 480px) {
-	.tip::before {
-		/* A centered, element-anchored bubble can extend the document when the
-		 * trigger is close to either viewport edge. Present it as a bounded
-		 * bottom sheet on touch-sized viewports instead. */
-		position: fixed;
-		top: auto;
-		right: 24px;
-		bottom: 24px;
-		left: 24px;
-		width: auto;
-		max-width: none;
-		transform: translateY(4px);
-	}
-	.tip:hover::before,
-	.tip:focus::before {
-		transform: none;
-	}
-}
-@media (prefers-reduced-motion: reduce) {
-	.tip::before,
-	.tip {
-		transition: none;
-	}
+	transition: background-color 0.2s var(--ease-standard), color 0.2s var(--ease-standard), border-color 0.2s var(--ease-standard) !important;
 }
