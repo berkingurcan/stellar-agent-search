@@ -38,9 +38,9 @@
 	});
 </script>
 
-<div class="rounded-xl border border-border bg-surface-raised/30 px-5 py-4">
+<div class="rounded-xl border border-border bg-surface-raised px-5 py-4">
 	<div class="flex flex-wrap items-baseline gap-x-8 gap-y-2">
-		<span class="text-[10px] tracking-[0.18em] text-text-dim uppercase">
+		<span class="font-mono text-[10px] tracking-[0.15em] text-text-dim uppercase">
 			{failed ? 'Explorer unreachable' : 'Registry, as the explorer reports it'}
 		</span>
 

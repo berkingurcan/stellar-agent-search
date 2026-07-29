@@ -12,14 +12,14 @@
 	};
 </script>
 
-<div class="grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-5">
+<div class="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
 	{#each VERDICTS as v (v.key)}
-		<div class="bg-surface p-4">
-			<div class="flex items-center gap-2">
-				<span class="h-1.5 w-1.5 rounded-full {TONE[v.tone].dot}"></span>
-				<code class="font-mono text-[11.5px] {TONE[v.tone].text}">{v.key}</code>
+		<div class="flex items-baseline gap-2">
+			<span class="mt-[2px] h-1.5 w-1.5 shrink-0 rounded-full {TONE[v.tone].dot}"></span>
+			<div>
+				<code class="font-mono text-[11px] {TONE[v.tone].text}">{v.key}</code>
+				<span class="text-[11px] text-text-dim"> &mdash; {v.meaning}</span>
 			</div>
-			<p class="mt-2 text-[11.5px] leading-relaxed text-text-dim">{v.meaning}</p>
 		</div>
 	{/each}
 </div>
