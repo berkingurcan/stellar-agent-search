@@ -1,22 +1,24 @@
 /**
  * get_agent_profile — deep profile for one agent: typed identity + capabilities
  * + scores + 3-axis breakdown + declared-vs-verified reputation + recent
- * feedback + the canonical stellar identifier + an A2A AgentCard projection.
+ * feedback + the canonical stellar identifier + an explicitly unverified,
+ * derived A2A-shaped projection.
  *
  * Trust boundary: all agent-authored free text (name/description/services/
- * metadata/image) is confined to `profile.selfDeclared`; the AgentCard and
- * feedback (both carry untrusted text) are emitted inside labeled `selfDeclared`
- * slots. content[].text interpolates only typed/enum/numeric values.
+ * metadata/image) is confined to `profile.selfDeclared`; the derived projection
+ * and feedback (both carry untrusted text) are emitted inside labeled
+ * `selfDeclared` slots. content[].text interpolates only typed/enum/numeric values.
  */
 
 import { z } from "zod";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { ValidationError } from "@trionlabs/stellar8004";
-import { resolveAgentId, STELLAR_ID_RE } from "../lib/identifier.js";
+import { MAX_AGENT_ID, resolveAgentId, STELLAR_ID_RE } from "../lib/identifier.js";
 import { toAgentCard } from "../lib/agentcard.js";
 import { safe, selfDeclared, serverText } from "../lib/sanitize.js";
 import {
   buildAgentProfile,
+  collectFeedbackWindow,
   handler,
   toolResult,
   toSafeFeedback,
@@ -28,7 +30,7 @@ import { zAgentProfile, zSelfDeclaredSlot, zVerification } from "./schemas.js";
 const inputShape = {
   agent: z
     .union([
-      z.number().int().nonnegative(),
+      z.number().int().nonnegative().max(MAX_AGENT_ID),
       z.string().regex(STELLAR_ID_RE, "stellar:{network}:{identity}#{id}"),
       z.string().regex(/^\d+$/, "numeric agent id"),
     ])
@@ -43,6 +45,14 @@ const outputShape = {
   profile: zAgentProfile,
   agentCard: zSelfDeclaredSlot,
   recentFeedback: zSelfDeclaredSlot,
+  feedbackCoverage: z
+    .object({
+      windowComplete: z.boolean(),
+      paginationExhausted: z.boolean(),
+      pagesScanned: z.number().int().nonnegative(),
+      hasMore: z.boolean().optional(),
+    })
+    .passthrough(),
   verification: zVerification,
 };
 
@@ -53,15 +63,19 @@ export function registerGetAgentProfile(server: McpServer, deps: ToolDeps): void
       title: "Get Agent Profile",
       description:
         "Full profile for one agent: typed identity, capabilities, declared scores, a 3-axis rank " +
-        "breakdown, declared-vs-on-chain-verified reputation, recent feedback, the canonical " +
-        "stellar:{network}:{identity}#{id} handle, and an A2A AgentCard projection. Self-declared " +
-        "text is confined to labeled `selfDeclared` slots.",
-      inputSchema: inputShape,
-      outputSchema: outputShape,
+        "breakdown, a bounded declared-vs-on-chain reputation check, recent feedback, the canonical " +
+        "stellar:{network}:{identity}#{id} handle, and an explicitly unverified derived A2A-shaped " +
+        "projection. No A2A conformance or endpoint ownership is implied; self-declared text is " +
+        "confined to labeled `selfDeclared` slots.",
+      inputSchema: z.object(inputShape),
+      outputSchema: z.object(outputShape),
       annotations: { title: "Get Agent Profile", ...READ_ANNOTATIONS },
     },
     handler<Args>(async (args) => {
-      const id = resolveAgentId(args.agent);
+      const id = resolveAgentId(args.agent, {
+        network: deps.config.network,
+        identity: deps.config.stellar.contracts.identity,
+      });
       if (id == null) {
         throw new ValidationError(`Could not resolve agent reference '${String(args.agent)}'.`);
       }
@@ -69,27 +83,31 @@ export function registerGetAgentProfile(server: McpServer, deps: ToolDeps): void
       // Fetch detail and feedback concurrently: feedback depends only on `id`, so
       // firing it up front overlaps it with the slow multi-RPC on-chain verify
       // (which buildAgentProfile runs) instead of serializing behind it.
-      const [detailRes, feedbackRes] = await Promise.all([
-        deps.explorer.getAgent(id),
+      const detailPromise = deps.explorer.getAgent(id);
+      const feedbackPromise =
         args.feedbackLimit > 0
-          ? deps.explorer.getFeedback(id, { page: 1 })
-          : Promise.resolve(null),
+          ? collectFeedbackWindow(deps, id, {
+              page: 1,
+              limit: args.feedbackLimit,
+              includeRevoked: false,
+            })
+          : Promise.resolve({
+              rows: [],
+              revokedHidden: 0,
+              coverage: { windowComplete: true, paginationExhausted: false, pagesScanned: 0 },
+            });
+      const detailRes = await detailPromise;
+      // Verification starts as soon as detail is available and overlaps the
+      // still-running multi-page feedback scan.
+      const [built, feedbackWindow] = await Promise.all([
+        buildAgentProfile(deps, id, { verify: args.verify, detail: detailRes.data }),
+        feedbackPromise,
       ]);
-
-      const { profile, verification, caps, declared } = await buildAgentProfile(deps, id, {
-        verify: args.verify,
-        detail: detailRes.data,
-      });
+      const { profile, verification, caps, declared } = built;
       const rank = profile.rank!; // buildAgentProfile always sets it
 
       // Recent feedback: drop revoked, cap to feedbackLimit, sanitize + label.
-      let recent: ReturnType<typeof toSafeFeedback>[] = [];
-      if (feedbackRes) {
-        recent = (feedbackRes.data ?? [])
-          .filter((f) => !f.isRevoked)
-          .slice(0, args.feedbackLimit)
-          .map(toSafeFeedback);
-      }
+      const recent = feedbackWindow.rows.map(toSafeFeedback);
 
       const card = toAgentCard(profile);
 
@@ -106,6 +124,7 @@ export function registerGetAgentProfile(server: McpServer, deps: ToolDeps): void
         profile,
         agentCard: selfDeclared(card),
         recentFeedback: selfDeclared(recent),
+        feedbackCoverage: feedbackWindow.coverage,
         verification,
       });
     }),

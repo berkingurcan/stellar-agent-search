@@ -1,8 +1,17 @@
 # Integration — MCP client configuration
 
-`stellar-agent-mcp` is a **stdio** MCP server. Every client launches it the same way — `npx -y
-stellar-agent-mcp` with no subcommand — because the binary starts the MCP server automatically when its
-stdin is not a TTY. Below are copy-paste configs for each supported client.
+> **Pre-release:** the npm name is not yet owned by this project. Do not execute these `npx` examples until
+> the [official package page](https://www.npmjs.com/package/stellar-agent-mcp) shows version 0.1.0. Persistent
+> client entries should pin `stellar-agent-mcp@0.1.0`; `setup` does this automatically.
+
+The supported, usable transport today is the **local stdio** MCP server. Every client launches the same
+explicit version-pinned command — `npx -y stellar-agent-mcp@0.1.0 mcp`. The binary also auto-detects non-TTY launches, but the
+explicit subcommand removes ambiguity across clients. Below are copy-paste configs for each supported client.
+
+The local runtime uses `@modelcontextprotocol/server` 2.0.0 and currently negotiates protocol
+`2025-11-25`. A separate Cloudflare Worker implements modern stateless MCP `2026-07-28` discovery
+(`server/discover` plus a per-request `_meta` envelope) and a legacy stateless compatibility lane, but it is
+**not live**; this distinction is why the remote URL is not included in the copy-paste client configs below.
 
 All clients share the same `mcpServers` JSON shape **except VS Code** (`servers` key) and **Codex CLI**
 (TOML `[mcp_servers.*]`).
@@ -14,7 +23,7 @@ The canonical stdio entry (works for Claude Code, Cursor, Windsurf, Claude Deskt
   "mcpServers": {
     "stellar-agent": {
       "command": "npx",
-      "args": ["-y", "stellar-agent-mcp"],
+      "args": ["-y", "stellar-agent-mcp@0.1.0", "mcp"],
       "env": { "STELLAR_NETWORK": "mainnet" }
     }
   }
@@ -25,24 +34,54 @@ The canonical stdio entry (works for Claude Code, Cursor, Windsurf, Claude Deskt
 > `STELLAR_RPC_URL`, `VERIFY_ONCHAIN`, `RANK_*` are all optional overrides — see [tools.md](tools.md) and the
 > README config table.
 
+## Remote Streamable HTTP (not live)
+
+The intended endpoint is:
+
+```text
+https://mcp.stellar8004.com/mcp
+```
+
+Do **not** configure it yet. `/mcp` currently falls through to the assets-only landing Worker and returns
+404. Although the runtime, tests, exact zone routes, and Service Binding adapter are implemented, production
+deployment is blocked until its sentinel rate-limit namespace is replaced and a canary proves original-caller
+identity through the binding.
+
+When deployed, the runtime will be public, read-only, keyless, unauthenticated, and stateless: a fresh MCP
+server per request, no sessions. Browser origins are allowlisted, but originless MCP clients are allowed;
+**CORS is not authentication**. The Worker reaches the existing `stellar8004-web` API only through a Service
+Binding and does not receive Supabase credentials or maintain a shadow index. Full security and caching limits
+are in [architecture.md](architecture.md#remote-cloudflare-adapter-implemented-not-live) and
+[../SECURITY.md](../SECURITY.md#hosted-worker-boundary-implemented-not-deployed).
+
 ---
 
 ## Claude Code
 
-**One-liner (recommended):**
+**Safe bootstrap (recommended):**
+
+```bash
+npx -y stellar-agent-mcp@0.1.0 setup --client claude --scope user --handshake
+```
+
+This is idempotent, checks for conflicts, registers through Claude's own CLI, and performs a real MCP
+initialize + `tools/list` handshake. Use `--scope project` for a committable `.mcp.json`, `--check` to inspect
+without changing anything, or `--dry-run --json` to preview the exact registration.
+
+**Manual fallback:**
 
 ```bash
 # local scope (default; just you) — stored in ~/.claude.json
-claude mcp add stellar-agent -- npx -y stellar-agent-mcp
+claude mcp add stellar-agent -- npx -y stellar-agent-mcp@0.1.0 mcp
 
 # user scope (all your projects)
-claude mcp add --scope user stellar-agent -- npx -y stellar-agent-mcp
+claude mcp add --scope user stellar-agent -- npx -y stellar-agent-mcp@0.1.0 mcp
 
 # project scope (committed to .mcp.json, shared with the team)
-claude mcp add --scope project stellar-agent -- npx -y stellar-agent-mcp
+claude mcp add --scope project stellar-agent -- npx -y stellar-agent-mcp@0.1.0 mcp
 
 # with a network override
-claude mcp add --env STELLAR_NETWORK=mainnet stellar-agent -- npx -y stellar-agent-mcp
+claude mcp add --env STELLAR_NETWORK=mainnet stellar-agent -- npx -y stellar-agent-mcp@0.1.0 mcp
 ```
 
 > **The `--` is mandatory.** Everything after `--` is the server command, passed untouched. Without it,
@@ -56,7 +95,7 @@ claude mcp add --env STELLAR_NETWORK=mainnet stellar-agent -- npx -y stellar-age
   "mcpServers": {
     "stellar-agent": {
       "command": "npx",
-      "args": ["-y", "stellar-agent-mcp"],
+      "args": ["-y", "stellar-agent-mcp@0.1.0", "mcp"],
       "env": { "STELLAR_NETWORK": "mainnet" }
     }
   }
@@ -74,6 +113,19 @@ claude mcp add --env STELLAR_NETWORK=mainnet stellar-agent -- npx -y stellar-age
 
 ## Cursor
 
+**Safe bootstrap (recommended):**
+
+```bash
+npx -y stellar-agent-mcp@0.1.0 setup --client cursor --scope project --handshake
+```
+
+The command parses strict JSON, refuses symlinks/JSONC/conflicting registrations, and writes through a
+same-directory atomic rename. Setup processes share an advisory lock and the file is checked again just before
+rename. An unrelated editor does not honor that lock, so a portable filesystem cannot eliminate the final
+read-to-rename race; avoid editing this file during setup. Existing entries match only when their explicit
+`env` map is exact—an extra private key, token, or even a benign extra variable is treated as a conflict and
+is never silently retained.
+
 **File:** project `.cursor/mcp.json` (repo root) or global `~/.cursor/mcp.json`.
 
 ```json
@@ -81,7 +133,7 @@ claude mcp add --env STELLAR_NETWORK=mainnet stellar-agent -- npx -y stellar-age
   "mcpServers": {
     "stellar-agent": {
       "command": "npx",
-      "args": ["-y", "stellar-agent-mcp"],
+      "args": ["-y", "stellar-agent-mcp@0.1.0", "mcp"],
       "env": { "STELLAR_NETWORK": "mainnet" }
     }
   }
@@ -104,7 +156,7 @@ SSE) and uses `${env:VAR}` interpolation.
   "mcpServers": {
     "stellar-agent": {
       "command": "npx",
-      "args": ["-y", "stellar-agent-mcp"],
+      "args": ["-y", "stellar-agent-mcp@0.1.0", "mcp"],
       "env": { "STELLAR_NETWORK": "${env:STELLAR_NETWORK}" }
     }
   }
@@ -125,7 +177,7 @@ Manage it from the Cascade panel's **Manage plugins / raw config** button.
   "mcpServers": {
     "stellar-agent": {
       "command": "npx",
-      "args": ["-y", "stellar-agent-mcp"],
+      "args": ["-y", "stellar-agent-mcp@0.1.0", "mcp"],
       "env": { "STELLAR_NETWORK": "mainnet" },
       "disabled": false,
       "autoApprove": ["find_agent", "get_agent_profile", "list_services", "rank_agent"]
@@ -134,10 +186,9 @@ Manage it from the Cascade panel's **Manage plugins / raw config** button.
 }
 ```
 
-> Because every tool is **read-only**, listing them in `autoApprove` is safe and gives a friction-free
-> experience. You can add the Tier-1 tools (`list_agents`, `leaderboard`, `resolve_agent`,
-> `get_agents_by_owner`, `get_agent_feedback`, `verify_reputation`, `get_registry_stats`,
-> `get_registry_health`) to `autoApprove` as well.
+> These tools cannot sign or write, but their structured results include untrusted registry metadata. Use
+> `autoApprove` only if your client/model policy already treats tool output as untrusted data; read-only does
+> not eliminate prompt-injection risk. The Tier-1 tools can be added under the same policy.
 
 ---
 
@@ -150,7 +201,7 @@ Manage it from the Cascade panel's **Manage plugins / raw config** button.
   "servers": {
     "stellar-agent": {
       "command": "npx",
-      "args": ["-y", "stellar-agent-mcp"],
+      "args": ["-y", "stellar-agent-mcp@0.1.0", "mcp"],
       "env": { "STELLAR_NETWORK": "mainnet" }
     }
   }
@@ -168,7 +219,7 @@ Manage it from the Cascade panel's **Manage plugins / raw config** button.
   "mcpServers": {
     "stellar-agent": {
       "command": "npx",
-      "args": ["-y", "stellar-agent-mcp"],
+      "args": ["-y", "stellar-agent-mcp@0.1.0", "mcp"],
       "env": { "STELLAR_NETWORK": "mainnet" }
     }
   }
@@ -182,19 +233,28 @@ Manage it from the Cascade panel's **Manage plugins / raw config** button.
 Codex uses **TOML**, not JSON, and the table is `[mcp_servers.<name>]` (snake_case `mcp_servers`, not
 `mcpServers`).
 
+For user scope, prefer the safe bootstrap:
+
+```bash
+npx -y stellar-agent-mcp@0.1.0 setup --client codex --scope user --handshake
+```
+
+Project scope is intentionally manual because `codex mcp add` has no project-scope operation; asking setup
+for project scope prints the exact TOML without modifying anything.
+
 **File:** `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.stellar-agent]
 command = "npx"
-args = ["-y", "stellar-agent-mcp"]
+args = ["-y", "stellar-agent-mcp@0.1.0", "mcp"]
 env = { STELLAR_NETWORK = "mainnet" }
 ```
 
 Or add it from the CLI:
 
 ```bash
-codex mcp add stellar-agent -- npx -y stellar-agent-mcp
+codex mcp add stellar-agent -- npx -y stellar-agent-mcp@0.1.0 mcp
 ```
 
 > A JSON `mcpServers` block does nothing in Codex — the table name must be `mcp_servers`.
@@ -211,7 +271,7 @@ Claude Code, plus an optional `trust` field that skips the per-call approval pro
   "mcpServers": {
     "stellar-agent": {
       "command": "npx",
-      "args": ["-y", "stellar-agent-mcp"],
+      "args": ["-y", "stellar-agent-mcp@0.1.0", "mcp"],
       "env": { "STELLAR_NETWORK": "mainnet" },
       "trust": true
     }
@@ -219,7 +279,8 @@ Claude Code, plus an optional `trust` field that skips the per-call approval pro
 }
 ```
 
-> Every tool here is read-only and keyless, so `trust: true` is safe.
+> `trust: true` removes per-call approval. The tools are read-only and keyless, but registry metadata remains
+> untrusted; enable it only if your client/model policy contains indirect prompt injection.
 
 ---
 
@@ -227,13 +288,13 @@ Claude Code, plus an optional `trust` field that skips the per-call approval pro
 
 | Client | Config file | Root key | Client-specific fields | Register via |
 |---|---|---|---|---|
-| Claude Code | `.mcp.json` / `~/.claude.json` | `mcpServers` | `type`, `timeout`, `alwaysLoad` | `claude mcp add stellar-agent -- npx -y stellar-agent-mcp` |
-| Cursor | `.cursor/mcp.json` / `~/.cursor/mcp.json` | `mcpServers` | — | Settings → MCP |
+| Claude Code | `.mcp.json` / `~/.claude.json` | `mcpServers` | `type`, `timeout`, `alwaysLoad` | `stellar-agent-mcp setup --client claude` |
+| Cursor | `.cursor/mcp.json` / `~/.cursor/mcp.json` | `mcpServers` | — | `stellar-agent-mcp setup --client cursor` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | `mcpServers` | `${env:VAR}` interpolation | Cascade → Manage plugins |
 | Cline | `cline_mcp_settings.json` | `mcpServers` | `disabled`, `autoApprove` | MCP Servers → Configure |
 | Claude Desktop | `claude_desktop_config.json` | `mcpServers` | `type` | edit file |
 | VS Code | `.vscode/mcp.json` | **`servers`** | `${input:}` | edit file |
-| Codex CLI | `~/.codex/config.toml` | **`mcp_servers`** (TOML) | — | `codex mcp add stellar-agent -- npx -y stellar-agent-mcp` |
+| Codex CLI | `~/.codex/config.toml` | **`mcp_servers`** (TOML) | — | `stellar-agent-mcp setup --client codex` |
 | Gemini CLI | `~/.gemini/settings.json` | `mcpServers` | `trust` | edit file |
 
 ---
@@ -242,11 +303,11 @@ Claude Code, plus an optional `trust` field that skips the per-call approval pro
 
 - **Force the server explicitly** (unambiguous config): use the `mcp` (or `serve`) subcommand.
   ```json
-  { "mcpServers": { "stellar-agent": { "command": "npx", "args": ["-y", "stellar-agent-mcp", "mcp"] } } }
+  { "mcpServers": { "stellar-agent": { "command": "npx", "args": ["-y", "stellar-agent-mcp@0.1.0", "mcp"] } } }
   ```
 - **Global install** (avoids `npx` cold-start latency):
   ```bash
-  npm i -g stellar-agent-mcp
+  npm i -g stellar-agent-mcp@0.1.0
   ```
   ```json
   { "mcpServers": { "stellar-agent": { "command": "stellar-agent-mcp", "args": [] } } }
@@ -256,7 +317,7 @@ Claude Code, plus an optional `trust` field that skips the per-call approval pro
 
 - **Server shows `failed` on first launch, works on retry** — cold `npx -y` download exceeded the client's
   connect budget. Install globally (above) or raise `MCP_TIMEOUT`.
-- **No tools appear / wrong network** — run `npx -y stellar-agent-mcp doctor` in a terminal to check
+- **No tools appear / wrong network** — run `npx -y stellar-agent-mcp@0.1.0 doctor` in a terminal to check
   explorer reachability, RPC health, and the active network.
 - **Project-scoped server stuck pending (Claude Code)** — approve it in the `/mcp` panel (a security gate
   for committed `.mcp.json`).

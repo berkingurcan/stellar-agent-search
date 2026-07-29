@@ -8,7 +8,7 @@
  *   breadth = clamp(ln1p(uc) / ln1p(BREADTH_SAT),0,1)(sybil-resistant)
  *
  *   base  = wQ*quality + wV*volume + wB*breadth      (weights sum to 1 ⇒ [0,1])
- *   score = clamp(base + paymentBonus + endpointBonus + verifiedBonus, 0, 1)
+ *   score = clamp(base + paymentBonus + endpointBonus, 0, 1)
  *
  * Default weights 0.5 / 0.2 / 0.3 put breadth (unique clients — hard to fake)
  * above volume (raw count — cheap to fake) for sybil-resistance.
@@ -45,7 +45,6 @@ export const RANKING = {
   P_X402: 0.05,
   P_MPP: 0.03,
   P_SERVICES: 0.03,
-  P_VERIFIED: 0.03,
   /** an agent created within this many days is flagged `newAgent`. */
   NEW_AGENT_DAYS: 14,
   /** feedbackCount below this is flagged `lowConfidence`. */
@@ -204,7 +203,10 @@ export function scoreAgent(input: RankInput, opts: ScoreOptions = {}): RankResul
   const paymentBonus =
     (input.x402 ? RANKING.P_X402 : 0) + (input.mpp ? RANKING.P_MPP : 0);
   const endpointBonus = input.hasServices ? RANKING.P_SERVICES : 0;
-  const verifiedBonus = input.verificationStatus === "verified" ? RANKING.P_VERIFIED : 0;
+  // Kept as an always-zero response field for pre-release schema continuity.
+  // Verification is evidence metadata, not a score boost: the current contract
+  // cannot re-derive active uniqueClients without an unbounded event scan.
+  const verifiedBonus = 0;
 
   const score = clamp(base + paymentBonus + endpointBonus + verifiedBonus, 0, 1);
   const score100 = Math.round(score * 100);

@@ -31,6 +31,8 @@ export interface ParsedQuery {
   filters: ParsedFilters;
   /** Debug trace: which token triggered which filter. */
   matched: string[];
+  /** Semantics the v1 positive-only filter surface cannot represent safely. */
+  unsupported: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -81,6 +83,16 @@ const RE_MPP = /\b(mpp|streaming\s+pay\w*|streaming\s+micropayments?|payment\s+s
 // Invokable service endpoints.
 const RE_SERVICES = /\b(invoke|invocable|invokable|callable|endpoints?|apis?|service|services)\b/;
 
+// The upstream v1 booleans are positive requirements, not true/false filters:
+// serialising `false` is silently ignored. Detect common negative requests so
+// callers can reject them instead of returning the opposite of what was asked.
+const RE_NEGATED_X402 =
+  /\b(?:no|not|without|exclude|excluding)\b(?:\s+\w+){0,3}\s+(?:x402|paid|payments?|usdc|micropayments?)\b|\bx402\s+(?:olmadan|olmayan|istemiyorum)\b/u;
+const RE_NEGATED_MPP =
+  /\b(?:no|not|without|exclude|excluding)\b(?:\s+\w+){0,3}\s+(?:mpp|streaming\s+(?:payments?|micropayments?))\b|\bmpp\s+(?:olmadan|olmayan|istemiyorum)\b/u;
+const RE_NEGATED_SERVICES =
+  /\b(?:no|not|without|exclude|excluding)\b(?:\s+\w+){0,3}\s+(?:services?|apis?|endpoints?|callable|invokable)\b|\bservis\s+(?:olmadan|olmayan|istemiyorum)\b/u;
+
 // Trust models. Reputation-as-trust needs explicit trust-model phrasing so the
 // common "good reputation" (a quality phrase) does NOT become a trust filter.
 const RE_TRUST_REPUTATION =
@@ -111,17 +123,25 @@ export function parseQuery(raw: string): ParsedQuery {
   const text = (raw ?? "").toLowerCase();
   const filters: ParsedFilters = {};
   const matched: string[] = [];
+  const unsupported: string[] = [];
 
   // 1. Capabilities
-  if (RE_X402.test(text) || RE_PAY.test(text)) {
+  const negatedX402 = RE_NEGATED_X402.test(text);
+  const negatedMpp = RE_NEGATED_MPP.test(text);
+  const negatedServices = RE_NEGATED_SERVICES.test(text);
+  if (negatedX402) unsupported.push("negative-filter:x402");
+  if (negatedMpp) unsupported.push("negative-filter:mpp");
+  if (negatedServices) unsupported.push("negative-filter:hasServices");
+
+  if (!negatedX402 && (RE_X402.test(text) || RE_PAY.test(text))) {
     filters.x402 = true;
     matched.push("x402");
   }
-  if (RE_MPP.test(text)) {
+  if (!negatedMpp && RE_MPP.test(text)) {
     filters.mpp = true;
     matched.push("mpp");
   }
-  if (RE_SERVICES.test(text)) {
+  if (!negatedServices && RE_SERVICES.test(text)) {
     filters.hasServices = true;
     matched.push("hasServices");
   }
@@ -135,8 +155,8 @@ export function parseQuery(raw: string): ParsedQuery {
     filters.trust = "validation";
     matched.push("trust:validation");
   } else if (RE_TRUST_TEE.test(text)) {
-    filters.trust = "tee";
-    matched.push("trust:tee");
+    filters.trust = "tee-attestation";
+    matched.push("trust:tee-attestation");
   }
 
   // 3. minScore — explicit number wins, then qualitative phrases.
@@ -155,7 +175,7 @@ export function parseQuery(raw: string): ParsedQuery {
   // 4. Residual keywords → explorer full-text search.
   const keywords = residualKeywords(text);
 
-  return { keywords, filters, matched };
+  return { keywords, filters, matched, unsupported };
 }
 
 /** Clamp a parsed score to the valid 0..100 integer range. */
@@ -171,7 +191,7 @@ function clampScore(n: number): number {
 export function residualKeywords(text: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  for (const tokenRaw of text.split(/[^a-z0-9]+/)) {
+  for (const tokenRaw of unicodeTokens(text)) {
     const token = tokenRaw.trim();
     if (token.length === 0) continue;
     if (/^\d+$/.test(token)) continue; // bare numbers are score args, not keywords
@@ -182,4 +202,16 @@ export function residualKeywords(text: string): string[] {
     out.push(token);
   }
   return out;
+}
+
+/** Unicode-aware, accent-insensitive tokenization for international agent names. */
+export function unicodeTokens(text: string): string[] {
+  return normalizeSearchText(text).match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+export function normalizeSearchText(text: string): string {
+  return (text ?? "")
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase();
 }

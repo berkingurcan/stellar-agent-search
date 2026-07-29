@@ -19,7 +19,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { AgentResponse } from "@trionlabs/stellar8004";
 import { loadConfig, type Config } from "../src/config.js";
-import { ExplorerService } from "../src/lib/explorer.js";
+import { ExplorerService, TtlCache } from "../src/lib/explorer.js";
 import { manualClock } from "../src/lib/clock.js";
 
 // ---------------------------------------------------------------------------
@@ -79,7 +79,9 @@ class MockFetch {
 
   get fn(): typeof fetch {
     const self = this;
-    return (async (input: URL | RequestInfo) => {
+    // `Parameters<typeof fetch>[0]` rather than the DOM's `RequestInfo`: the
+    // project's `lib` is ES2022 only, so the DOM global does not exist here.
+    return (async (input: Parameters<typeof fetch>[0]) => {
       const url = input instanceof URL ? input : new URL(String(input));
       self.calls.push(url);
       return self.responder(url) as unknown as Response;
@@ -99,6 +101,19 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("TTL cache", () => {
+  it("shares actor-neutral results across request-scoped ExplorerService instances", async () => {
+    const cache = new TtlCache();
+    const firstFetch = new MockFetch(() => jsonResponse(agentPage([agent(7, "shared")])));
+    const secondFetch = new MockFetch(() => jsonResponse(agentPage([agent(99, "must-not-run")])));
+    const first = new ExplorerService(config, { fetch: firstFetch.fn, cache });
+    const second = new ExplorerService(config, { fetch: secondFetch.fn, cache });
+
+    expect((await first.getAgents({ limit: 50 })).data[0].id).toBe(7);
+    expect((await second.getAgents({ limit: 50 })).data[0].id).toBe(7);
+    expect(firstFetch.calls).toHaveLength(1);
+    expect(secondFetch.calls).toHaveLength(0);
+  });
+
   it("serves a repeated identical read from cache (one fetch)", async () => {
     const mock = new MockFetch(() => jsonResponse(agentPage([agent(1, "a")])));
     const svc = new ExplorerService(config, { fetch: mock.fn });
@@ -219,6 +234,32 @@ describe("findAgents discovery primitive", () => {
 
     const hits = await svc.findAgents("   ");
     expect(hits.map((a) => a.id).sort()).toEqual([1, 2]);
+  });
+
+  it("matches Unicode names accent-insensitively", async () => {
+    const mock = new MockFetch(() =>
+      jsonResponse(
+        agentPage([
+          agent(1, "Türkçe Çeviri", "çok dilli çeviri"),
+          agent(2, "Price Oracle", "market data"),
+        ]),
+      ),
+    );
+    const svc = new ExplorerService(config, { fetch: mock.fn });
+
+    expect((await svc.findAgents("turkce ceviri")).map((a) => a.id)).toEqual([1]);
+  });
+
+  it("never treats a nonblank tokenless query as match-all", async () => {
+    const mock = new MockFetch(() =>
+      jsonResponse(agentPage([agent(1, "a"), agent(2, "b")])),
+    );
+    const svc = new ExplorerService(config, { fetch: mock.fn });
+
+    const result = await svc.findAgentsWithCoverage("!!!");
+    expect(result.agents).toEqual([]);
+    expect(result.coverage.coverageComplete).toBe(false);
+    expect(result.coverage.limitations).toContain("query-no-search-tokens");
   });
 
   it("match:'all' still REQUIRES a meaningful 2-char token (ai/ml/db)", async () => {

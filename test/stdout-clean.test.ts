@@ -125,7 +125,9 @@ describe("stdio server keeps stdout JSON-RPC-only", () => {
     const init = msgs.find((m) => m.id === 1);
     expect(init).toBeDefined();
     expect(init!.result.serverInfo.name).toBe("stellar-agent-mcp");
-    expect(init!.result.capabilities.tools).toBeTruthy();
+    expect(init!.result.capabilities.tools).toEqual({ listChanged: false });
+    expect(init!.result.capabilities.resources).toEqual({ listChanged: false });
+    expect(init!.result.capabilities.prompts).toEqual({ listChanged: false });
   });
 
   it("lists the read-only tools over the protocol (registration path is clean)", () => {

@@ -26,7 +26,7 @@ checked in a browser in about five minutes.
 | # | What to check | Where | Expected |
 |---|---|---|---|
 | 1 | The code is public and MIT-licensed | [github.com/berkingurcan/stellar-agent-mcp](https://github.com/berkingurcan/stellar-agent-mcp) | Repository opens; `LICENSE` says MIT |
-| 2 | Automated tests pass | Repo → **Actions** tab | Latest CI run green across Node 18/20/22 on Linux + macOS |
+| 2 | Automated tests pass | Repo → **Actions** tab | Latest CI run green across Node 20/22/24 on Linux + macOS, plus the Worker job |
 | 3 | The four SOW tools exist and are documented | [docs/tools.md](tools.md) | `find_agent`, `rank_agent`, `get_agent_profile`, `list_services` each documented with inputs and outputs |
 | 4 | The x402 reference script exists | [examples/x402-demo.ts](../examples/x402-demo.ts) | TypeScript file in `/examples`, as the SOW specifies |
 | 5 | The registry data is real | [stellar8004.com](https://stellar8004.com) → agent **10** ("Scrapper") | Same agent the tools return, live on mainnet |
@@ -88,24 +88,23 @@ This is independently reproducible without our code. Simulate two read calls aga
 
 Both are read-only simulations: no account, no funds, no signature.
 
-> **Note for anyone running behind an HTTP proxy.** The Stellar SDK's RPC transport uses axios, and versions
-> below 1.16.1 send a plain-HTTP request that some proxies reject with `405`. If `doctor` reports
-> `✗ verify  on-chain read FAILED (rpc-error)`, that is the environment, not the registry — the explorer and
-> RPC health checks above it will still pass. Everything else keeps working; verification reports `unavailable`
-> rather than guessing.
+> **Note for anyone running behind an HTTP proxy.** The reputation read deliberately uses Stellar SDK's
+> fetch-based `no-axios` transport, so the historical axios/proxy `405` failure is not an accepted explanation
+> anymore. If `doctor` reports `✗ verify on-chain read FAILED`, treat the RPC/simulation path as unhealthy and
+> investigate it. Tool calls still degrade to `unavailable` rather than guessing.
 
 ### How to verify yourself
 
 ```bash
-npx -y stellar-agent-mcp doctor              # self-check: environment, explorer, RPC, on-chain verification
-npx -y stellar-agent-mcp find "web scraper"  # the find_agent tool from the terminal
-npx -y stellar-agent-mcp profile 10          # full profile incl. declared-vs-verified block
+npx -y stellar-agent-mcp@0.1.0 doctor              # self-check: environment, explorer, RPC, on-chain verification
+npx -y stellar-agent-mcp@0.1.0 find "web scraper"  # the find_agent tool from the terminal
+npx -y stellar-agent-mcp@0.1.0 profile 10          # full profile incl. declared-vs-verified block
 ```
 
 Inside an MCP client, install with one line and call the tools directly:
 
 ```bash
-claude mcp add --scope user stellar-agent -- npx -y stellar-agent-mcp
+npx -y stellar-agent-mcp@0.1.0 setup --client claude --scope user --handshake
 ```
 
 ---
@@ -132,7 +131,8 @@ run procedure.
 1. **Discover** — calls the MCP server's discovery path to find the Scrapper agent (id 10) by capability.
 2. **Vet** — verifies its reputation against the Reputation contract before spending anything.
 3. **Call** — requests the agent's endpoint; receives HTTP **402 Payment Required** with a payment challenge.
-4. **Pay** — signs a USDC payment over x402 against the `payTo` address from the challenge, and retries.
+4. **Pay** — checks the untrusted challenge against a reviewed exact tuple, signs once, never auto-retries,
+   then independently verifies finality and the exact USDC transfer through Stellar RPC.
 5. **Receive** — gets the scraping result back.
 6. **Report** — writes reputation feedback on-chain via `give_feedback`, scored on whether the result actually
    succeeded.
@@ -156,11 +156,36 @@ cannot silently erode.
 
 | Evidence required by SOW | Status | Link |
 |---|---|---|
-| Skill package install command | 🟡 | [`skills/mcp/SKILL.md`](../skills/mcp/SKILL.md) — served from this repository; **the command resolves only once the repo is public and `main` is the default branch** (outstanding items 0 and 2) |
-| Developer docs URL | ✅ | [Repository docs](https://github.com/berkingurcan/stellar-agent-mcp#readme) |
+| Skill package install command | 🟡 | [`skills/mcp/SKILL.md`](../skills/mcp/SKILL.md) — served from this repository; `main` is now the default branch, so **the command resolves as soon as the repo is public** (outstanding item 01) |
+| One-command MCP bootstrap | 🟡 | [`src/cli/setup.ts`](../src/cli/setup.ts) + [`test/setup.test.ts`](../test/setup.test.ts) — implemented and covered by local tests for Claude, Cursor, and Codex, but real clean-environment evidence still requires the first npm publish and Recording 3 |
+| Developer docs URL | 🟡 | [Repository docs](https://github.com/berkingurcan/stellar-agent-mcp#readme) — files are complete locally, but the URL is not independently accessible until the repository is public |
 | Install + usage screen recording | ⬜ | `‹recording link›` |
 
-### The one-command install
+### One-command MCP bootstrap and optional skill acquisition
+
+The runtime installer is the idempotent `setup` command. It registers an explicit stdio launch, refuses to
+overwrite a conflicting entry, and can prove the package works with a live MCP handshake:
+
+```bash
+# Claude Code, user scope
+npx -y stellar-agent-mcp@0.1.0 setup --client claude --scope user --handshake
+
+# Cursor, project scope; use this in Recording 3 as the required second client
+npx -y stellar-agent-mcp@0.1.0 setup --client cursor --scope project --handshake
+
+# Codex, user scope
+npx -y stellar-agent-mcp@0.1.0 setup --client codex --scope user --handshake
+
+# Non-mutating verification or preview
+npx -y stellar-agent-mcp@0.1.0 setup --client cursor --scope project --check --handshake
+npx -y stellar-agent-mcp@0.1.0 setup --client cursor --scope project --dry-run --json
+```
+
+Codex `project` scope is deliberately not auto-written: its CLI has no project-scoped MCP add operation.
+`setup --client codex --scope project` makes no change, exits non-zero, and emits the exact TOML block to merge
+into `.codex/config.toml`. This limitation must not be presented as an automated install.
+
+The optional skill is the usage guide an agent reads before calling the server:
 
 ```bash
 npx skills add berkingurcan/stellar-agent-mcp --skill mcp
@@ -174,13 +199,10 @@ tool surface and its documentation land in the same commit — and
 [`test/skill-sync.test.ts`](../test/skill-sync.test.ts) fails CI if the skill's tool/resource/prompt counts or
 its version pin drift from the code, so the coupling is enforced rather than merely intended.
 
-The skill documents MCP registration for **eight** clients and carries a copy-paste config for each.
-
-Then register the server:
-
-```bash
-claude mcp add --scope user stellar-agent -- npx -y stellar-agent-mcp
-```
+The skill documents MCP registration for **eight** clients and carries a copy-paste config for each. That is
+configuration coverage, not proof that all eight clients were integration-tested. Automated setup covers
+Claude Code and Cursor at user/project scope, plus Codex at user scope. The still-unrecorded SOW acceptance run
+will exercise Claude Code and Cursor in clean environments.
 
 ### Documentation checklist
 
@@ -197,8 +219,9 @@ Also present, beyond the SOW list: [docs/architecture.md](architecture.md), [SEC
 
 ### Client coverage
 
-The SOW asked for Claude Code and one other client. Documented and configured: **Claude Code, Cursor, Windsurf,
-Cline, VS Code, Claude Desktop, Codex CLI, Gemini CLI**.
+The SOW asks for Claude Code and one other client. **Claude Code, Cursor, Windsurf, Cline, VS Code, Claude
+Desktop, Codex CLI, and Gemini CLI** are documented. That is not yet acceptance evidence: Recording 1 must
+exercise Claude Code, and Recording 3 must exercise Cursor. Both links remain ⬜ until those recordings exist.
 
 ---
 
@@ -206,8 +229,9 @@ Cline, VS Code, Claude Desktop, Codex CLI, Gemini CLI**.
 
 | Line item from the budget rationale | Status | Evidence |
 |---|---|---|
-| Multi-client integration testing | ✅ | [docs/integration.md](integration.md) — per-client config and caveats |
-| CI/CD setup | ✅ | [.github/workflows/ci.yml](../.github/workflows/ci.yml) — Node 18/20/22 × Linux/macOS; typecheck, build, test, pack |
+| Multi-client integration testing | 🟡 | [docs/integration.md](integration.md) contains per-client config and caveats; real clean-environment evidence for Claude Code + one additional client is still required |
+| CI/CD setup | ✅ | [.github/workflows/ci.yml](../.github/workflows/ci.yml) — Node 20/22/24 × Linux/macOS; typecheck, build, test, pack; separate Worker typecheck/test/bundle audit |
+| Remote Streamable HTTP Worker | 🟡 | [`worker/`](../worker/) — implemented behind exact `/mcp` and `/healthz` Cloudflare routes, but deliberately not claimed live until namespace configuration and production canary pass |
 | npm publishing setup | ✅ | [.github/workflows/publish.yml](../.github/workflows/publish.yml) — tag-triggered, OIDC Trusted Publishing with Sigstore provenance, plus MCP Registry publish |
 | Skill packaging + distribution | ✅ | [`skills/mcp/SKILL.md`](../skills/mcp/SKILL.md) — ships in the repository, where `npx skills add` fetches it; deliberately kept out of the npm tarball (`files` in [package.json](../package.json)) so the published package stays lean |
 | Mainnet gas | ⬜ | Consumed by the Deliverable 2 run |
@@ -216,11 +240,11 @@ Cline, VS Code, Claude Desktop, Codex CLI, Gemini CLI**.
 Registry manifests are in place for three directories: [`server.json`](../server.json) (official MCP Registry),
 [`smithery.yaml`](../smithery.yaml), [`glama.json`](../glama.json).
 
-**Quality signals not required by the SOW:** a full automated suite green on every push across Node 18/20/22 ×
+**Quality signals not required by the SOW:** a full automated suite green on every push across Node 20/22/24 ×
 Linux/macOS (count and result in the [Actions tab](https://github.com/berkingurcan/stellar-agent-mcp/actions) —
-deliberately not restated here, so it cannot go stale), clean TypeScript typecheck, `npm audit` clean, two
-independent
-adversarial code-review passes plus a security review with all findings resolved.
+deliberately not restated here, so it cannot go stale), clean TypeScript typecheck, and automated/internal
+adversarial review passes. The repository has **not** had an independent external human code review; the
+remaining consumer dependency finding is tracked explicitly under [`issues/`](../issues/README.md).
 
 ---
 
@@ -244,13 +268,14 @@ file per item under [`issues/`](../issues/); this table is the ordering, not a s
 | # | Item | Unblocks |
 |---|---|---|
 | [01](../issues/P0-01-make-repository-public.md) | **Make the repository public** | Everything reviewer-facing; also npm provenance and the MCP Registry publish |
-| [02](../issues/P0-02-set-default-branch-to-main.md) | **Set the default branch to `main`** | D3's one-command install — `npx skills add` reads the default branch, which is currently the disposable working branch |
-| [03](../issues/P0-03-first-npm-publish.md) | First `npm publish` + Trusted Publisher | D1's npm link; makes `npx -y stellar-agent-mcp` resolve |
+| ~~[02](../issues/P0-02-set-default-branch-to-main.md)~~ | ~~**Set the default branch to `main`**~~ — **done 2026-07-29**; the disposable working branch is deleted | D3's optional skill acquisition — `npx skills add` reads the default branch |
+| [03](../issues/P0-03-first-npm-publish.md) | First npm bootstrap + Trusted Publisher | D1's npm link; makes the pinned `npx -y stellar-agent-mcp@0.1.0` resolve |
 | [04](../issues/P0-04-funded-mainnet-x402-run.md) | Funded mainnet run of `examples/x402-demo.ts` | D2's two transaction hashes |
 | [05](../issues/P0-05-record-three-demos.md) | Recordings 1–3 | The D1, D2 and D3 recordings |
 
-Item 01 blocks review entirely. Items 01 and 02 together gate the one-command install; 03 gates the two install
-recordings; 04 gates the payment recording. [docs/recordings.md](recordings.md) has the shot-by-shot scripts.
+Item 01 blocks public review and the optional skill acquisition (02 is done); 03 gates the actual `setup`
+bootstrap and the two install recordings; 04 gates the payment recording. [docs/recordings.md](recordings.md)
+has the shot-by-shot scripts.
 
 Known engineering work that does **not** block SOW delivery — including one defect that reaches users of the
 published package — is tracked in the same place: see [`issues/README.md`](../issues/README.md). It is listed

@@ -14,14 +14,14 @@
  */
 
 import { z } from "zod";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import type {
   AgentResponse,
   FeedbackResponse,
 } from "@trionlabs/stellar8004";
 import type { Config } from "../config.js";
-import { ExplorerService } from "../lib/explorer.js";
-import { ReputationVerifier } from "../lib/reputation.js";
+import { ExplorerService, type ExplorerServiceOptions } from "../lib/explorer.js";
+import { ReputationVerifier, type ReputationVerifierOptions } from "../lib/reputation.js";
 import {
   rankAgents,
   roundRankResult,
@@ -70,14 +70,54 @@ export interface ToolDeps {
   config: Config;
   explorer: ExplorerService;
   verifier: ReputationVerifier;
+  /** Optional runtime-specific public-surface caps (the local stdio defaults stay broader). */
+  policy?: ToolRuntimePolicy;
+}
+
+export interface ToolRuntimePolicy {
+  maxRankAgentIds?: number;
+  maxRankLimit?: number;
+  maxListServicesLimit?: number;
+  maxListServicesPage?: number;
+  maxVerifyTopK?: number;
+  maxVerificationConcurrency?: number;
+  maxFeedbackScanPages?: number;
+  maxExplorerConcurrency?: number;
+}
+
+/** Small dependency-free pMap used for bounded Explorer fan-out. */
+export async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const output = new Array<R>(items.length);
+  let cursor = 0;
+  const workers = Array.from(
+    { length: Math.max(1, Math.min(items.length || 1, Math.floor(limit) || 1)) },
+    async () => {
+      while (cursor < items.length) {
+        const index = cursor++;
+        output[index] = await mapper(items[index]!, index);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return output;
+}
+
+/** Construction options for runtime-specific fetch/cache and test seams. */
+export interface CreateToolDepsOptions {
+  explorer?: ExplorerServiceOptions;
+  verifier?: ReputationVerifierOptions;
 }
 
 /** Convenience factory: build the read-only deps from a loaded Config. */
-export function createToolDeps(config: Config): ToolDeps {
+export function createToolDeps(config: Config, opts: CreateToolDepsOptions = {}): ToolDeps {
   return {
     config,
-    explorer: new ExplorerService(config),
-    verifier: new ReputationVerifier(config),
+    explorer: new ExplorerService(config, opts.explorer),
+    verifier: new ReputationVerifier(config, opts.verifier),
   };
 }
 
@@ -96,9 +136,25 @@ export const READ_ANNOTATIONS = {
 // Shared zod fragments
 // ---------------------------------------------------------------------------
 
-export const zTrust = z.enum(["reputation", "validation", "tee"]);
+export const zTrust = z.enum([
+  "reputation",
+  "crypto-economic",
+  "tee-attestation",
+  // Backward-compatible MCP aliases; normalize before sending upstream.
+  "validation",
+  "tee",
+]);
+export function canonicalTrust(
+  value: z.infer<typeof zTrust>,
+): "reputation" | "validation" | "crypto-economic" | "tee-attestation" {
+  if (value === "tee") return "tee-attestation";
+  return value;
+}
 export const zSort = z.enum(["relevance", "score", "confidence", "newest"]);
 export const zMinScore = z.number().min(0).max(100);
+/** Public free-text fields are intentionally small to bound CPU/log/cache-key amplification. */
+export const MAX_QUERY_LENGTH = 256;
+export const MAX_FEEDBACK_TAG_LENGTH = 64;
 
 export function zLimit(def: number, max = 50) {
   return z.number().int().min(1).max(max).default(def);
@@ -111,11 +167,7 @@ export const VERIFY_TOP_K = 5;
 // AgentResponse → typed domain adapters
 // ---------------------------------------------------------------------------
 
-/**
- * Best-effort MPP detection (the explorer has no first-class MPP field).
- * NOTE: `metadata` is only present on DETAIL responses, so this returns false
- * for list rows — callers that filter on MPP must hydrate first (see filterMpp).
- */
+/** Best-effort MPP detection for response projection after server-side filtering. */
 function deriveMpp(a: AgentResponse): boolean {
   const rec = a as Record<string, unknown>;
   if (typeof rec.mpp === "boolean") return rec.mpp;
@@ -294,7 +346,10 @@ export async function buildAgentProfile(
 }> {
   const detail = opts.detail ?? (await deps.explorer.getAgent(id)).data;
   const declared = declaredReputation(detail);
-  const verification = await deps.verifier.verifyAgainst(id, declared, { skip: !opts.verify });
+  const verification = await deps.verifier.verifyAgainst(id, declared, {
+    skip: !opts.verify,
+    excludeClient: detail.owner,
+  });
   const result = scoreAgent(toRankInput(detail, verification.status), {
     weights: deps.config.weights,
     scoreMax: deps.config.scoreMax,
@@ -347,8 +402,8 @@ export interface RankVerifyOptions {
 }
 
 /**
- * Rank a candidate set, verify the top-K on-chain (bounded), then re-rank with
- * the verification bonus applied, and project to trust-boundary-safe rows.
+ * Rank a candidate set, check the top-K on-chain (bounded), then attach the
+ * evidence without inflating score and project trust-boundary-safe rows.
  */
 export async function rankAndVerify(
   deps: ToolDeps,
@@ -372,20 +427,39 @@ export async function rankAndVerify(
   );
   const returned = pre.slice(0, opts.limit);
   const verifyTopK = opts.verify ? (opts.verifyTopK ?? VERIFY_TOP_K) : 0;
-  const verifyIds = new Set(returned.slice(0, verifyTopK).map((r) => r.id));
+  const effectiveVerifyTopK = Math.min(
+    verifyTopK,
+    deps.policy?.maxVerifyTopK ?? Number.POSITIVE_INFINITY,
+  );
+  const verifyIds = new Set(returned.slice(0, effectiveVerifyTopK).map((r) => r.id));
 
   // Verify (or skip) each returned agent. `skip` short-circuits without RPC.
   const verifications = new Map<number, VerificationResult>();
+  const pending = [...returned];
+  const concurrency = Math.max(
+    1,
+    Math.min(
+      pending.length || 1,
+      deps.policy?.maxVerificationConcurrency ?? (pending.length || 1),
+    ),
+  );
   await Promise.all(
-    returned.map(async (r) => {
+    Array.from({ length: concurrency }, async () => {
+      while (pending.length > 0) {
+        const r = pending.shift();
+        if (!r) return;
       const a = byId.get(r.id)!;
       const skip = !verifyIds.has(r.id);
-      const v = await deps.verifier.verifyAgainst(r.id, declaredReputation(a), { skip });
+        const v = await deps.verifier.verifyAgainst(r.id, declaredReputation(a), {
+          skip,
+          excludeClient: a.owner,
+        });
       verifications.set(r.id, v);
+      }
     }),
   );
 
-  // Pass 2 — re-rank the returned set with verification status applied.
+  // Pass 2 — retain deterministic order while attaching verification flags.
   const finalRanked = rankAgents(
     returned.map((r) => toRankInput(byId.get(r.id)!, verifications.get(r.id)?.status)),
     rankOpts,
@@ -397,42 +471,6 @@ export async function rankAndVerify(
       includeBreakdown: opts.includeBreakdown,
     }),
   );
-}
-
-/** Bound on how many candidates filterMpp will hydrate per call (RPC/HTTP cost). */
-export const MPP_HYDRATE_CAP = 40;
-
-/**
- * Filter a candidate pool to MPP-capable agents.
- *
- * MPP is only derivable from the detail-only `metadata` field, so filtering it
- * over LIST rows (deriveMpp === false for every one) silently emptied the pool
- * and returned "No matching agents found". Instead: cheaply pre-rank the pool
- * (declared-only), hydrate the top `cap` candidates via getAgent, and filter on
- * the hydrated detail. Bounded so cost stays predictable; if the pool exceeds
- * the cap the tail is left unchecked (logged by the explorer layer).
- */
-export async function filterMpp(
-  deps: ToolDeps,
-  pool: AgentResponse[],
-  cap = MPP_HYDRATE_CAP,
-): Promise<AgentResponse[]> {
-  if (pool.length === 0) return pool;
-  const pre = rankAgents(
-    pool.map((a) => toRankInput(a)),
-    { weights: deps.config.weights, scoreMax: deps.config.scoreMax, sortBy: "relevance" },
-  );
-  const byId = new Map(pool.map((a) => [a.id, a] as const));
-  const head = pre.slice(0, cap).map((r) => byId.get(r.id)!);
-  const hydrated = await Promise.all(
-    head.map((a) =>
-      deps.explorer
-        .getAgent(a.id)
-        .then((r) => r.data)
-        .catch(() => a),
-    ),
-  );
-  return hydrated.filter((a) => deriveCapabilities(a).mpp);
 }
 
 // ---------------------------------------------------------------------------
@@ -488,6 +526,81 @@ export function toSafeFeedback(f: FeedbackResponse): SafeFeedbackEntry {
     isRevoked: Boolean(f.isRevoked),
     createdAt: sanitizeText(f.createdAt, 40),
     responseCount: f.responses?.length ?? 0,
+  };
+}
+
+export interface FeedbackWindow {
+  rows: FeedbackResponse[];
+  revokedHidden: number;
+  coverage: {
+    windowComplete: boolean;
+    paginationExhausted: boolean;
+    pagesScanned: number;
+    hasMore?: boolean;
+  };
+}
+
+/**
+ * Build a stable caller-facing page over the Explorer's fixed-size upstream
+ * pages. Revocation filtering happens before the local offset, so page=2,
+ * limit=10 means visible rows 11..20 rather than upstream rows 21..30.
+ */
+export async function collectFeedbackWindow(
+  deps: ToolDeps,
+  agentId: number,
+  options: {
+    page: number;
+    limit: number;
+    tag?: string;
+    includeRevoked: boolean;
+  },
+): Promise<FeedbackWindow> {
+  const offset = (options.page - 1) * options.limit;
+  const maxPages = Math.max(1, Math.min(deps.policy?.maxFeedbackScanPages ?? 20, 20));
+  const rows: FeedbackResponse[] = [];
+  let visibleSeen = 0;
+  let revokedHidden = 0;
+  let pagesScanned = 0;
+  let hasMore: boolean | undefined;
+  let paginationExhausted = false;
+
+  for (let upstreamPage = 1; upstreamPage <= maxPages; upstreamPage++) {
+    const res = await deps.explorer.getFeedback(
+      agentId,
+      options.tag ? { page: upstreamPage, tag: options.tag } : { page: upstreamPage },
+    );
+    pagesScanned++;
+    const batch = res.data ?? [];
+    const reported = res.meta?.pagination?.hasMore;
+    hasMore = typeof reported === "boolean" ? reported : undefined;
+
+    for (const feedback of batch) {
+      if (!options.includeRevoked && feedback.isRevoked) {
+        revokedHidden++;
+        continue;
+      }
+      if (visibleSeen >= offset && rows.length < options.limit) rows.push(feedback);
+      visibleSeen++;
+    }
+
+    if (rows.length >= options.limit) break;
+    if (hasMore === false || batch.length === 0) {
+      paginationExhausted = true;
+      break;
+    }
+    // Without an explicit continuation signal, do not speculate another page.
+    if (hasMore === undefined) break;
+  }
+
+  return {
+    rows,
+    revokedHidden,
+    coverage: {
+      windowComplete: rows.length >= options.limit || paginationExhausted,
+      paginationExhausted,
+      pagesScanned,
+      ...(hasMore !== undefined ? { hasMore } : {}),
+    },
   };
 }
 

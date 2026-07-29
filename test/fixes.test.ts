@@ -11,8 +11,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentResponse } from "@trionlabs/stellar8004";
 import { parseQuery } from "../src/lib/nlparse.js";
-import { sanitizeText } from "../src/lib/sanitize.js";
-import { validWalletOrNull, resolveAgentId } from "../src/lib/identifier.js";
+import { sanitizeService, sanitizeText } from "../src/lib/sanitize.js";
+import { MAX_AGENT_ID, validWalletOrNull, resolveAgentId } from "../src/lib/identifier.js";
 import { deriveCapabilities } from "../src/tools/shared.js";
 import { toAgentCard } from "../src/lib/agentcard.js";
 import type { AgentProfile } from "../src/types.js";
@@ -52,6 +52,19 @@ describe("sanitizeText: line/paragraph separators (sanitize-#7)", () => {
   });
 });
 
+describe("service invocation examples stay labeled data", () => {
+  it("preserves and bounds inputExample without executing or interpolating it", () => {
+    const marker = "$(touch /tmp/never-execute)";
+    const service = sanitizeService({
+      name: "scrape",
+      endpoint: "https://example.test/task",
+      inputExample: marker.repeat(100),
+    });
+    expect(service.inputExample).toContain(marker);
+    expect(service.inputExample!.length).toBeLessThanOrEqual(1_000);
+  });
+});
+
 describe("validWalletOrNull: address validation (trust-#1/#5)", () => {
   it("accepts a valid Stellar G-address", () => {
     expect(validWalletOrNull(G_ADDR)).toBe(G_ADDR);
@@ -66,6 +79,9 @@ describe("validWalletOrNull: address validation (trust-#1/#5)", () => {
     expect(validWalletOrNull("")).toBeNull();
     expect(validWalletOrNull(null)).toBeNull();
     expect(validWalletOrNull(123 as unknown)).toBeNull();
+    // Shape-correct, checksum-invalid StrKeys must not be promoted to typed values.
+    expect(validWalletOrNull(`G${"A".repeat(55)}`)).toBeNull();
+    expect(validWalletOrNull(`C${"A".repeat(55)}`)).toBeNull();
   });
 });
 
@@ -76,6 +92,34 @@ describe("parseId: hex/exponent/oversized rejection (resource-#10 variant)", () 
   it("still accepts a normal id", () => {
     expect(resolveAgentId("10")).toBe(10);
     expect(resolveAgentId(10)).toBe(10);
+  });
+  it("accepts the u32 boundary and rejects an impossible on-chain id", () => {
+    expect(resolveAgentId(MAX_AGENT_ID)).toBe(MAX_AGENT_ID);
+    expect(() => resolveAgentId(MAX_AGENT_ID + 1)).toThrow(/unsigned 32-bit/);
+  });
+
+  it("rejects full handles outside the configured network/Identity contract", () => {
+    const cfg = loadConfig({ STELLAR_NETWORK: "mainnet" });
+    const scope = { network: cfg.network, identity: cfg.stellar.contracts.identity };
+    const wrongIdentity = cfg.stellar.contracts.reputation;
+    expect(() =>
+      resolveAgentId(`stellar:testnet:${cfg.stellar.contracts.identity}#10`, scope),
+    ).toThrow(/does not match configured network/);
+    expect(() => resolveAgentId(`stellar:mainnet:${wrongIdentity}#10`, scope)).toThrow(
+      /does not match the configured contract/,
+    );
+    expect(resolveAgentId(`stellar:pubnet:${cfg.stellar.contracts.identity}#10`, scope)).toBe(10);
+  });
+});
+
+describe("loadConfig rejects mistyped safety overrides", () => {
+  it("fails closed for invalid booleans, score scale, and weights", () => {
+    expect(() => loadConfig({ VERIFY_ONCHAIN: "flase" })).toThrow(/VERIFY_ONCHAIN/);
+    expect(() => loadConfig({ RANK_SCORE_MAX: "0" })).toThrow(/greater than zero/);
+    expect(() => loadConfig({ RANK_W_QUALITY: "NaN" })).toThrow(/RANK_W_QUALITY/);
+    expect(() =>
+      loadConfig({ RANK_W_QUALITY: "0", RANK_W_VOLUME: "0", RANK_W_BREADTH: "0" }),
+    ).toThrow(/at least one/);
   });
 });
 
@@ -96,7 +140,7 @@ describe("deriveCapabilities.mpp: whole-key + value (mpp-#8)", () => {
   });
 });
 
-describe("toAgentCard: empty endpoint falls back to agentUri (card-#9)", () => {
+describe("toAgentCard: registry endpoints remain unverified candidates (card trust boundary)", () => {
   function profileWith(serviceEndpoint: string): AgentProfile {
     return {
       id: 1,
@@ -129,17 +173,24 @@ describe("toAgentCard: empty endpoint falls back to agentUri (card-#9)", () => {
     };
   }
 
-  it("uses agentUri when the primary service endpoint is empty", () => {
+  it("does not promote agentUri when the service endpoint is empty", () => {
     const card = toAgentCard(profileWith(""));
-    expect(card.url).toBe("https://agent.example.com/.well-known/agent.json");
-    const x402 = card.capabilities.extensions.find((e) => e.uri.includes("a2a-x402"));
-    const accepts = (x402?.params as { accepts: Array<{ resource: string | null }> }).accepts[0];
-    expect(accepts.resource).toBe("https://agent.example.com/.well-known/agent.json");
+    expect(card.conformance).toBe("unverified-derived");
+    expect(card.url).toBeNull();
+    expect(card.provider.url).toBeNull();
+    expect(card.capabilities.extensions).toEqual([]);
+    expect(card.selfDeclared.agentUri).toBe("https://agent.example.com/.well-known/agent.json");
+    expect(card.selfDeclared.services[0].endpoint).toBe("");
   });
 
-  it("uses the service endpoint when present", () => {
+  it("keeps a service endpoint only below selfDeclared and never creates a skill/payment hint", () => {
     const card = toAgentCard(profileWith("https://svc.example.com/task"));
-    expect(card.url).toBe("https://svc.example.com/task");
+    expect(card.url).toBeNull();
+    expect(card.skills).toEqual([]);
+    expect(card.capabilities.extensions).toEqual([]);
+    expect(card.selfDeclared.services[0].endpoint).toBe("https://svc.example.com/task");
+    expect(card["x-stellar8004"].agentUri).toBeNull();
+    expect(card["x-stellar8004"].wallet).toBeNull();
   });
 });
 
@@ -169,34 +220,47 @@ describe("server capabilities: declare only what we exercise", () => {
   });
 });
 
-describe("testnet + mainnet-only explorer is warned, not silently mixed (config)", () => {
+describe("testnet + mainnet-only explorer is refused, not silently mixed (config)", () => {
   // The default explorer indexes mainnet only. Pairing it with STELLAR_NETWORK=testnet
   // would serve mainnet registry rows alongside testnet on-chain reads — two chains
-  // described as one. The repo's degrade-closed rule says surface it, never fake it.
-  it("warns when testnet is paired with the default (mainnet) explorer", () => {
-    const warnings: string[] = [];
-    const spy = vi.spyOn(log, "warn").mockImplementation((m: string) => void warnings.push(m));
-    try {
-      loadConfig({ STELLAR_NETWORK: "testnet" } as NodeJS.ProcessEnv);
-    } finally {
-      spy.mockRestore();
-    }
-    expect(warnings.join("\n")).toMatch(/testnet.*mainnet default|mainnet default.*testnet/is);
+  // described as one. There is no testnet indexer to fall back to, so the launch is
+  // refused rather than warned about: degrade closed, never fake.
+  it("refuses to start on testnet without an explicit EXPLORER_BASE_URL", () => {
+    expect(() => loadConfig({ STELLAR_NETWORK: "testnet" } as NodeJS.ProcessEnv)).toThrow(
+      /testnet requires an explicit EXPLORER_BASE_URL/i,
+    );
   });
 
-  it("does not warn on mainnet, nor when an explicit explorer is supplied", () => {
+  it("treats a blank or whitespace EXPLORER_BASE_URL as absent", () => {
+    for (const blank of ["", "   "]) {
+      expect(() =>
+        loadConfig({ STELLAR_NETWORK: "testnet", EXPLORER_BASE_URL: blank } as NodeJS.ProcessEnv),
+      ).toThrow(/testnet requires an explicit EXPLORER_BASE_URL/i);
+    }
+  });
+
+  it("starts, and warns about nothing, on mainnet or with an explicit testnet explorer", () => {
     for (const env of [
       { STELLAR_NETWORK: "mainnet" },
       { STELLAR_NETWORK: "testnet", EXPLORER_BASE_URL: "https://testnet.example.com" },
     ]) {
       const warnings: string[] = [];
       const spy = vi.spyOn(log, "warn").mockImplementation((m: string) => void warnings.push(m));
+      let cfg;
       try {
-        loadConfig(env as NodeJS.ProcessEnv);
+        cfg = loadConfig(env as NodeJS.ProcessEnv);
       } finally {
         spy.mockRestore();
       }
-      expect(warnings.join("\n"), JSON.stringify(env)).not.toMatch(/mainnet default/i);
+      expect(warnings.join("\n"), JSON.stringify(env)).not.toMatch(/explorer/i);
+      expect(cfg.explorerBaseUrl, JSON.stringify(env)).toBe(
+        env.EXPLORER_BASE_URL ?? "https://stellar8004.com",
+      );
     }
+  });
+
+  it("carries the optional simulation source through the explicit environment map", () => {
+    expect(loadConfig({ STELLAR_NETWORK: "mainnet", RANK_SIM_SOURCE: G_ADDR }).simSource).toBe(G_ADDR);
+    expect(loadConfig({ STELLAR_NETWORK: "mainnet", RANK_SIM_SOURCE: "   " }).simSource).toBeUndefined();
   });
 });

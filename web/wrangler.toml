@@ -1,0 +1,83 @@
+# stellar-agent-mcp — landing page.
+#
+# ASSETS-ONLY WORKER. There is deliberately no `main` key: with only an [assets]
+# block, Cloudflare serves the directory as static files and never boots a Worker
+# isolate. Static asset requests are unbilled; Worker invocations are billed per
+# million. `svelte.config.js` uses adapter-static (not adapter-cloudflare, which
+# stellar8004.com needs for its server routes) precisely to keep this true.
+#
+# NO SECRETS, NO BINDINGS, NO DATABASE. The one piece of live data on the page —
+# the registry counts in the stat row — is read from the already-public
+# stellar8004 explorer API straight from the browser. `wrangler secret put` is
+# not part of deploying this.
+#
+# WHY BROWSER-DIRECT INSTEAD OF PROXYING THROUGH A WORKER:
+#   The upstream API rate-limits per client address (x-ratelimit-limit: 30/min;
+#   its Cloudflare adapter reads cf-connecting-ip). Proxying server-side could
+#   collapse every visitor onto one
+#   egress IP, so all users would share ONE 30/min budget and a single busy tab
+#   would 429 everyone. Fetching from the browser gives each visitor their own
+#   budget. The upstream already sends `access-control-allow-origin: *` and
+#   `cache-control: public, max-age=30, stale-while-revalidate=120`, so CORS
+#   permits it and both the browser and Cloudflare's edge cache the reads.
+#
+# Deploy: `npm run deploy` in this directory (builds, then wrangler deploy).
+
+name = "stellar-agent-mcp-web"
+compatibility_date = "2026-07-29"
+
+# Top-level keys MUST stay above every [table] header. TOML assigns a bare key to
+# the most recently opened table, so anything placed after [assets] silently
+# becomes `assets.<key>` and is ignored with only a warning. (This exact mistake
+# cost a no-op deploy in the sibling stellar8004-web config.)
+#
+# One canonical public hostname. The custom-domain deploy provisions DNS and TLS;
+# a second workers.dev or preview URL would bypass the MCP Worker's Host policy
+# and create another surface to monitor.
+workers_dev = false
+preview_urls = false
+
+# Custom domain on the stellar8004.com zone — the SAME zone the explorer Worker
+# serves, which is why wrangler can provision the DNS record and certificate on
+# deploy with no manual CNAME.
+#
+# A SUBDOMAIN, NOT stellar8004.com/mcp. The path was the first instinct and it is
+# the better-looking URL, but routing a path prefix to a SEPARATE Worker fights the
+# build: with `kit.paths.base = '/mcp'` adapter-static still writes the output to
+# the root of build/ while the HTML references assets relatively ('./_app/…'), so
+# every asset 404s. Making it work needs paths.relative=false, the output nested
+# under build/mcp, and _headers plus 404.html moved back to the assets root because
+# Cloudflare only looks for them there — six places to get right instead of one.
+# The honest alternative for a /mcp path is a prerendered route inside the explorer
+# app itself, but that moves this page out of the repo it documents and couples its
+# deploys to the Worker holding the Supabase service-role key.
+#
+# The subdomain keeps the stellar8004.com association, needs none of that, and
+# leaves docs deploys independent of the registry. Discoverability comes from a nav
+# link on the explorer, which is needed either way.
+#
+# The separate `stellar-agent-mcp` runtime Worker owns the exact `/mcp` and
+# `/healthz` zone routes. Cloudflare evaluates those more-specific routes before
+# this custom-domain origin, so the landing remains assets-only while both
+# surfaces share one canonical hostname. Deploy this custom domain first so its
+# proxied DNS record exists before deploying the path routes.
+#
+# Cloudflare Pages would also serve this for free, but the account already runs
+# Workers and zero Pages projects, and Cloudflare now steers new static projects
+# to Workers Static Assets. Same CDN, same free static-asset serving, one fewer
+# platform to hold in your head.
+[[routes]]
+pattern = "mcp.stellar8004.com"
+custom_domain = true
+
+[assets]
+# adapter-static writes here; `build/` is gitignored, so deploy after `npm run build`.
+directory = "./build"
+
+# NOT "single-page-application": that would render the landing page for every
+# typo'd path with a 200. adapter-static emits `404.html` (svelte.config.js
+# `fallback`), which this serves with a real 404 status.
+not_found_handling = "404-page"
+
+[observability]
+enabled = true

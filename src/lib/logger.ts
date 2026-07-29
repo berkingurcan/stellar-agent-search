@@ -44,8 +44,19 @@ export function isLogLevel(v: unknown): v is LogLevel {
 }
 
 function envLevel(): LogLevel {
-  const v = (process.env.LOG_LEVEL ?? "").trim().toLowerCase();
+  const raw = typeof process !== "undefined" ? process.env?.LOG_LEVEL : undefined;
+  const v = (raw ?? "").trim().toLowerCase();
   return isLogLevel(v) ? v : "info";
+}
+
+function defaultWrite(line: string): void {
+  if (typeof process !== "undefined" && process.stderr?.write) {
+    process.stderr.write(line + "\n");
+    return;
+  }
+  // Worker/fetch runtimes have no protocol stdout channel. console.error maps
+  // to the platform's structured log sink and cannot corrupt MCP responses.
+  console.error(line);
 }
 
 export class Logger {
@@ -58,7 +69,7 @@ export class Logger {
     this.level = opts.level ?? envLevel();
     this.base = opts.base ?? {};
     this.clock = opts.clock ?? systemClock;
-    this.write = opts.write ?? ((line) => process.stderr.write(line + "\n"));
+    this.write = opts.write ?? defaultWrite;
   }
 
   /** Set the minimum emit level. Children created AFTER this inherit it. */

@@ -44,6 +44,16 @@ describe("capability triggers", () => {
     expect(q.filters.hasServices).toBe(true);
     expect(q.keywords).toContain("ocr");
   });
+
+  it("does not reverse negated capability requests into positive filters", () => {
+    const x402 = parseQuery("a scraper without x402");
+    expect(x402.filters.x402).toBeUndefined();
+    expect(x402.unsupported).toContain("negative-filter:x402");
+
+    const mpp = parseQuery("mpp olmadan çeviri");
+    expect(mpp.filters.mpp).toBeUndefined();
+    expect(mpp.unsupported).toContain("negative-filter:mpp");
+  });
 });
 
 describe("trust models (reputation-as-trust needs explicit phrasing)", () => {
@@ -63,8 +73,8 @@ describe("trust models (reputation-as-trust needs explicit phrasing)", () => {
     expect(parseQuery("a validated data provider").filters.trust).toBe("validation");
   });
 
-  it('"tee attested inference" → trust:tee', () => {
-    expect(parseQuery("tee attested inference").filters.trust).toBe("tee");
+  it('"tee attested inference" → trust:tee-attestation', () => {
+    expect(parseQuery("tee attested inference").filters.trust).toBe("tee-attestation");
   });
 });
 
@@ -122,12 +132,18 @@ describe("residual keyword extraction", () => {
     expect(residualKeywords("oracle oracle data oracle")).toEqual(["oracle", "data"]);
   });
 
+  it("preserves international words and folds accents deterministically", () => {
+    expect(residualKeywords("Türkçe çeviri ve veri")).toEqual(["turkce", "ceviri", "ve", "veri"]);
+    expect(residualKeywords("中文 翻译")).toEqual(["中文", "翻译"]);
+  });
+
   it("empty / whitespace / punctuation-only queries yield no keywords and no filters", () => {
     for (const raw of ["", "   ", "!!! ??? ..."]) {
       const q = parseQuery(raw);
       expect(q.keywords).toEqual([]);
       expect(q.filters).toEqual({});
       expect(q.matched).toEqual([]);
+      expect(q.unsupported).toEqual([]);
     }
   });
 

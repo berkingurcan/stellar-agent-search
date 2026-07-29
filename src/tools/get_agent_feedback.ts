@@ -8,13 +8,15 @@
  */
 
 import { z } from "zod";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ValidationError, type FeedbackResponse } from "@trionlabs/stellar8004";
-import { resolveAgentId, STELLAR_ID_RE } from "../lib/identifier.js";
+import type { McpServer } from "@modelcontextprotocol/server";
+import { ValidationError } from "@trionlabs/stellar8004";
+import { MAX_AGENT_ID, resolveAgentId, STELLAR_ID_RE } from "../lib/identifier.js";
 import { safe, selfDeclared, serverText } from "../lib/sanitize.js";
 import {
   agentIds,
+  collectFeedbackWindow,
   handler,
+  MAX_FEEDBACK_TAG_LENGTH,
   toolResult,
   toSafeFeedback,
   READ_ANNOTATIONS,
@@ -25,14 +27,14 @@ import { zSelfDeclaredSlot } from "./schemas.js";
 const inputShape = {
   agent: z
     .union([
-      z.number().int().nonnegative(),
+      z.number().int().nonnegative().max(MAX_AGENT_ID),
       z.string().regex(STELLAR_ID_RE, "stellar:{network}:{identity}#{id}"),
       z.string().regex(/^\d+$/, "numeric agent id"),
     ])
     .describe("Numeric agent id, numeric string, or a full stellar handle."),
   limit: z.number().int().min(1).max(50).default(10),
   page: z.number().int().min(1).default(1),
-  tag: z.string().optional().describe("Filter by feedback tag."),
+  tag: z.string().max(MAX_FEEDBACK_TAG_LENGTH).optional().describe("Filter by feedback tag."),
   includeRevoked: z.boolean().default(false),
 };
 
@@ -46,6 +48,14 @@ const outputShape = {
   summary: z
     .object({ returned: z.number(), revokedHidden: z.number() })
     .passthrough(),
+  coverage: z
+    .object({
+      windowComplete: z.boolean(),
+      paginationExhausted: z.boolean(),
+      pagesScanned: z.number().int().nonnegative(),
+      hasMore: z.boolean().optional(),
+    })
+    .passthrough(),
   feedback: zSelfDeclaredSlot,
 };
 
@@ -57,49 +67,39 @@ export function registerGetAgentFeedback(server: McpServer, deps: ToolDeps): voi
       description:
         "Recent on-chain feedback for one agent (client-authored, untrusted → returned in a labeled " +
         "`selfDeclared` slot, sanitized). Revoked entries are hidden unless includeRevoked is set.",
-      inputSchema: inputShape,
-      outputSchema: outputShape,
+      inputSchema: z.object(inputShape),
+      outputSchema: z.object(outputShape),
       annotations: { title: "Get Agent Feedback", ...READ_ANNOTATIONS },
     },
     handler<Args>(async (args) => {
-      const id = resolveAgentId(args.agent);
+      const id = resolveAgentId(args.agent, {
+        network: deps.config.network,
+        identity: deps.config.stellar.contracts.identity,
+      });
       if (id == null) {
         throw new ValidationError(`Could not resolve agent reference '${String(args.agent)}'.`);
       }
 
-      // The SDK getFeedback only accepts {page, tag}; `limit` is ours to honor.
-      // Page from args.page until we have `limit` VISIBLE (post-revoke-filter)
-      // rows or the indexer signals no more pages. Previously `limit` was ignored
-      // (capped by the server page size) and page/limit windows misaligned.
-      const MAX_PAGES = 20;
-      const visible: FeedbackResponse[] = [];
-      let revokedHidden = 0;
-      for (let p = args.page, fetched = 0; fetched < MAX_PAGES; p++, fetched++) {
-        const res = await deps.explorer.getFeedback(id, args.tag ? { page: p, tag: args.tag } : { page: p });
-        const batch = res.data ?? [];
-        for (const f of batch) {
-          if (!args.includeRevoked && f.isRevoked) {
-            revokedHidden++;
-            continue;
-          }
-          visible.push(f);
-        }
-        if (visible.length >= args.limit) break;
-        if (!res.meta?.pagination?.hasMore || batch.length === 0) break;
-      }
-      const entries = visible.slice(0, args.limit).map(toSafeFeedback);
+      const window = await collectFeedbackWindow(deps, id, {
+        page: args.page,
+        limit: args.limit,
+        ...(args.tag ? { tag: args.tag } : {}),
+        includeRevoked: args.includeRevoked,
+      });
+      const entries = window.rows.map(toSafeFeedback);
 
       const ids = agentIds(deps.config, id);
-      const text = serverText`Agent ${id}: ${entries.length} feedback row(s) on page ${args.page} (${revokedHidden} revoked hidden), on ${safe(
+      const text = serverText`Agent ${id}: ${entries.length} feedback row(s) on page ${args.page} (${window.revokedHidden} revoked hidden), on ${safe(
         deps.config.network,
-      )}.`;
+      )}; windowComplete=${window.coverage.windowComplete}.`;
 
       return toolResult(text, {
         agentId: id,
         stellarId: ids.stellarId,
         page: args.page,
         count: entries.length,
-        summary: { returned: entries.length, revokedHidden },
+        summary: { returned: entries.length, revokedHidden: window.revokedHidden },
+        coverage: window.coverage,
         feedback: selfDeclared(entries),
       });
     }),

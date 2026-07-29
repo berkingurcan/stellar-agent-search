@@ -1,25 +1,36 @@
 # Architecture
 
-`stellar-agent-mcp` is a single TypeScript (ESM, NodeNext) binary that is **both** an MCP stdio server and a
-human CLI, built on the stable MCP **1.x** SDK. It is read-only and keyless. This document covers the data
-flow, the ranking formula, the verification overlay, the trust model, and the delivery/spec stance.
+`stellar-agent-mcp` has one shared TypeScript service/tool layer with two adapters: a Node (ESM, NodeNext)
+binary that is both an MCP stdio server and a human CLI, and a separate stateless Cloudflare Worker. The
+runtime uses the split MCP v2 packages (`@modelcontextprotocol/server` and `@modelcontextprotocol/client`
+2.0.0) with Zod 4 and requires Node ≥ 20 for the local binary. Both adapters are read-only and keyless.
+
+The local stdio path is usable now. The Worker implementation exists, but its public route is **not deployed**;
+`https://mcp.stellar8004.com/mcp` currently returns the landing site's 404. This document distinguishes
+implemented code from live, canary-proven behavior.
 
 ## System overview
 
 ```
+LOCAL — available now
+
 MCP client (Claude Code / Cursor / Windsurf / Cline / VS Code)   +   human terminal
         │  stdio (stdout = JSON-RPC only · stderr = logs)             │  TTY subcommands
         ▼                                                             ▼
-  stellar-agent-mcp  (ONE bin: src/index.ts dispatches → mcp server | cli | doctor | serve)
+  stellar-agent-mcp  (src/index.ts dispatches → MCP server | CLI | doctor | setup)
         │
-        ├─ buildServer(config)  →  Tools · Resources (stellar8004://…) · Prompts
-        │        capabilities: { tools, resources, prompts }   (no listChanged — stateless)
-        │
-        ├─ ExplorerService     (stellar-8004 HTTP API)      [PRIMARY DATA]
-        │        └─► https://stellar8004.com
-        │
-        └─ ReputationVerifier  (Soroban RPC, bounded top-K) [VERIFY: declared → verified]
-                 └─► https://mainnet.sorobanrpc.com  →  Reputation contract (get_summary + get_clients_paginated)
+        └─ buildServer(config) → Tools · Resources (stellar8004://…) · Prompts
+                 │
+                 ├─ ExplorerService ──HTTPS──► stellar8004 public API [PRIMARY DATA]
+                 └─ ReputationVerifier ──► Soroban RPC ──► Reputation contract
+
+REMOTE — implemented, not deployed
+
+Remote MCP client ──POST /mcp──► Cloudflare runtime Worker
+                                      │  fresh MCP server per request; no sessions
+                                      ├─ ExplorerService ──Service Binding──► stellar8004-web
+                                      │                                      └─ canonical Supabase-backed index
+                                      └─ ReputationVerifier ──HTTPS──► Soroban RPC
 
   examples/x402-demo.ts  (SEPARATE process, SOLE keyed actor) — never an MCP tool
 ```
@@ -42,8 +53,8 @@ canonical `AgentProfile` join (defined once in `src/types.ts`) so they never div
 
 Both modes go through the **same** service layer (`ExplorerService` + `ReputationVerifier` + the ranking
 engine), so the CLI is a thin formatter over the exact logic the tools call — no duplicated discovery or
-ranking. `serve --http` (Streamable HTTP) is a documented post-`v0.1.0` stretch and is **not** enabled in
-this build.
+ranking. `serve` remains an alias for the local stdio server; it does not open an HTTP listener. Streamable
+HTTP lives in `worker/` as a separately built and deployed Cloudflare adapter.
 
 ## Module layout (`src/`)
 
@@ -58,6 +69,7 @@ this build.
 | `prompts/` | the slash-command workflow prompts |
 | `cli/` | the human CLI (`find`/`rank`/`profile`/`services`/`doctor`) + stdio server bootstrap |
 | `lib/` | `explorer` · `reputation` · `ranking` · `identifier` · `agentcard` · `sanitize` · `nlparse` · `errors` · `logger` · `clock` |
+| `../worker/` | Cloudflare Streamable HTTP adapter, edge admission controls, Service Binding egress, and Worker-specific tests/config |
 
 ## Canonical data: `AgentProfile`
 
@@ -73,9 +85,11 @@ The cross-registry join produced for one agent (`src/types.ts`):
 - **`selfDeclared`** — the **only** slot holding untrusted agent free text (name/description/image/
   services/metadata), sanitized and bounded.
 
-The identifiers surface both the identity-network form and the CAIP-2 form so any A2A/AP2 consumer can read
-them; `get_agent_profile` also emits an **A2A AgentCard projection** (with an `x-stellar8004` verified
-extension) inside a labeled self-declared slot.
+The identifiers surface both the identity-network form and the CAIP-2 form. `get_agent_profile` also emits an
+explicitly **unverified, derived A2A-shaped projection** inside a labeled self-declared slot. It does not fetch
+an agent-published card, promote registry endpoints into invokable A2A URLs, synthesize payment requirements,
+or claim protocol/endpoint conformance. Its `x-stellar8004.verified` flag is scoped to reputation-summary
+re-derivation only.
 
 ## The 3-axis ranking engine (`lib/ranking.ts`)
 
@@ -85,14 +99,14 @@ byte-identical output. Three orthogonal axes, each normalized to `[0, 1]`:
 ```
 quality = clamp(avg / RANK_SCORE_MAX, 0, 1)              # null/0 when unrated
 volume  = clamp(ln(1+feedbackCount)  / ln(1+50), 0, 1)   # log-saturating
-breadth = clamp(ln(1+uniqueClients)  / ln(1+25), 0, 1)   # sybil-resistant
+breadth = clamp(ln(1+uniqueClients)  / ln(1+25), 0, 1)   # Sybil-cost-aware heuristic
 ```
 
 Weighted base + additive bonuses:
 
 ```
 base  = wQ·quality + wV·volume + wB·breadth              # default weights 0.5 / 0.2 / 0.3 (sum 1 ⇒ [0,1])
-score = clamp(base + paymentBonus + endpointBonus + verifiedBonus, 0, 1)
+score = clamp(base + paymentBonus + endpointBonus, 0, 1)
 score100 = round(score · 100)                            # the displayed 0..100 score
 ```
 
@@ -101,7 +115,7 @@ on-chain-**verified** **+0.03**. Weights are env-overridable (`RANK_W_*`) or per
 always re-normalized to sum 1.
 
 **Why breadth > volume:** unique clients (breadth) are hard to fake; raw feedback count (volume) is cheap to
-fake. Weighting breadth above volume is the ranking's sybil hedge.
+fake. Weighting breadth above volume is a Sybil-cost hedge, not Sybil-resistance or proof of personhood.
 
 **Two separated scores:** the displayed `score` is honest (an unrated agent contributes 0 on quality and is
 flagged `unrated`), while an ordering-only `sortScore` applies a `0.15` novelty floor so a capable-but-unrated
@@ -133,11 +147,118 @@ the row falls back to declared-only with `status: "unavailable"` rather than err
 
 ## Explorer access notes (`lib/explorer.ts`)
 
+- The existing stellar8004 registry/indexer and its Supabase database remain the **canonical projection**.
+  The MCP project does not run a shadow indexer or copy that database. In the local adapter, ExplorerService
+  calls the public API; in the Worker adapter, it calls the same `stellar8004-web` service through a Service
+  Binding. The Worker has no Supabase URL or service-role credential.
 - The explorer's `/search` substring-matches poorly and offers **no server-side score sort** (only
-  `created_at` / `id`). Discovery therefore uses `getAgents({search})` + **client-side filtering**, and all
-  ranking is done **client-side** over fetched pages.
+  `created_at` / `id`). Discovery therefore sends structured filters to `getAgents`, then performs text
+  matching and ranking **client-side** over a bounded candidate window.
 - List walks are **hard page-capped** (never an unbounded loop on a hostile `pagination.total`).
+- Discovery tools return `coverageComplete`, `pagesScanned`, `recordsScanned`, and `hasMore` when known, so a
+  bounded window cannot be mistaken for a global result. A server-side cursor discovery API remains the
+  production-scale fix.
 - The service layer uses a TTL cache + single-flight and the SDK's 429/backoff handling.
+
+The scale fix belongs upstream, not in another database here. The proposed cursor-based discovery contract,
+freshness metadata, stable ordering, and ownership boundary are in
+**[stellar8004-integration.md](stellar8004-integration.md)** and
+[trionlabs/stellar-8004#18](https://github.com/trionlabs/stellar-8004/issues/18). Issue #18 is a proposal, not
+an accepted or deployed API; until it lands, coverage fields are the honesty boundary for bounded scans.
+
+## Remote Cloudflare adapter (implemented, not live)
+
+### Routing and lifecycle
+
+The public hostname is deliberately split between two independently deployable Workers:
+
+- `stellar-agent-mcp-web` is an assets-only Worker and owns the `mcp.stellar8004.com` custom domain.
+- `stellar-agent-mcp` is the runtime Worker. Exact zone routes for `/mcp` and `/healthz` are more specific
+  than the custom-domain origin and therefore direct only those paths to the runtime.
+- `workers.dev` and preview URLs are disabled, so they cannot bypass the canonical hostname policy.
+
+The landing Worker must be deployed first because it establishes the proxied hostname. The runtime route is
+not deployed today: `/mcp` still reaches the landing Worker and returns 404. The code therefore makes no live
+availability, interoperability, latency, or protocol-conformance claim yet.
+
+The published/local Node binary supports Node ≥ 20. The Worker build/deploy workspace currently declares
+Node ≥ 22.18 for its Agents/Wrangler development toolchain; this is a contributor/CI requirement, not a
+requirement imposed on remote MCP clients.
+
+For each accepted `/mcp` request, Cloudflare Agents `0.20.1` calls `createMcpHandler`, constructs a **fresh**
+v2 server through `buildServer(config, { deps })`, and discards it after the response. The handler uses
+automatic response mode plus a stateless legacy compatibility lane; there are no sessions, Durable Objects,
+resume tokens, or server-initiated notifications. The target for modern Streamable HTTP clients is MCP
+`2026-07-28`: that lane starts with `server/discover` and carries a per-request `_meta` envelope; it does
+**not** use legacy `initialize`. The compatibility lane does accept legacy stateless `initialize`. By
+contrast, the currently tested local stdio negotiation reports `2025-11-25`. Those dates describe transport
+negotiations, not different tool contracts.
+
+`/healthz` is intentionally shallow: it reports only that the Worker can execute and makes no upstream call.
+It must not be described as registry, Service Binding, Supabase, or Soroban health.
+
+### Request admission and egress boundary
+
+The remote endpoint is deliberately **public and unauthenticated** because its tools are read-only and expose
+public registry/on-chain data. That is not the same as being unguarded:
+
+- Only the canonical production host and explicit local-development hosts are accepted. Browser `Origin`
+  values are allowlisted; originless non-browser clients are allowed. **CORS is a browser control, not
+  authentication.**
+- `/mcp` accepts `POST` (plus CORS `OPTIONS`) only, requires JSON, streams at most 256 KiB, caps JSON-RPC
+  batches at 8, and rejects requests whose conservative estimated upstream cost exceeds 24.
+- The cost budget exists because Cloudflare caps a Worker invocation chain at 32. It estimates worst-case
+  calls to the bound `stellar8004-web` Worker before constructing the server. Soroban verification RPC is
+  separately bounded and cached; it is not charged to this Service Binding counter. The estimate is an
+  admission heuristic, not exact billing or proof that a dependency can never change its call pattern.
+- A keyed rate-limit binding debits an IP + user-agent hash, weighted by estimated cost, at a configured
+  30 units/minute. Cloudflare's limiter is PoP-local and approximate, and limiter failure currently fails
+  open. It is best-effort abuse friction — **not** a global quota, authorization check, fairness guarantee, or
+  accounting boundary. A caller can rotate user-agent values to fragment its bucket, while unrelated users
+  behind the same NAT and user-agent can share one; durable principal-level quotas would require an identity
+  layer such as OAuth.
+- Explorer egress accepts only `GET` to the configured base's `/api/v1` or `/api/v2` paths, rewrites that
+  request to `STELLAR8004_API`, and strips caller `Authorization`, `Cookie`, MCP, forwarding, and arbitrary
+  headers. It forwards only a bounded `Accept`; when Cloudflare supplied a syntactically valid
+  `cf-connecting-ip`, both downstream `cf-connecting-ip` and `x-real-ip` are derived from that edge-owned
+  value. Caller-provided `x-real-ip` and `x-forwarded-for` are never trusted. Agent-declared service endpoints
+  are never fetched.
+
+There is one unresolved production proof. The upstream Svelte adapter currently derives its client address
+from `cf-connecting-ip`, and the reconstructed bodyless Service Binding `GET` derives both relevant headers
+only from Cloudflare's edge-owned incoming value. Unit tests prove that transformation, but cannot prove the
+full deployed edge → runtime Worker → Service Binding → `stellar8004-web` path. Deploy remains blocked until
+a two-client live canary shows distinct upstream identities; silently collapsing all callers onto one quota
+would let one busy client degrade the registry for everyone.
+
+### Cache boundaries
+
+Explorer data gets two actor-neutral, best-effort cache layers in the Worker:
+
+1. A shared isolate-local `TtlCache` (bounded to 500 entries per network/base tuple) is injected into each
+   fresh server's ExplorerService. It reduces repeat work but is lost on isolate eviction and is not global.
+2. When `caches.default` exists, the Service Binding adapter reads/writes Cloudflare Cache API entries only
+   for upstream `200` responses that explicitly declare `Cache-Control: public`, do not set cookies, and do
+   not vary on authorization or cookies. Actor-specific `x-ratelimit-*` headers are removed before a shared
+   entry is written. Cache API availability and entries are PoP-local/best effort.
+
+A separate bounded isolate-local verifier cache (200 entries per network/RPC tuple) reuses Soroban reputation
+reads across fresh per-request servers. It is also evictable and best effort. None of these caches is a
+correctness source, global freshness guarantee, authorization boundary, billing ledger, or replacement for
+the canonical index. Soroban verification still provides the bounded declared-vs-on-chain overlay; cache
+reuse does not upgrade declared data to verified data.
+
+### Deployment gates
+
+Two explicit gates keep the implemented Worker from being mistaken for production-ready:
+
+1. `worker/wrangler.jsonc` contains rate-limit namespace `0`, a dry-run sentinel; the deploy script refuses
+   to publish until it is replaced with an account-unique namespace.
+2. After a controlled deploy, a live canary must verify original caller identity through the Service Binding,
+   Host/Origin behavior, modern `server/discover`, legacy `initialize`, tool listing, bounded tool calls,
+   cache headers, and rollback of the two exact routes.
+
+Until both pass, documentation and client examples must continue to recommend local stdio.
 
 ## Error taxonomy (`lib/errors.ts`)
 
@@ -161,10 +282,11 @@ posture are in **[../SECURITY.md](../SECURITY.md)**.
 
 ### Honest limits
 
-This server verifies **provenance, liveness, and on-chain reputation re-derivation**, and the demo grounds
-feedback with a payment tx hash + result hash. It does **not** solve **Sybil resistance / proof-of-personhood**;
-`uniqueClients` (breadth) is a thin hedge, not a solution. That is a deliberate, stated limit, not an
-oversight.
+This server verifies registry/transaction provenance and re-derives bounded reputation reads on-chain. It
+does **not** probe or verify agent service-endpoint liveness or protocol conformance. The demo is designed to
+bind completed feedback to validated payment transaction and result hashes, but its first funded, recorded
+mainnet run is still pending. It also does **not** solve **Sybil resistance / proof-of-personhood**;
+`uniqueClients` (breadth) is a thin hedge, not a solution.
 
 ## Multi-chain readiness
 
@@ -174,16 +296,16 @@ Identifiers carry a CAIP-2 namespace and the data layer is reached only through 
 
 ## Delivery & spec stance
 
-- **Transport:** stdio, primary and default — correct for a keyless, read-only, local server. SSE is
-  deprecated and is **not** shipped. A stateless Streamable HTTP variant is a documented stretch.
-- **SDK / spec:** built on the stable `@modelcontextprotocol/sdk` **1.30.0** (spec **2025-11-25**),
-  `McpServer` + `registerTool`/`registerResource`/`registerPrompt` + `StdioServerTransport`, zod v3 input
-  schemas. A keyless read-only stdio server needs none of the 2026 RC's heavy machinery (Tasks, Apps,
-  stateless-HTTP, OAuth hardening); the RC's logging-to-stderr direction is already how this server behaves.
-  Migration to the v2 SDK is trivial (`registerTool` already exists) and scheduled as post-`v0.1.0`
-  maintenance.
-- **Schema safety:** output schemas keep any `oneOf`/`anyOf`/`allOf` **inside** `properties`, never at the
-  schema root (Claude Code rejects root-level combinators).
+- **Local transport:** stdio remains the primary, deploy-independent default. The split MCP v2 server/client
+  packages are pinned at `2.0.0`; the real local handshake currently negotiates protocol `2025-11-25` over
+  `StdioServerTransport`. `serve` means stdio, not an HTTP listener. SSE is not shipped.
+- **Remote transport:** the separate Cloudflare Worker uses Agents `0.20.1` `createMcpHandler`, fresh server
+  factories, automatic response mode, and a stateless legacy lane. Its modern target is MCP `2026-07-28` at
+  `/mcp`. The implementation and tests exist, but the route is not live and no production conformance claim
+  is made before the canary.
+- **Schemas:** tools, resources, and prompts register through the v2 package with Zod 4 objects. Output
+  schemas keep any `oneOf`/`anyOf`/`allOf` **inside** `properties`, never at the schema root (some clients
+  reject root-level combinators).
 - **Tool-search legibility:** the server ships a crisp `instructions` string ("Start with find_agent") so a
   tool-search client knows when to reach for the server before loading individual tool schemas.
 
@@ -286,9 +408,9 @@ axios build for that module.
 
 ### Why the npm artifact is not fixed by that alias
 
-**tsup externalizes runtime dependencies.** `dist/index.js` (~136 KB) `import`s `@trionlabs/stellar8004` and
-`@modelcontextprotocol/sdk` rather than inlining them, so a build-time alias never reaches the published
-package. Confirmed via the sourcemap: zero `stellar-sdk` modules in the shipped bundle.
+**tsup externalizes runtime dependencies.** `dist/index.js` imports `@trionlabs/stellar8004` and the split MCP
+v2 server package rather than inlining them, so a build-time alias never reaches the published Node package.
+The sourcemap contains no bundled `stellar-sdk` modules.
 
 Closing it therefore needs a deliberate choice, not a config tweak:
 
@@ -300,11 +422,11 @@ Closing it therefore needs a deliberate choice, not a config tweak:
 
 ### Consequence for edge runtimes
 
-Cloudflare Workers and similar fetch-only runtimes **must** bundle, so the alias applies there and the
-constraint disappears. The stack bundles cleanly under workerd resolution conditions
-(`--platform=browser --conditions=workerd,worker,browser,import`). Node-builtin usage in the SDK is limited —
-`path` plus `Buffer`, both covered by `nodejs_compat`.
+Cloudflare Workers must bundle, so `worker/wrangler.jsonc` aliases the default Stellar SDK plus its
+`/contract` and `/rpc` subpaths to the `no-axios` build. Missing any one alias can silently restore axios for
+that module. The Worker uses `nodejs_compat` for the small remaining Node-compatible surface.
 
-The server is otherwise already shaped for a stateless deployment: every tool is a pure read, there is no
-session state, and `resources.listChanged` is deliberately not declared, so nothing promises a server-initiated
-message. Remaining work for a remote deployment is transport wiring, not redesign.
+Transport wiring is now implemented in `worker/src/index.ts`; the remaining work is operational proof, not a
+service-layer redesign. The dry-run bundle and offline tests cannot prove zone routing, the real Service
+Binding's caller identity, PoP-local rate-limit behavior, cache behavior, or interoperability with production
+clients. Those are precisely the deployment canary gates described above.

@@ -8,8 +8,9 @@
  */
 
 import { z } from "zod";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { safe, sanitizeText, serverText } from "../lib/sanitize.js";
+import { buildRegistryStatsView } from "../lib/registry-stats.js";
 import { handler, toolResult, READ_ANNOTATIONS, type ToolDeps } from "./shared.js";
 
 // ---------------------------------------------------------------------------
@@ -25,8 +26,31 @@ const statsOutput = {
   averageFeedbackScore: z.number(),
   agentsWithServices: z.number(),
   agentsWithX402: z.number(),
-  protocolDistribution: z.record(z.number()),
-  trustDistribution: z.record(z.number()),
+  agentsWithMpp: z.number().nullable(),
+  protocolDistribution: z.record(z.string(), z.number()),
+  trustDistribution: z.record(z.string(), z.number()),
+  metricDefinitions: z.object({
+    totalAgents: z.string(),
+    totalFeedbacks: z.string(),
+    totalValidations: z.string(),
+    totalUniqueClients: z.string(),
+    averageFeedbackScore: z.string(),
+    agentsWithServices: z.string(),
+    agentsWithX402: z.string(),
+    agentsWithMpp: z.string(),
+    protocolDistribution: z.string(),
+    trustDistribution: z.string(),
+  }),
+  coverage: z.object({
+    source: z.literal("stellar-8004-explorer-v1"),
+    exactCountMetrics: z.array(z.string()),
+    sampledMetrics: z.array(z.string()),
+    sampleCapAgents: z.literal(5_000),
+    sampleSizeKnown: z.literal(false),
+    distributionsGlobalExact: z.literal(false),
+    snapshotConsistent: z.literal(false),
+  }),
+  limitations: z.array(z.string()),
 };
 
 export function registerGetRegistryStats(server: McpServer, deps: ToolDeps): void {
@@ -35,31 +59,24 @@ export function registerGetRegistryStats(server: McpServer, deps: ToolDeps): voi
     {
       title: "Get Registry Stats",
       description:
-        "Aggregate registry statistics: total agents / feedbacks / validations / unique clients, " +
-        "average feedback score, x402 + service coverage, and protocol/trust distributions.",
-      inputSchema: {},
-      outputSchema: statsOutput,
+        "Explorer v1 registry counts plus sampled metrics, with explicit metric definitions, " +
+        "5,000-agent sample cap, non-global distribution warning, and snapshot limitations.",
+      inputSchema: z.object({}),
+      outputSchema: z.object(statsOutput),
       annotations: { title: "Get Registry Stats", ...READ_ANNOTATIONS },
     },
     handler<Record<string, never>>(async () => {
       const s = (await deps.explorer.getStats()).data;
-      const structured = {
-        network: sanitizeText(s.network, 40) || deps.config.network,
-        totalAgents: s.totalAgents,
-        totalFeedbacks: s.totalFeedbacks,
-        totalValidations: s.totalValidations,
-        totalUniqueClients: s.totalUniqueClients,
-        averageFeedbackScore: s.averageFeedbackScore,
-        agentsWithServices: s.agentsWithServices,
-        agentsWithX402: s.agentsWithX402,
-        protocolDistribution: s.protocolDistribution,
-        trustDistribution: s.trustDistribution,
-      };
-      const text = serverText`Registry on ${safe(deps.config.network)}: ${s.totalAgents} agents, ${
+      const structured = buildRegistryStatsView(s, deps.config.network);
+      const mppSummary =
+        structured.agentsWithMpp === null ? safe("not returned") : structured.agentsWithMpp;
+      const text = serverText`Registry on ${safe(deps.config.network)}: ${s.totalAgents} indexed agents, ${
         s.totalFeedbacks
-      } feedbacks, ${s.totalUniqueClients} unique clients, avg score ${
-        s.averageFeedbackScore
-      }/100. x402 agents: ${s.agentsWithX402}, with services: ${s.agentsWithServices}.`;
+      } feedback rows. Sampled over at most 5,000 agent rows: sum of per-agent distinct-client counts ${
+        s.totalUniqueClients
+      }, unweighted per-agent average score ${s.averageFeedbackScore}/100. Distributions are not proven global. x402 agents: ${
+        s.agentsWithX402
+      }, MPP agents: ${mppSummary}, with services: ${s.agentsWithServices}.`;
       return toolResult(text, structured);
     }),
   );
@@ -89,8 +106,8 @@ export function registerGetRegistryHealth(server: McpServer, deps: ToolDeps): vo
         "Per-registry indexer health: last indexed ledger and staleness for the identity, " +
         "reputation, and validation indexers. A stale reputation indexer explains a temporary " +
         "declared-vs-verified 'unavailable'/'mismatch'.",
-      inputSchema: {},
-      outputSchema: healthOutput,
+      inputSchema: z.object({}),
+      outputSchema: z.object(healthOutput),
       annotations: { title: "Get Registry Health", ...READ_ANNOTATIONS },
     },
     handler<Record<string, never>>(async () => {

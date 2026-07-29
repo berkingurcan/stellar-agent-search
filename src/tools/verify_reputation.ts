@@ -7,9 +7,9 @@
  */
 
 import { z } from "zod";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { ValidationError } from "@trionlabs/stellar8004";
-import { resolveAgentId, STELLAR_ID_RE } from "../lib/identifier.js";
+import { MAX_AGENT_ID, resolveAgentId, STELLAR_ID_RE } from "../lib/identifier.js";
 import { safe, serverText } from "../lib/sanitize.js";
 import {
   agentIds,
@@ -24,7 +24,7 @@ import { zVerification } from "./schemas.js";
 const inputShape = {
   agent: z
     .union([
-      z.number().int().nonnegative(),
+      z.number().int().nonnegative().max(MAX_AGENT_ID),
       z.string().regex(STELLAR_ID_RE, "stellar:{network}:{identity}#{id}"),
       z.string().regex(/^\d+$/, "numeric agent id"),
     ])
@@ -48,20 +48,27 @@ export function registerVerifyReputation(server: McpServer, deps: ToolDeps): voi
       description:
         "Trust-minimized reputation check for one agent: re-derives the on-chain average from the " +
         "Reputation contract (get_clients_paginated + get_summary) and diffs it against the " +
-        "explorer's declared numbers. Status is verified | mismatch | unavailable | skipped.",
-      inputSchema: inputShape,
-      outputSchema: outputShape,
+        "explorer's declared numbers. The current contract can establish partial average/count " +
+        "parity for at most five comparable clients; status is partial | mismatch | unavailable | skipped.",
+      inputSchema: z.object(inputShape),
+      outputSchema: z.object(outputShape),
       annotations: { title: "Verify Reputation", ...READ_ANNOTATIONS },
     },
     handler<Args>(async (args) => {
-      const id = resolveAgentId(args.agent);
+      const id = resolveAgentId(args.agent, {
+        network: deps.config.network,
+        identity: deps.config.stellar.contracts.identity,
+      });
       if (id == null) {
         throw new ValidationError(`Could not resolve agent reference '${String(args.agent)}'.`);
       }
 
       const detail = (await deps.explorer.getAgent(id)).data;
       const declared = declaredReputation(detail);
-      const verification = await deps.verifier.verifyAgainst(id, declared, { skip: false });
+      const verification = await deps.verifier.verifyAgainst(id, declared, {
+        skip: false,
+        excludeClient: detail.owner,
+      });
 
       const ids = agentIds(deps.config, id);
       const declaredAvg = verification.declared.average;

@@ -7,10 +7,10 @@
  */
 
 import { z } from "zod";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import type { GetAgentsParams } from "../lib/explorer.js";
 import {
-  filterMpp,
+  canonicalTrust,
   handler,
   rankAndVerify,
   summarizeRanked,
@@ -22,16 +22,16 @@ import {
   VERIFY_TOP_K,
   type ToolDeps,
 } from "./shared.js";
-import { zRankedAgent } from "./schemas.js";
+import { zDiscoveryCoverage, zRankedAgent } from "./schemas.js";
 
 const POOL_PAGE_SIZE = 50;
 const POOL_PAGES = 3;
 
 const inputShape = {
   limit: zLimit(10, 50),
-  x402: z.boolean().optional(),
-  mpp: z.boolean().optional().describe("Filtered client-side (no server-side MPP filter)."),
-  hasServices: z.boolean().optional(),
+  x402: z.literal(true).optional(),
+  mpp: z.literal(true).optional().describe("When present, require indexed MPP support."),
+  hasServices: z.literal(true).optional(),
   trust: zTrust.optional(),
   minScore: zMinScore.optional(),
   verify: z.boolean().default(false).describe("On-chain-verify the top results (slower)."),
@@ -42,6 +42,7 @@ type Args = z.infer<z.ZodObject<typeof inputShape>>;
 const outputShape = {
   count: z.number(),
   agents: z.array(zRankedAgent),
+  coverage: zDiscoveryCoverage,
 };
 
 export function registerLeaderboard(server: McpServer, deps: ToolDeps): void {
@@ -50,11 +51,12 @@ export function registerLeaderboard(server: McpServer, deps: ToolDeps): void {
     {
       title: "Leaderboard",
       description:
-        "Top-ranked agents overall (or within an x402/mpp/trust/minScore filter), by the 3-axis " +
+        "Top-ranked agents in a bounded registry scan (or filter), by the 3-axis " +
         "engine, with per-axis `breakdown`. On-chain verification of the top rows is optional. " +
-        "Self-declared text lives in each row's labeled `selfDeclared` slot.",
-      inputSchema: inputShape,
-      outputSchema: outputShape,
+        "Coverage states whether the scan exhausted the filtered set; self-declared text lives in " +
+        "each row's labeled `selfDeclared` slot.",
+      inputSchema: z.object(inputShape),
+      outputSchema: z.object(outputShape),
       annotations: { title: "Leaderboard", ...READ_ANNOTATIONS },
     },
     handler<Args>(async (args) => {
@@ -62,14 +64,17 @@ export function registerLeaderboard(server: McpServer, deps: ToolDeps): void {
         limit: POOL_PAGE_SIZE,
       };
       if (args.x402 !== undefined) filters.x402 = args.x402;
+      if (args.mpp !== undefined) filters.mpp = args.mpp;
       if (args.hasServices !== undefined) filters.hasServices = args.hasServices;
-      if (args.trust !== undefined) filters.trust = args.trust;
+      if (args.trust !== undefined) filters.trust = canonicalTrust(args.trust);
       if (args.minScore !== undefined) filters.minScore = args.minScore;
 
-      let pool = await deps.explorer.findAgents("", { filters, pages: POOL_PAGES });
-      if (args.mpp) pool = await filterMpp(deps, pool);
+      const discovery = await deps.explorer.findAgentsWithCoverage("", {
+        filters,
+        pages: POOL_PAGES,
+      });
 
-      const rows = await rankAndVerify(deps, pool, {
+      const rows = await rankAndVerify(deps, discovery.agents, {
         weights: deps.config.weights,
         sortBy: "score",
         verify: args.verify,
@@ -78,7 +83,11 @@ export function registerLeaderboard(server: McpServer, deps: ToolDeps): void {
         includeBreakdown: true,
       });
 
-      return toolResult(summarizeRanked(rows), { count: rows.length, agents: rows });
+      return toolResult(summarizeRanked(rows), {
+        count: rows.length,
+        agents: rows,
+        coverage: discovery.coverage,
+      });
     }),
   );
 }

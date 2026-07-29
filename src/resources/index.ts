@@ -13,7 +13,7 @@
  *   - stellar8004://health       — per-registry indexer staleness
  * Templates (RFC-6570):
  *   - stellar8004://agent/{id}              — full AgentProfile
- *   - stellar8004://agent/{id}/card         — A2A AgentCard projection
+ *   - stellar8004://agent/{id}/card         — unverified derived A2A-shaped projection
  *   - stellar8004://agent/{id}/feedback     — reviews (declared/verified split)
  *   - stellar8004://agent/{id}/reputation   — declared-vs-on-chain diff
  *   - stellar8004://owner/{address}         — agents under an owner G-address
@@ -30,7 +30,7 @@
 import {
   McpServer,
   ResourceTemplate,
-} from "@modelcontextprotocol/sdk/server/mcp.js";
+} from "@modelcontextprotocol/server";
 import type { AgentResponse, FeedbackResponse } from "@trionlabs/stellar8004";
 import type { Config } from "../config.js";
 import type {
@@ -39,15 +39,16 @@ import type {
   Capabilities,
   DeclaredReputation,
 } from "../types.js";
-import { ExplorerService } from "../lib/explorer.js";
+import { ExplorerService, type DiscoveryCoverage } from "../lib/explorer.js";
 import { ReputationVerifier } from "../lib/reputation.js";
 import { toAgentCard } from "../lib/agentcard.js";
 import { scoreAgent, roundRankResult } from "../lib/ranking.js";
+import { buildRegistryStatsView } from "../lib/registry-stats.js";
 import {
   buildStellarId,
   buildCaip2Id,
+  isValidOwnerAddress,
   validWalletOrNull,
-  G_ADDRESS_RE,
 } from "../lib/identifier.js";
 import {
   CAPS,
@@ -147,7 +148,9 @@ async function buildProfile(deps: ResourceDeps, id: number): Promise<AgentProfil
   const caps = deriveCapabilities(agent);
   const supportedTrust = caps.supportedTrust;
 
-  const verification = await verifier.verifyAgainst(id, declared);
+  const verification = await verifier.verifyAgainst(id, declared, {
+    excludeClient: agent.owner,
+  });
 
   const rank = scoreAgent(
     {
@@ -299,15 +302,28 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
         explorer.getStats(),
         explorer.health(),
       ]);
-      const stats = statsRes.data;
+      const stats = buildRegistryStatsView(statsRes.data, config.network);
       const health = healthRes.data;
       const contracts = config.stellar.contracts;
+      const mppSummary = stats.agentsWithMpp === null ? safe("not returned") : stats.agentsWithMpp;
+      const rpc = {
+        source: config.rpcUrl === config.stellar.rpcUrl ? "network-default" : "operator-override",
+        transport: (() => {
+          try {
+            return new URL(config.rpcUrl).protocol.replace(/:$/, "");
+          } catch {
+            return "invalid";
+          }
+        })(),
+      };
 
       const json = {
         network: config.network,
         contracts,
         explorerBaseUrl: config.explorerBaseUrl,
-        rpcUrl: config.rpcUrl,
+        // Never expose a full operator URL: hosted RPC credentials are commonly
+        // carried in a path/query/tenant hostname. Consumers only need provenance.
+        rpc,
         stats,
         health,
       };
@@ -318,8 +334,9 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
         serverText`- Reputation: \`${safe(contracts.reputation)}\``,
         serverText`- Validation: \`${safe(contracts.validation)}\``,
         serverText`- totalAgents: ${stats.totalAgents} · totalFeedbacks: ${stats.totalFeedbacks} · totalValidations: ${stats.totalValidations}`,
-        serverText`- uniqueClients: ${stats.totalUniqueClients} · avgFeedbackScore: ${stats.averageFeedbackScore}`,
-        serverText`- withServices: ${stats.agentsWithServices} · withX402: ${stats.agentsWithX402}`,
+        serverText`- sampled per-agent unique-client sum: ${stats.totalUniqueClients} · sampled unweighted per-agent avgFeedbackScore: ${stats.averageFeedbackScore}`,
+        serverText`- sample cap: ${stats.coverage.sampleCapAgents} agents · distributionsGlobalExact=${stats.coverage.distributionsGlobalExact} · snapshotConsistent=${stats.coverage.snapshotConsistent}`,
+        serverText`- withServices: ${stats.agentsWithServices} · withX402: ${stats.agentsWithX402} · withMPP: ${mppSummary}`,
         serverText`- trust: reputation=${stats.trustDistribution.reputation} · validation=${stats.trustDistribution.validation} · tee=${stats.trustDistribution.tee}`,
         serverText`- indexer stale: identity=${health.indexer.identity.stale} · reputation=${health.indexer.reputation.stale} · validation=${health.indexer.validation.stale}`,
       ].join("\n");
@@ -335,20 +352,22 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
     {
       title: "Stellar 8004 Leaderboard",
       description:
-        "Top agents ranked client-side by the 3-axis score (declared-only snapshot; pin the best agents right now).",
+        "Top agents in a bounded scan, ranked client-side by the 3-axis score (declared-only snapshot with coverage).",
       mimeType: JSON_MIME,
       annotations: { audience: ["user", "assistant"], priority: 0.8 },
     },
     async () => {
-      const rows = await computeLeaderboard(deps);
+      const { rows, coverage } = await computeLeaderboard(deps);
       const json = {
         network: config.network,
-        note: "Ranked client-side (explorer has no server-side score sort). Declared-only; open stellar8004://agent/{id} for on-chain-verified detail.",
+        note: "Ranked client-side over a bounded scan (explorer has no server-side score sort). Inspect coverage before treating it as global. Declared-only; open stellar8004://agent/{id} for bounded on-chain field checks.",
         count: rows.length,
         agents: rows,
+        coverage,
       };
       const md = [
         serverText`## Leaderboard — top ${rows.length} (declared-only)`,
+        serverText`- coverageComplete=${coverage.coverageComplete} · pagesScanned=${coverage.pagesScanned} · recordsScanned=${coverage.recordsScanned}`,
         ...rows.map(
           (row, i) =>
             serverText`${i + 1}. Agent #${row.id} — ${row.score100}/100 · fc ${row.feedbackCount} · clients ${row.uniqueClients} · x402=${row.x402} · \`${safe(row.stellarId)}\``,
@@ -392,7 +411,7 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
     {
       title: "Agent Profile",
       description:
-        "Full cross-registry AgentProfile (identity + declared/verified reputation + 3-axis rank + stellar:…#id).",
+        "Full AgentProfile (identity + declared/on-chain-checked reputation fields + 3-axis rank + stellar:…#id).",
       mimeType: JSON_MIME,
       annotations: { audience: ["user", "assistant"] },
     },
@@ -403,7 +422,7 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
     },
   );
 
-  // --- template: agent/{id}/card (A2A AgentCard) ---------------------------
+  // --- template: agent/{id}/card (unverified A2A-shaped projection) --------
   server.registerResource(
     "agent-card",
     new ResourceTemplate("stellar8004://agent/{id}/card", {
@@ -411,9 +430,10 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
       complete: { id: makeIdCompleter(deps) },
     }),
     {
-      title: "Agent Card (A2A)",
+      title: "Derived A2A Projection (Unverified)",
       description:
-        "Portable A2A AgentCard projection with an x-stellar8004 verified extension.",
+        "Unverified A2A-shaped projection from indexed registry metadata; not an agent-published " +
+        "AgentCard and not proof of protocol conformance or endpoint ownership.",
       mimeType: JSON_MIME,
       annotations: { audience: ["user", "assistant"] },
     },
@@ -422,17 +442,33 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
       const profile = await buildProfile(deps, id);
       const card = toAgentCard(profile);
       const ext = card["x-stellar8004"];
+      const declared = card.selfDeclared;
       const md = [
-        serverText`## A2A Agent Card — Agent #${ext.agentId}`,
+        serverText`## Derived A2A-shaped projection — Agent #${ext.agentId}`,
+        serverText`- conformance: ${safe(card.conformance)} · A2A document fetched: ${card.provenance.a2aDocumentFetched} · endpoint ownership verified: ${card.provenance.endpointOwnershipVerified}`,
         serverText`- stellarId: \`${safe(ext.stellarId)}\` · network: ${safe(ext.network)}`,
-        serverText`- verified: ${ext.verified} (${safe(ext.verificationStatus)}) · x402=${ext.capabilities.x402} · mpp=${ext.capabilities.mpp}`,
-        serverText`- reputation: declaredAvg=${ext.reputation.declaredAverage} · verifiedAvg=${ext.reputation.verifiedAverage} · feedback=${ext.reputation.feedbackCount} · clients=${ext.reputation.uniqueClients}`,
-        serverText`- skills (self-declared): ${card.skills.length}`,
+        serverText`- reputation check: ${safe(ext.verificationStatus)} · fullyVerified=${ext.verified} · scope=${safe(ext.verificationScope)}`,
+        serverText`- declared capabilities (unverified): x402=${declared.capabilities.x402} · mpp=${declared.capabilities.mpp}`,
+        serverText`- reputation: declaredAvg=${
+          ext.reputation.declaredAverage == null ? safe("n/a") : ext.reputation.declaredAverage
+        } · onchainAvg=${
+          ext.reputation.onchainAverage == null ? safe("n/a") : ext.reputation.onchainAverage
+        } · declaredFeedback=${ext.reputation.declaredFeedbackCount} · onchainFeedback=${
+          ext.reputation.onchainFeedbackCount == null
+            ? safe("n/a")
+            : ext.reputation.onchainFeedbackCount
+        } · declaredClients=${ext.reputation.declaredUniqueClients} (not contract-verified)`,
+        serverText`- A2A skills promoted: ${card.skills.length} · self-declared service candidates: ${declared.services.length}`,
         selfDeclaredBlock([
-          ["name", card.name || null],
-          ["description", card.description || null],
-          ...card.skills.map(
-            (s) => ["skill", `${s.name}${s.description ? " — " + s.description : ""}`] as [string, string],
+          ["name", declared.name],
+          ["description", declared.description],
+          ["agentUri candidate", declared.agentUri],
+          ...declared.services.map(
+            (s) =>
+              ["service candidate", `${s.name} @ ${s.endpoint}${s.description ? " — " + s.description : ""}`] as [
+                string,
+                string,
+              ],
           ),
         ]),
       ].join("\n");
@@ -510,7 +546,7 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
     }),
     {
       title: "Agents by Owner",
-      description: "All agents operated by a Stellar owner G-address.",
+      description: "First owner endpoint page (up to 20 agents), with pagination coverage.",
       mimeType: JSON_MIME,
       annotations: { audience: ["user", "assistant"] },
     },
@@ -540,9 +576,25 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
         };
       });
 
-      const json = { owner: address, network: config.network, count: rows.length, agents: rows };
+      const hasMore = res.meta?.pagination?.hasMore;
+      const paginationExhausted = hasMore === false;
+      const coverage = {
+        coverageComplete: paginationExhausted,
+        paginationExhausted,
+        snapshotConsistent: true,
+        pagesScanned: 1,
+        recordsScanned: rows.length,
+        ...(typeof hasMore === "boolean" ? { hasMore } : {}),
+      };
+      const json = {
+        owner: address,
+        network: config.network,
+        count: rows.length,
+        agents: rows,
+        coverage,
+      };
       const md = [
-        serverText`## Agents owned by \`${safe(address)}\` — ${rows.length} found`,
+        serverText`## Agents owned by \`${safe(address)}\` — ${rows.length} on first API page · coverageComplete=${coverage.coverageComplete}`,
         ...rows.map(
           (row) =>
             serverText`- Agent #${row.id} — fc ${row.scores.feedbackCount} · clients ${row.scores.uniqueClients} · x402=${row.x402} · \`${safe(row.stellarId)}\``,
@@ -569,11 +621,20 @@ interface LeaderboardRow {
   x402: boolean;
 }
 
+interface LeaderboardResult {
+  rows: LeaderboardRow[];
+  coverage: DiscoveryCoverage;
+}
+
 /** Declared-only 3-axis ranking over fetched pages (bounded, cheap). */
-async function computeLeaderboard(deps: ResourceDeps): Promise<LeaderboardRow[]> {
+async function computeLeaderboard(deps: ResourceDeps): Promise<LeaderboardResult> {
   const { config, explorer } = deps;
   const identity = config.stellar.contracts.identity;
-  const agents = await fetchAgentsPaged(explorer);
+  const discovery = await explorer.findAgentsWithCoverage("", {
+    filters: { limit: LIST_PAGE_LIMIT },
+    pages: MAX_LIST_PAGES,
+  });
+  const agents = discovery.agents;
 
   const scored = agents.map((a) => {
     const declared = declaredFrom(a);
@@ -600,21 +661,24 @@ async function computeLeaderboard(deps: ResourceDeps): Promise<LeaderboardRow[]>
     return x.a.id - y.a.id;
   });
 
-  return scored.slice(0, LEADERBOARD_N).map(({ a, declared, caps, result }) => ({
-    id: a.id,
-    stellarId: buildStellarId(config.network, identity, a.id),
-    score100: result.score100,
-    confidence: result.confidence,
-    feedbackCount: declared.feedbackCount,
-    uniqueClients: declared.uniqueClients,
-    x402: caps.x402,
-  }));
+  return {
+    rows: scored.slice(0, LEADERBOARD_N).map(({ a, declared, caps, result }) => ({
+      id: a.id,
+      stellarId: buildStellarId(config.network, identity, a.id),
+      score100: result.score100,
+      confidence: result.confidence,
+      feedbackCount: declared.feedbackCount,
+      uniqueClients: declared.uniqueClients,
+      x402: caps.x402,
+    })),
+    coverage: discovery.coverage,
+  };
 }
 
 /** Top-N agents surfaced as concrete `stellar8004://agent/{id}` resources. */
 async function listTopAgentResources(deps: ResourceDeps) {
   try {
-    const rows = await computeLeaderboard(deps);
+    const { rows } = await computeLeaderboard(deps);
     return rows.map((row) => ({
       uri: `${SCHEME}agent/${row.id}`,
       name: `agent-${row.id}`,
@@ -712,8 +776,10 @@ function parseIdVar(v: string | string[] | undefined): number {
 
 function parseAddressVar(v: string | string[] | undefined): string {
   const raw = firstVar(v).trim();
-  if (!G_ADDRESS_RE.test(raw)) {
-    throw new Error(`Invalid owner address in resource URI: '${raw}' (expected a Stellar G-address)`);
+  if (!isValidOwnerAddress(raw)) {
+    throw new Error(
+      `Invalid owner address in resource URI: '${raw}' (expected a checksum-valid Stellar G-address)`,
+    );
   }
   return raw;
 }

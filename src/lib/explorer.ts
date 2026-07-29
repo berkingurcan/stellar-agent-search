@@ -31,8 +31,9 @@ import {
 } from "@trionlabs/stellar8004";
 import type { Config } from "../config.js";
 import { systemClock, type Clock } from "./clock.js";
-import { classifyError } from "./errors.js";
+import { classifyError, ExplorerScopeError } from "./errors.js";
 import { log, type Logger } from "./logger.js";
+import { normalizeSearchText, unicodeTokens } from "./nlparse.js";
 
 // ---------------------------------------------------------------------------
 // TTL cache + single-flight (shared with reputation.ts)
@@ -127,16 +128,34 @@ const TTL = {
   health: 15_000,
 } as const;
 
-/** getAgents() parameters (mirrors the SDK client's supported filter set). */
-export type GetAgentsParams = Parameters<ExplorerClient["getAgents"]>[0];
+/**
+ * getAgents() parameters.
+ *
+ * The deployed explorer and the SDK source both support `mpp`, but the exact
+ * 0.0.11 declaration published to npm predates that field. The runtime client
+ * forwards every supplied parameter, so widen only this local boundary until a
+ * release containing the corrected declaration is consumed here.
+ */
+type SdkGetAgentsParams = NonNullable<Parameters<ExplorerClient["getAgents"]>[0]>;
+export type GetAgentsParams = SdkGetAgentsParams & { mpp?: boolean };
 /** getFeedback() parameters. */
 export type GetFeedbackParams = Parameters<ExplorerClient["getFeedback"]>[1];
 /** search() parameters. */
 export type SearchParams = Parameters<ExplorerClient["search"]>[1];
 
+/**
+ * The live explorer already returns `agentsWithMpp`, while the pinned 0.0.11
+ * SDK declaration predates that field. Keep the compatibility widening local
+ * to the read boundary; the presentation layer still validates the optional
+ * value before exposing it.
+ */
+export type ExplorerStatsResponse = StatsResponse & { agentsWithMpp?: number };
+
 export interface ExplorerServiceOptions {
   clock?: Clock;
   logger?: Logger;
+  /** Share an actor-neutral list/detail cache across request-scoped clients. */
+  cache?: TtlCache;
   /** Inject a pre-built client (tests) or a custom fetch. */
   client?: ExplorerClient;
   fetch?: typeof fetch;
@@ -151,13 +170,17 @@ export class ExplorerService {
   private readonly client: ExplorerClient;
   private readonly cache: TtlCache;
   private readonly logger: Logger;
+  private readonly expectedNetwork: Config["network"];
 
   constructor(cfg: Config, opts: ExplorerServiceOptions = {}) {
     this.logger = (opts.logger ?? log).child({ component: "explorer" });
-    this.cache = new TtlCache({
-      maxEntries: opts.maxCacheEntries ?? 500,
-      clock: opts.clock ?? systemClock,
-    });
+    this.cache =
+      opts.cache ??
+      new TtlCache({
+        maxEntries: opts.maxCacheEntries ?? 500,
+        clock: opts.clock ?? systemClock,
+      });
+    this.expectedNetwork = cfg.network;
     this.client =
       opts.client ??
       new ExplorerClient(cfg.explorerBaseUrl, {
@@ -171,12 +194,42 @@ export class ExplorerService {
    *  rethrow unchanged for the tool layer to map. */
   private async run<V>(key: string, ttl: TtlSpec<V>, loader: () => Promise<V>): Promise<V> {
     try {
-      return await this.cache.wrap(key, ttl, loader);
+      return await this.cache.wrap(key, ttl, async () => this.assertExplorerScope(await loader()));
     } catch (err) {
       const body = classifyError(err);
       this.logger.debug("explorer request failed", { key, errorCode: body.code });
       throw err;
     }
+  }
+
+  /** Never combine registry rows from one chain with handles/contracts from another. */
+  private assertExplorerScope<V>(value: V): V {
+    if (typeof value !== "object" || value === null) {
+      throw new ExplorerScopeError("Explorer response has no verifiable chain/network metadata");
+    }
+    const meta = Reflect.get(value, "meta");
+    if (typeof meta !== "object" || meta === null) {
+      throw new ExplorerScopeError("Explorer response has no verifiable chain/network metadata");
+    }
+    const chain = Reflect.get(meta, "chain");
+    const rawNetwork = Reflect.get(meta, "network");
+    const actualNetwork =
+      typeof rawNetwork === "string" && rawNetwork.toLowerCase() === "pubnet"
+        ? "mainnet"
+        : typeof rawNetwork === "string"
+          ? rawNetwork.toLowerCase()
+          : "";
+    if (typeof chain !== "string" || chain.toLowerCase() !== "stellar") {
+      throw new ExplorerScopeError(
+        `Explorer chain '${String(chain)}' does not match required chain 'stellar'`,
+      );
+    }
+    if (actualNetwork !== this.expectedNetwork) {
+      throw new ExplorerScopeError(
+        `Explorer network '${String(rawNetwork)}' does not match configured network '${this.expectedNetwork}'`,
+      );
+    }
+    return value;
   }
 
   // --- passthrough (cached) reads --------------------------------------------
@@ -202,7 +255,7 @@ export class ExplorerService {
     );
   }
 
-  getStats(): Promise<ApiResponse<StatsResponse>> {
+  getStats(): Promise<ApiResponse<ExplorerStatsResponse>> {
     return this.run("stats", TTL.stats, () => this.client.getStats());
   }
 
@@ -229,20 +282,21 @@ export class ExplorerService {
    *
    * Empty/whitespace queries return the fetched page(s) unfiltered.
    */
-  async findAgents(
+  async findAgentsWithCoverage(
     query: string,
     opts: {
       filters?: Omit<NonNullable<GetAgentsParams>, "search" | "page">;
       match?: "all" | "any";
       pages?: number;
     } = {},
-  ): Promise<AgentResponse[]> {
+  ): Promise<FindAgentsResult> {
     const filters = opts.filters ?? {};
     const pages = Math.max(1, Math.min(opts.pages ?? 1, 10));
     const q = (query ?? "").trim();
 
     const collected: AgentResponse[] = [];
-    let moreAvailable = false;
+    let pagesScanned = 0;
+    let hasMore: boolean | undefined;
     for (let page = 1; page <= pages; page++) {
       // NOTE: we deliberately do NOT forward the free-text query to the explorer's
       // `search=` param. It substring-matches the raw stored name poorly — e.g.
@@ -252,43 +306,78 @@ export class ExplorerService {
       const params: GetAgentsParams = { ...filters, page };
       const res = await this.getAgents(params);
       const batch = res.data ?? [];
+      pagesScanned++;
       collected.push(...batch);
-      moreAvailable = Boolean(res.meta?.pagination?.hasMore) && batch.length > 0;
-      // Stop early when the explorer signals no more pages.
-      if (!moreAvailable) break;
+      const reportedHasMore = res.meta?.pagination?.hasMore;
+      hasMore = typeof reportedHasMore === "boolean" ? reportedHasMore : undefined;
+      // Stop when the explorer explicitly reports completion, or when an empty
+      // page makes further progress impossible. An empty page with hasMore=true
+      // remains incomplete in the coverage result below.
+      if (hasMore === false || batch.length === 0) break;
     }
     // Legibility for the known scale limit: because there is no server-side text
     // filter, we only ever inspect the first `pages` pages in the explorer's
     // default order. If more pages exist, a matching agent past this window is
     // NOT seen — surface it rather than silently under-returning.
-    if (moreAvailable) {
+    if (hasMore === true) {
       this.logger.debug("findAgents fetch window exhausted; more pages available (unscanned)", {
-        pages,
+        pages: pagesScanned,
         scanned: collected.length,
       });
     }
+
+    const paginationExhausted = hasMore === false;
+    // Offset pages are separate HTTP snapshots. Inserts/updates between page
+    // reads can shift boundaries and omit a row even when the final page says
+    // hasMore=false. Only a one-request exhaustion is snapshot-complete until
+    // the upstream v2 API supplies a revision-bound cursor.
+    const snapshotConsistent = pagesScanned === 1;
+    // The v1 Explorer preselects at most 500 ids for minScore before it paginates.
+    // hasMore=false therefore proves only that the capped qualifier set ended,
+    // not that every matching registry row was visible.
+    const qualifierMayBeCapped = typeof filters.minScore === "number" && filters.minScore > 0;
+    const coverage: DiscoveryCoverage = {
+      coverageComplete: paginationExhausted && snapshotConsistent && !qualifierMayBeCapped,
+      paginationExhausted,
+      snapshotConsistent,
+      pagesScanned,
+      recordsScanned: collected.length,
+      ...(hasMore !== undefined ? { hasMore } : {}),
+      ...(qualifierMayBeCapped ? { limitations: ["v1-minScore-qualifier-cap-500"] } : {}),
+    };
 
     // De-dupe by id (pages can overlap under concurrent indexer writes).
     const byId = new Map<number, AgentResponse>();
     for (const a of collected) if (!byId.has(a.id)) byId.set(a.id, a);
     const agents = [...byId.values()];
 
-    if (!q) return agents;
+    if (!q) return { agents, coverage };
 
     const tokens = tokenize(q);
-    if (tokens.length === 0) return agents;
+    if (tokens.length === 0) {
+      return {
+        agents: [],
+        coverage: {
+          ...coverage,
+          coverageComplete: false,
+          limitations: [...(coverage.limitations ?? []), "query-no-search-tokens"],
+        },
+      };
+    }
     const mode = opts.match ?? "all";
     // Keep 2-char stems (ai/ml/os/db/3d/io): dropping them made match:"all" stop
     // REQUIRING those tokens, so "ai agent" wrongly matched "Payment Agent".
     // tokenize() already floors at length 2, and stem() leaves short tokens as-is.
     const stems = tokens.map(stem).filter((s) => s.length >= 2);
-    const qLower = q.toLowerCase();
+    const qLower = normalizeSearchText(q);
 
     const matchesAgent = (a: AgentResponse, requireAll: boolean): boolean => {
       const svcText = (a.services ?? [])
         .map((s) => `${s?.name ?? ""} ${s?.endpoint ?? ""}`)
         .join(" ");
-      const haystack = `${a.name ?? ""} ${a.description ?? ""} ${svcText}`.toLowerCase();
+      const haystack = normalizeSearchText(
+        `${a.name ?? ""} ${a.description ?? ""} ${svcText}`,
+      );
       // Whole-query substring is always a match.
       if (haystack.includes(qLower)) return true;
       if (stems.length === 0) return false;
@@ -301,17 +390,46 @@ export class ExplorerService {
     // Strict (all tokens) first; if that empties the set, relax to any-token so a
     // multi-word query still surfaces the closest agents rather than nothing.
     const strict = agents.filter((a) => matchesAgent(a, mode === "all"));
-    if (strict.length > 0 || mode === "any") return strict;
-    return agents.filter((a) => matchesAgent(a, false));
+    if (strict.length > 0 || mode === "any") return { agents: strict, coverage };
+    return { agents: agents.filter((a) => matchesAgent(a, false)), coverage };
   }
+
+  /** Backward-compatible discovery helper for callers that only need rows. */
+  async findAgents(
+    query: string,
+    opts: {
+      filters?: Omit<NonNullable<GetAgentsParams>, "search" | "page">;
+      match?: "all" | "any";
+      pages?: number;
+    } = {},
+  ): Promise<AgentResponse[]> {
+    return (await this.findAgentsWithCoverage(query, opts)).agents;
+  }
+}
+
+/** Honest description of how much of the filtered explorer set was inspected. */
+export interface DiscoveryCoverage {
+  coverageComplete: boolean;
+  /** The final observed page explicitly reported `hasMore=false`. */
+  paginationExhausted: boolean;
+  /** True only when the window came from one response or a revision-bound cursor. */
+  snapshotConsistent: boolean;
+  pagesScanned: number;
+  recordsScanned: number;
+  /** Present only when pagination metadata lets the explorer derive it. */
+  hasMore?: boolean;
+  /** Known upstream conditions that prevent a completeness claim. */
+  limitations?: string[];
+}
+
+export interface FindAgentsResult {
+  agents: AgentResponse[];
+  coverage: DiscoveryCoverage;
 }
 
 /** Lowercase word tokens (length ≥ 2) for client-side substring filtering. */
 function tokenize(query: string): string[] {
-  return query
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((t) => t.length >= 2);
+  return unicodeTokens(query).filter((t) => t.length >= 2);
 }
 
 /**

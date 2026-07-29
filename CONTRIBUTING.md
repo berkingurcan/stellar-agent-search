@@ -15,7 +15,7 @@ npm test           # vitest
 npm run typecheck  # tsc --noEmit
 ```
 
-Requires **Node.js ≥ 18**. No API keys, no wallet, no `.env` needed — the defaults read Stellar **mainnet**.
+Requires **Node.js ≥ 20**. No API keys, no wallet, no `.env` needed — the defaults read Stellar **mainnet**.
 
 Try it end to end without installing anything into a client:
 
@@ -107,14 +107,18 @@ fixing a bug, add the failing case first — `test/fixes.test.ts` collects regre
 - Conventional-commit prefixes: `feat:`, `fix:`, `docs:`, `test:`, `chore:`, `refactor:`.
 - One logical change per PR; explain **why**, not just what.
 - Before pushing: `npm run typecheck && npm test && npm run build`.
-- CI runs the matrix Node 18/20/22 × ubuntu/macOS plus a `npm pack --dry-run`. Green CI is required to merge.
+- CI runs the matrix Node 20/22/24 × ubuntu/macOS plus a `npm pack --dry-run`; the Worker gets a separate
+  Node 22 typecheck/test/bundle audit. Green CI is required to merge.
 - User-visible changes get a `CHANGELOG.md` entry under `## Unreleased`.
 
 ## Releasing
 
-Releases are tag-driven. Pushing a `v*` tag runs `.github/workflows/publish.yml`, which publishes to npm via
-**Trusted Publishing** (OIDC — no long-lived token, provenance attached automatically) and then publishes
-`server.json` to the official MCP Registry.
+Releases are tag-driven. Pushing a `v*` tag runs `.github/workflows/publish.yml`, but only when the tagged commit
+is already on `main`. The job repeats typecheck, tests, build, package/manifest validation, and an isolated
+tarball-consumer install before it publishes to npm via **Trusted Publishing** (OIDC — no long-lived token).
+It verifies the resulting npm tarball and SLSA provenance before publishing `server.json` to the official MCP
+Registry. Exact-version checks make a rerun resumable without treating an unrelated package or immutable
+registry record as ours.
 
 ```bash
 npm version patch    # or minor / major — updates package.json and tags
@@ -131,17 +135,30 @@ The tag-driven path needs two things that only exist after a first publish:
 
 1. **The repository must be public.** npm provenance is generated from a public source, and the MCP Registry's
    GitHub OIDC login expects a public repository.
-2. **A Trusted Publisher must be configured on npmjs.com** for the `stellar-agent-mcp` package, pointing at this
-   repository and `.github/workflows/publish.yml`. That configuration requires the package name to exist, so the
-   very first publish is manual:
+2. **Reserve the name with a non-install-default bootstrap version.** Trusted Publisher configuration requires
+   the package to exist. In a disposable clean copy of the tagged source, change only `package.json` to `0.0.0`,
+   build and inspect the tarball, then publish it under a non-`latest` dist-tag:
 
    ```bash
    npm login
-   npm publish --access public
+   npm version 0.0.0 --no-git-tag-version
+   npm ci
+   npm run typecheck
+   npm test
+   npm pack --dry-run
+   npm publish --access public --tag bootstrap
    ```
 
-   Then add the Trusted Publisher in the package settings on npmjs.com. Every release after that is just a tag
-   push — no token, provenance attached automatically.
+   Do not publish `0.1.0` manually: that release must come from OIDC so it has verifiable provenance.
+3. **Configure npm Trusted Publishing.** In the package settings, select GitHub Actions, repository
+   `berkingurcan/stellar-agent-mcp`, and workflow filename **`publish.yml`** (the npm field takes the filename,
+   not `.github/workflows/publish.yml`). Restrict token publishing after the OIDC path succeeds.
+4. **Set the repository Actions variable `NPM_PACKAGE_OWNERS`.** Its comma-separated value must be the exact
+   npm maintainer allowlist (usually the one account that performed the bootstrap). The workflow refuses both
+   a missing variable and an unexpected extra owner.
+
+Then create/push `v0.1.0` from a green commit already on `main`. The workflow publishes the exact tarball it
+tested, verifies its registry integrity and GitHub provenance, and only then attempts the MCP Registry record.
 
 ## Reporting security issues
 

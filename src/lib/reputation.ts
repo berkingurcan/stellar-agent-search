@@ -1,6 +1,6 @@
 /**
  * reputation.ts — ReputationVerifier: trust-minimized, on-chain re-derivation
- * of an agent's reputation and a declared-vs-verified diff (the headline edge).
+ * of an agent's reputation and a field-scoped declared-vs-on-chain diff.
  *
  * This is READ-ONLY. It uses the generated contract spec on a fetch-only SDK
  * build (see `soroban.ts` for why), which
@@ -10,8 +10,8 @@
  * simulation origin. (modules/01 §2.4.2 + §3.4.)
  *
  * Flow per agent:
- *   1. get_clients_paginated(agent_id, start, limit) → paginate the full client
- *      set (bounded by a hard cap to keep cost predictable).
+ *   1. get_clients_paginated(agent_id, start, limit) → prove that the client
+ *      set is small enough for the contract's five-client summary cap.
  *   2. get_summary(agent_id, client_addresses, "", "") → WAD-normalized average
  *      across those clients: average = summary_value / 10^summary_value_decimals.
  *   3. diff vs the explorer's DECLARED {average, feedbackCount, uniqueClients}
@@ -57,9 +57,17 @@ import { TtlCache } from "./explorer.js";
  * required. Reads never sign, so the fabricated account is never a problem.
  */
 
-/** Client-set pagination page size and hard cap (bounds get_summary cost). */
-const CLIENTS_PAGE = 100;
-const CLIENTS_HARD_CAP = 1_000;
+/**
+ * Canonical contract `get_summary` silently processes at most five supplied
+ * clients (`MAX_SUMMARY_CLIENTS = 5`). Until the contract exposes a maintained
+ * full aggregate, only a complete comparable set of <=5 reviewers can be
+ * truthfully re-derived.
+ */
+const SUMMARY_CLIENT_CAP = 5;
+// Read one extra address so exactly six can be distinguished in one page. The
+// indexer excludes owner self-feedback while the contract does not, so six raw
+// clients can still mean five comparable clients after removing the owner.
+const CLIENT_SCAN_PAGE = SUMMARY_CLIENT_CAP + 1;
 
 /** Cache TTLs (ms): verified values live ~10 min; degraded results retry sooner. */
 const TTL_OK = 600_000;
@@ -69,14 +77,17 @@ const TTL_NEGATIVE = 60_000;
 export interface VerifyTolerance {
   /** Max |declared − on-chain| average delta, AFTER precision-normalization. */
   average: number;
-  /** Max |declared − on-chain| unique-client delta. */
-  uniqueClients: number;
+  /** Max explorer-vs-contract feedback count delta. */
+  feedbackCount: number;
 }
 // Tolerances stay TIGHT (0.5): the integer-vs-fractional average representation
 // gap is neutralized precisely at compare time (see verifyAgainst) rather than by
 // globally loosening the mismatch threshold — a loose absolute constant both masks
 // sub-point inflation and scales wrong when RANK_SCORE_MAX is not 100.
-export const DEFAULT_TOLERANCE: VerifyTolerance = { average: 0.5, uniqueClients: 1 };
+export const DEFAULT_TOLERANCE: VerifyTolerance = {
+  average: 0.5,
+  feedbackCount: 1,
+};
 
 /** Why an on-chain read produced no trustworthy value — see {@link ReputationVerifier.probe}. */
 export type VerifyFailure =
@@ -91,14 +102,23 @@ export type VerifyProbe =
   | { ok: true; value: OnchainReputation }
   | { ok: false; reason: VerifyFailure; detail?: string };
 
+/** Cached together so a reused chain read never masquerades as freshly checked. */
+interface VerificationSnapshot {
+  value: OnchainReputation | null;
+  checkedAt: string;
+  failure?: VerifyFailure;
+}
+
 export interface ReputationVerifierOptions {
   clock?: Clock;
   logger?: Logger;
+  /** Share actor-neutral Soroban read results across request-scoped verifiers. */
+  cache?: TtlCache;
   /** Inject a pre-built binding (tests). */
   client?: ReputationReadClient;
   /**
-   * Read-simulation source G-address. Falls back to RANK_SIM_SOURCE; if neither
-   * is set, publicKey is omitted so the SDK simulates from its fabricated
+   * Read-simulation source G-address. Falls back to config.simSource (loaded
+   * from RANK_SIM_SOURCE); if neither is set, publicKey is omitted so the SDK simulates from its fabricated
    * NULL_ACCOUNT with no getAccount lookup (the default — no funded account
    * needed). Only provide this to force a specific funded source.
    */
@@ -113,15 +133,15 @@ export class ReputationVerifier {
   private readonly clock: Clock;
   private readonly logger: Logger;
   private readonly enabled: boolean;
-  private readonly scoreMax: number;
   private readonly tolerance: VerifyTolerance;
 
   constructor(cfg: Config, opts: ReputationVerifierOptions = {}) {
     this.clock = opts.clock ?? systemClock;
     this.logger = (opts.logger ?? log).child({ component: "reputation" });
-    this.cache = new TtlCache({ maxEntries: opts.maxCacheEntries ?? 200, clock: this.clock });
+    this.cache =
+      opts.cache ??
+      new TtlCache({ maxEntries: opts.maxCacheEntries ?? 200, clock: this.clock });
     this.enabled = cfg.verifyOnchain;
-    this.scoreMax = cfg.scoreMax;
     this.tolerance = { ...DEFAULT_TOLERANCE, ...opts.tolerance };
 
     if (!this.enabled) {
@@ -132,7 +152,7 @@ export class ReputationVerifier {
       // Only pass a publicKey when the operator explicitly provides a funded
       // source; otherwise omit it so the SDK uses its fabricated NULL_ACCOUNT and
       // skips the getAccount() lookup that would otherwise fail on public RPCs.
-      const simSource = opts.simSource ?? process.env.RANK_SIM_SOURCE?.trim();
+      const simSource = opts.simSource ?? cfg.simSource;
       this.client = createReputationReadClient(cfg, { ...(simSource ? { simSource } : {}) });
     }
   }
@@ -150,10 +170,26 @@ export class ReputationVerifier {
    */
   async verify(agentId: number): Promise<OnchainReputation | null> {
     if (!this.isEnabled) return null;
-    return this.cache.wrap<OnchainReputation | null>(
-      `rep:${agentId}`,
-      (value) => (value == null ? TTL_NEGATIVE : TTL_OK),
-      () => this.deriveOnchain(agentId),
+    return (await this.verificationSnapshot(agentId)).value;
+  }
+
+  /** Return the value and the time the underlying read actually ran. */
+  private verificationSnapshot(
+    agentId: number,
+    excludeClient?: string,
+  ): Promise<VerificationSnapshot> {
+    const exclusionKey = excludeClient?.trim() || "none";
+    return this.cache.wrap<VerificationSnapshot>(
+      `rep:${agentId}:exclude:${exclusionKey}`,
+      (snapshot) => (snapshot.value == null ? TTL_NEGATIVE : TTL_OK),
+      async () => {
+        const probe = await this.probe(agentId, { excludeClient });
+        return {
+          value: probe.ok ? probe.value : null,
+          checkedAt: this.clock.nowIso(),
+          ...(probe.ok ? {} : { failure: probe.reason }),
+        };
+      },
     );
   }
 
@@ -166,18 +202,21 @@ export class ReputationVerifier {
    * that turns a broken setup into a green check. Uncached, so a probe always
    * reflects reality now.
    */
-  async probe(agentId: number): Promise<VerifyProbe> {
+  async probe(
+    agentId: number,
+    opts: { excludeClient?: string } = {},
+  ): Promise<VerifyProbe> {
     if (!this.isEnabled) return { ok: false, reason: "disabled" };
     const client = this.client!;
     try {
-      const { clients, truncated } = await this.allClients(agentId);
+      const { clients, truncated } = await this.allClients(agentId, opts.excludeClient);
       if (truncated) {
         // Cannot fully account for the client set → don't risk a false mismatch.
         this.logger.debug("client set truncated; degrading to unavailable", { agentId });
         return { ok: false, reason: "truncated" };
       }
       if (clients.length === 0) {
-        return { ok: true, value: { average: 0, count: 0, uniqueClients: 0 } };
+        return { ok: true, value: { average: 0, count: 0, uniqueClients: null } };
       }
 
       const tx = await client.get_summary({
@@ -201,7 +240,7 @@ export class ReputationVerifier {
 
       return {
         ok: true,
-        value: { average, count: Number(summary.count), uniqueClients: clients.length },
+        value: { average, count: Number(summary.count), uniqueClients: null },
       };
     } catch (err) {
       const body = classifyError(err);
@@ -213,91 +252,126 @@ export class ReputationVerifier {
     }
   }
 
-  private async deriveOnchain(agentId: number): Promise<OnchainReputation | null> {
-    const probe = await this.probe(agentId);
-    return probe.ok ? probe.value : null;
-  }
-
-  /** Paginate get_clients_paginated. `truncated` = hit the hard cap without
-   *  reaching the end (client set too large to fully verify cheaply). */
-  private async allClients(agentId: number): Promise<{ clients: string[]; truncated: boolean }> {
+  /**
+   * Read a bounded client set compatible with `get_summary`'s five-client cap.
+   *
+   * The canonical indexed score excludes owner self-feedback. The reputation
+   * contract stores that client and includes it unless the caller removes it,
+   * so comparison callers pass the owner as `excludeClient`. We scan six raw
+   * clients: an exact six-client set remains comparable when one is the owner.
+   * A seventh raw client necessarily leaves at least six after one exclusion,
+   * so the result must degrade closed.
+   */
+  private async allClients(
+    agentId: number,
+    excludeClient?: string,
+  ): Promise<{ clients: string[]; truncated: boolean }> {
     const client = this.client!;
-    const out: string[] = [];
-    // `<=` so we make one probe fetch AT the cap boundary: an agent with exactly
-    // CLIENTS_HARD_CAP clients returns full pages up to the cap, then an empty
-    // page at `start == CLIENTS_HARD_CAP` proving the set is complete. Without the
-    // probe, exactly-cap client sets were wrongly flagged truncated → "unavailable".
-    for (let start = 0; start <= CLIENTS_HARD_CAP; start += CLIENTS_PAGE) {
-      const tx = await client.get_clients_paginated({
+    const firstTx = await client.get_clients_paginated({
+      agent_id: agentId,
+      start: 0,
+      limit: CLIENT_SCAN_PAGE,
+    });
+    const first = firstTx.result ?? [];
+    const raw = first.slice(0, CLIENT_SCAN_PAGE);
+
+    // A full first page needs one boundary probe. More than six raw clients can
+    // never fit the five-client summary after excluding at most one owner.
+    if (first.length >= CLIENT_SCAN_PAGE) {
+      const boundaryTx = await client.get_clients_paginated({
         agent_id: agentId,
-        start,
-        limit: CLIENTS_PAGE,
+        start: CLIENT_SCAN_PAGE,
+        limit: 1,
       });
-      const page = tx.result ?? [];
-      out.push(...page);
-      if (page.length < CLIENTS_PAGE) return { clients: out, truncated: false };
+      if ((boundaryTx.result ?? []).length > 0) {
+        return { clients: [], truncated: true };
+      }
     }
-    return { clients: out, truncated: true };
+
+    const excluded = excludeClient?.trim();
+    const comparable = excluded ? raw.filter((address) => address !== excluded) : raw;
+    if (comparable.length > SUMMARY_CLIENT_CAP) {
+      return { clients: [], truncated: true };
+    }
+    return { clients: comparable, truncated: false };
   }
 
   /**
-   * Convert a WAD-normalized on-chain value to the 0..scoreMax scale, keeping
-   * 3 decimals via bigint division (avoids Number precision loss on i128).
-   * Returns null for a nonsensical unit (likely a scale mismatch) so the caller
-   * degrades to "unavailable" instead of asserting a false "mismatch".
+   * Convert a WAD-normalized on-chain value to a signed decimal with three
+   * places, using bigint division before the Number boundary. Negative values
+   * are protocol-valid. Values whose milliscale integer is not exactly
+   * representable in JavaScript degrade closed instead of producing a rounded
+   * comparison that looks authoritative.
    */
   private wadToScale(value: bigint, decimals: number): number | null {
     if (!Number.isInteger(decimals) || decimals < 0 || decimals > 40) return null;
     const denom = 10n ** BigInt(decimals);
-    const scaled = Number((value * 1000n) / denom) / 1000;
+    const scaledMilli = (value * 1000n) / denom;
+    const maxSafe = BigInt(Number.MAX_SAFE_INTEGER);
+    if (scaledMilli > maxSafe || scaledMilli < -maxSafe) return null;
+    const scaled = Number(scaledMilli) / 1000;
     if (!Number.isFinite(scaled)) return null;
-    // On-chain average should sit on the declared 0..scoreMax scale. A value far
-    // outside that band signals a unit mismatch, not a real divergence.
-    if (scaled < -0.001 || scaled > this.scoreMax * 5) return null;
     return scaled;
   }
 
-  // --- declared-vs-verified diff --------------------------------------------
+  // --- declared-vs-on-chain diff --------------------------------------------
 
   /**
-   * Full verification for one agent against the explorer's DECLARED reputation.
+   * Bounded verification for one agent against the explorer's DECLARED reputation.
    * - `opts.skip` (or verification disabled) → status "skipped" (e.g. out of top-K).
    * - on-chain null → "unavailable".
-   * - within tolerance → "verified"; else "mismatch" (flag only, no penalty).
+   * - average/count within tolerance → "partial" because active uniqueClients
+   *   is not derivable from the contract's append-only client list.
    */
   async verifyAgainst(
     agentId: number,
     declared: DeclaredReputation,
-    opts: { skip?: boolean } = {},
+    opts: { skip?: boolean; excludeClient?: string } = {},
   ): Promise<VerificationResult> {
-    const checkedAt = this.clock.nowIso();
-
     if (!this.isEnabled || opts.skip) {
-      return { status: "skipped", declared, checkedAt };
+      return {
+        status: "skipped",
+        declared,
+        reason: !this.isEnabled ? "disabled" : "not-requested",
+        verifiedFields: [],
+        unverifiedFields: ["average", "feedbackCount", "uniqueClients"],
+        checkedAt: this.clock.nowIso(),
+      };
     }
 
-    const onchain = await this.verify(agentId);
+    const snapshot = await this.verificationSnapshot(agentId, opts.excludeClient);
+    const { value: onchain, checkedAt } = snapshot;
     if (onchain == null) {
-      return { status: "unavailable", declared, checkedAt };
+      return {
+        status: "unavailable",
+        declared,
+        reason: snapshot.failure ?? "rpc-error",
+        verifiedFields: [],
+        unverifiedFields: ["average", "feedbackCount", "uniqueClients"],
+        checkedAt,
+      };
     }
 
     const dCount = Math.abs(declared.feedbackCount - onchain.count);
-    const dUnique = Math.abs(declared.uniqueClients - onchain.uniqueClients);
+    const dUnique = null;
 
     // Nothing declared to verify: an agent with no declared reputation cannot be
     // "verified". A null declared average previously forced avgWithin=true, so an
     // unrated agent (declared null, on-chain empty) was wrongly reported
-    // "verified" and earned the +P_VERIFIED rank bonus. Distinguish the two real
+    // "verified". Distinguish the two real
     // cases instead: on-chain is also empty → "unavailable" (no signal either
     // side); on-chain HAS feedback the indexer doesn't → "mismatch".
     if (declared.average == null) {
       const chainEmpty =
-        onchain.average === 0 && onchain.count === 0 && onchain.uniqueClients === 0;
+        onchain.average === 0 && onchain.count === 0;
       return {
         status: chainEmpty ? "unavailable" : "mismatch",
         declared,
         verified: onchain,
         deltas: { average: 0, count: dCount, uniqueClients: dUnique },
+        reason: chainEmpty ? "no-reputation-signal" : "declared-onchain-diff",
+        verifiedFields: ["average", "feedbackCount"],
+        unverifiedFields: ["uniqueClients"],
         checkedAt,
       };
     }
@@ -306,37 +380,45 @@ export class ReputationVerifier {
     // commonly integer-scaled (the contract truncates the mean, decimals=0 → e.g.
     // 96) while the indexer reports a fractional mean (96.75). Comparing the raw
     // values would false-flag a healthy agent by up to <1.0. When the on-chain
-    // value is an integer, compare the declared value floored to that same integer
-    // precision (the fractional part is not independently verifiable against an
+    // value is an integer, compare the declared value truncated to that same integer
+    // precision (toward zero, matching Rust integer division). The fractional part is not independently verifiable against an
     // integer summary); otherwise compare directly. This keeps the tolerance TIGHT
     // and scale-independent while still catching a real ≥1-point divergence.
     const declaredForCmp = Number.isInteger(onchain.average)
-      ? Math.floor(declared.average)
+      ? Math.trunc(declared.average)
       : declared.average;
     const dAvg = Math.abs(declaredForCmp - onchain.average);
 
-    // Drive verified/mismatch off the AVERAGE (the reputation signal) and the
-    // UNIQUE-CLIENT count (both should agree). The on-chain `get_summary.count` has
-    // ambiguous semantics vs the indexer's per-feedback count (it aggregates over
-    // the CLIENT list), so a feedbackCount-vs-count mismatch is common on a healthy
-    // agent (e.g. Scrapper: 8 feedback / 4 clients). Report it as an informational
-    // delta only — never a mismatch trigger — to avoid false negatives.
+    // get_summary covers average + non-revoked feedback count. The contract's
+    // client-address list is append-only across revocations, so it cannot verify
+    // the indexer's active uniqueClients metric. A healthy comparison is partial
+    // and intentionally earns no full-verification ranking bonus.
     const avgWithin = dAvg <= this.tolerance.average;
-    const uniqueWithin = dUnique <= this.tolerance.uniqueClients;
-    const within = avgWithin && uniqueWithin;
+    const countWithin = dCount <= this.tolerance.feedbackCount;
+    const within = avgWithin && countWithin;
 
     return {
-      status: within ? "verified" : "mismatch",
+      status: within ? "partial" : "mismatch",
       declared,
       verified: onchain,
       deltas: { average: dAvg, count: dCount, uniqueClients: dUnique },
+      reason: within ? "unique-clients-not-contract-verifiable" : "declared-onchain-diff",
+      verifiedFields: ["average", "feedbackCount"],
+      unverifiedFields: ["uniqueClients"],
       checkedAt,
     };
   }
 
   /** Build a "skipped" result without any RPC (caller decided out of top-K). */
   skipped(declared: DeclaredReputation): VerificationResult {
-    return { status: "skipped", declared, checkedAt: this.clock.nowIso() };
+    return {
+      status: "skipped",
+      declared,
+      reason: "not-requested",
+      verifiedFields: [],
+      unverifiedFields: ["average", "feedbackCount", "uniqueClients"],
+      checkedAt: this.clock.nowIso(),
+    };
   }
 
   /** Test/utility: drop the verification cache. */

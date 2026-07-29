@@ -3,18 +3,25 @@
 [![CI](https://github.com/berkingurcan/stellar-agent-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/berkingurcan/stellar-agent-mcp/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/stellar-agent-mcp.svg)](https://www.npmjs.com/package/stellar-agent-mcp)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen.svg)](https://nodejs.org)
-[![MCP](https://img.shields.io/badge/MCP-1.30.0-6E56CF.svg)](https://modelcontextprotocol.io)
+[![Node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen.svg)](https://nodejs.org)
+[![MCP](https://img.shields.io/badge/MCP-SDK%20v2-6E56CF.svg)](https://modelcontextprotocol.io)
 
-> **The reference ERC-8004 + x402 trust loop that actually runs on mainnet, with on-chain-verified reputation.**
+> **A read-only ERC-8004 discovery and verification layer for Stellar mainnet. The funded x402 + feedback proof is implemented but still pending its first recorded mainnet run.**
+
+> **Pre-release security gate (29 July 2026):** the `stellar-agent-mcp` npm name is still unclaimed. Do not
+> run the `npx` commands below until the [official npm page](https://www.npmjs.com/package/stellar-agent-mcp)
+> shows a release owned by this project. Once installed, `setup` pins the exact package version in persistent
+> MCP client configuration rather than executing a mutable `latest` tag on every launch.
 
 A **read-only, keyless** MCP server (and human CLI) that lets an AI agent — or you — **discover, rank, and
 vet on-chain [stellar-8004](https://stellar8004.com) agents** on Stellar mainnet, then prepare an x402
 (USDC pay-per-call) payment. One binary speaks the [Model Context Protocol](https://modelcontextprotocol.io)
-over stdio to Claude Code / Cursor / Windsurf / Cline / VS Code, and doubles as a plain-terminal tool.
+over stdio to Claude Code / Cursor / Windsurf / Cline / VS Code, and doubles as a plain-terminal tool. A
+separate Cloudflare Worker implementation exposes the same surface over stateless Streamable HTTP, but that
+remote endpoint is **not live yet**; use the local stdio transport until its deployment canary passes.
 
 ```bash
-npx -y stellar-agent-mcp find "a paid web scraper with a good reputation"
+npx -y stellar-agent-mcp@0.1.0 find "a paid web scraper with a good reputation"
 ```
 
 ---
@@ -25,16 +32,19 @@ Off-chain agent directories (A2A cards, the MCP Registry, OASF, NANDA) list **se
 exactly where the trust gap lives. A 2026 study of the ERC-8004 ecosystem (arXiv 2606.26028) found that only
 **3–15% of registrations have a live endpoint**, and **59–91% of "reviewers" are Sybils**.
 
-stellar-8004 is the **only live non-EVM ERC-8004 implementation** (66 agents on Stellar mainnet as of July 2026;
-`get_registry_stats` returns the current count). This server
+stellar-8004 is the only non-EVM ERC-8004 implementation **we are aware of** running on mainnet (66 agents on
+Stellar mainnet as of July 2026; `get_registry_stats` returns the current count). No published survey
+enumerates non-EVM deployments — the study above restricts itself to Ethereum, BSC and Base, "the three chains
+with the highest registration and feedback volume" — so read that as unrefuted, not as proven. This server
 is built around the one thing a directory listing cannot give you: it **re-derives each agent's reputation
 directly from the on-chain Reputation contract** (`get_summary` + `get_clients_paginated`) and reports it as a
 **declared-vs-verified** diff — `verified | mismatch | unavailable | skipped`. Self-declared marketing text
 (name, description, service labels, feedback tags) is treated as **untrusted data**, never as instructions
 (see [Security](#security)).
 
-That verification overlay — plus a sybil-resistant ranking that weights **unique clients** (breadth, hard to
-fake) above raw feedback volume (cheap to fake) — is the product.
+That verification overlay — plus a **Sybil-cost-aware heuristic** that weights unique clients (breadth, more
+expensive to fake) above raw feedback volume (cheap to fake) — is the product. Breadth raises the cost of
+manipulation; it is not proof of personhood and does not make the ranking Sybil-resistant.
 
 ---
 
@@ -48,16 +58,16 @@ All three MCP primitives, all read-only:
 |---|---|---|
 | **0 · SOW** | `find_agent` | Natural-language discovery → ranked candidates |
 | | `rank_agent` | Rank an explicit id set or a query, full 3-axis breakdown + on-chain verify |
-| | `get_agent_profile` | Deep profile: identity, capabilities, declared-vs-verified reputation, recent feedback, A2A AgentCard |
+| | `get_agent_profile` | Deep profile: identity, capabilities, declared-vs-verified reputation, recent feedback, unverified A2A projection |
 | | `list_services` | Catalog of invokable x402/MPP service endpoints |
 | **1 · complete-core** | `list_agents` | Paginated, filterable listing, ranked |
-| | `leaderboard` | Top agents overall (client-side 3-axis rank) |
+| | `leaderboard` | Top agents in a bounded scan (client-side 3-axis rank + coverage) |
 | | `resolve_agent` | Any handle (id / stellar:…#id / owner G-address) → canonical identifiers |
 | | `get_agents_by_owner` | Every agent an owner operates |
 | | `get_agent_feedback` | Recent on-chain reviews (sanitized, labeled) |
 | | `verify_reputation` | Standalone declared-vs-on-chain reputation check |
-| | `get_agent_card` | Portable A2A AgentCard (v0.3) + x402 hint — the interop surface |
-| | `get_registry_stats` | Aggregate registry statistics |
+| | `get_agent_card` | Derived, unverified A2A-shaped projection + x402 hint; not protocol-conformance proof |
+| | `get_registry_stats` | Exact-count queries + capped sampled metrics, with definitions and coverage |
 | | `get_registry_health` | Per-registry indexer staleness |
 
 Full per-tool reference (inputs, outputs, defaults): **[docs/tools.md](docs/tools.md)**.
@@ -77,18 +87,18 @@ server holds no keys.
 
 ## Quickstart
 
-**Zero-install (MCP client):** point any client at `npx -y stellar-agent-mcp`. See
-**[docs/integration.md](docs/integration.md)** for copy-paste configs.
-
-**Claude Code, one line:**
+**One-command MCP setup (Claude Code):**
 
 ```bash
-claude mcp add stellar-agent -- npx -y stellar-agent-mcp
+npx -y stellar-agent-mcp@0.1.0 setup --client claude --scope user --handshake
 ```
 
-> The `--` is required — everything after it is passed to the server untouched. Without it, Claude Code tries
-> to parse the server's flags as its own. Add `--scope user` to register once for every project instead of
-> just the current one; [docs/integration.md](docs/integration.md) covers all four scopes.
+This downloads the package, registers a version-pinned `npx -y stellar-agent-mcp@0.1.0 mcp` stdio launch through
+Claude Code's own CLI, then performs a real MCP initialize + `tools/list` handshake. It is idempotent: rerun
+with `--check --handshake` to verify without changing config, or use `--dry-run` to preview the registration.
+Cursor and Codex examples, config paths, and scope limitations are in
+**[docs/getting-started.md](docs/getting-started.md)**. Manual configs for other clients remain in
+**[docs/integration.md](docs/integration.md)**.
 
 Optionally install the **skill** first — the usage guide your agent reads before it calls anything:
 
@@ -99,14 +109,30 @@ npx skills add berkingurcan/stellar-agent-mcp --skill mcp
 **Terminal (human CLI):**
 
 ```bash
-npx -y stellar-agent-mcp find "web scraper" --x402       # discover
-npx -y stellar-agent-mcp profile 10                       # full profile for agent 10
-npx -y stellar-agent-mcp rank "scraping agents" --json    # rank + verify, machine-readable
-npx -y stellar-agent-mcp services --x402                  # callable paid endpoints
-npx -y stellar-agent-mcp doctor                           # self-check: env, explorer, RPC, verify
+npx -y stellar-agent-mcp@0.1.0 find "web scraper" --x402       # discover
+npx -y stellar-agent-mcp@0.1.0 profile 10                       # full profile for agent 10
+npx -y stellar-agent-mcp@0.1.0 rank "scraping agents" --json    # rank + verify, machine-readable
+npx -y stellar-agent-mcp@0.1.0 services --x402                  # callable paid endpoints
+npx -y stellar-agent-mcp@0.1.0 doctor                           # self-check: env, explorer, RPC, verify
+npx -y stellar-agent-mcp@0.1.0 setup --client cursor --scope project --dry-run  # preview client config
 ```
 
 New here? Start with **[docs/getting-started.md](docs/getting-started.md)**.
+
+### Remote endpoint status
+
+The intended hosted URL is `https://mcp.stellar8004.com/mcp`. The Worker, transport tests, routing, and
+hardening are implemented, but **the route has not been deployed**: `/mcp` currently falls through to the
+landing site and returns 404. Deployment remains deliberately blocked until the Cloudflare rate-limit
+namespace is replaced from its sentinel value and a live canary proves that the original caller identity is
+preserved through the Service Binding. Do not configure a remote MCP client against that URL yet.
+
+The landing page and MCP runtime are separate Workers. The assets-only landing Worker owns the
+`mcp.stellar8004.com` custom domain; exact `/mcp` and `/healthz` zone routes will send only those two paths to
+the runtime Worker. The runtime reads the existing `stellar8004-web` API through a Cloudflare Service Binding.
+It does **not** connect to Supabase, hold a service-role key, or create a second indexer. See
+**[docs/architecture.md](docs/architecture.md)** and
+**[docs/stellar8004-integration.md](docs/stellar8004-integration.md)**.
 
 ---
 
@@ -117,7 +143,7 @@ All configuration is via environment variables (canonical for MCP mode); CLI fla
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `STELLAR_NETWORK` | `mainnet` | `mainnet` or `testnet` — see the note below before using `testnet` |
+| `STELLAR_NETWORK` | `mainnet` | `mainnet` or `testnet` — `testnet` also requires `EXPLORER_BASE_URL`, see below |
 | `EXPLORER_BASE_URL` | `https://stellar8004.com` | Explorer HTTP API base. **Indexes mainnet only** |
 | `STELLAR_RPC_URL` | `https://mainnet.sorobanrpc.com` | Soroban RPC for on-chain verification |
 | `VERIFY_ONCHAIN` | `true` | Set `false` to skip Soroban reads (declared-only) |
@@ -127,10 +153,12 @@ All configuration is via environment variables (canonical for MCP mode); CLI fla
 `STELLAR_PRIVATE_KEY` is **intentionally ignored** if present (and warned about on stderr) — this server is
 keyless by construction.
 
-> **`testnet` needs its own explorer.** The default explorer indexes **mainnet only**, while `STELLAR_NETWORK`
-> also selects the Soroban contracts and RPC. Setting `testnet` without also setting `EXPLORER_BASE_URL` gives
-> you mainnet registry rows alongside testnet on-chain reads — two chains described as one. The server warns
-> loudly on stderr when it sees that combination rather than pretending the pair agrees.
+> **`testnet` needs its own explorer, and refuses to start without one.** The default explorer indexes
+> **mainnet only**, while `STELLAR_NETWORK` also selects the Soroban contracts and RPC. That pairing would give
+> you mainnet registry rows alongside testnet on-chain reads — two chains described as one — so
+> `STELLAR_NETWORK=testnet` **fails at startup** unless `EXPLORER_BASE_URL` is set explicitly. No public testnet
+> indexer exists today, so in practice testnet is for someone running their own; the dry-run gate for the x402
+> demo is `DRY_RUN=1` on mainnet, which spends nothing.
 
 ---
 
@@ -153,13 +181,21 @@ Full threat model + disclosure policy: **[SECURITY.md](SECURITY.md)** and
 
 ## How it works
 
-MCP client (or terminal) → **one binary** → `ExplorerService` (stellar8004 HTTP API, primary data) +
-`ReputationVerifier` (Soroban RPC, on-chain verify) → canonical stellar-8004 contracts on mainnet. Data
-precedence is always **explorer → on-chain verify → degrade-closed to declared-only**. Architecture,
-ranking formula, and the RegistrySource abstraction: **[docs/architecture.md](docs/architecture.md)**.
+Local MCP client (or terminal) → **one Node binary** → `ExplorerService` (stellar8004 HTTP API, primary
+data) + `ReputationVerifier` (Soroban RPC, on-chain verify) → canonical stellar-8004 contracts on mainnet.
+Data precedence is always **explorer → on-chain verify → degrade-closed to declared-only**.
 
-Built on the stable MCP **1.x** SDK (`@modelcontextprotocol/sdk` 1.30.0, spec 2025-11-25),
-`@trionlabs/stellar8004`, TypeScript ESM, Node ≥ 18.
+The not-yet-live hosted path adds only an edge adapter: remote client → stateless Cloudflare Worker →
+existing `stellar8004-web` service → its canonical Supabase-backed index. The Worker never reads Supabase
+directly and never owns indexer credentials. It still uses Soroban RPC for bounded on-chain verification.
+Architecture, ranking formula, cache boundaries, and the upstream discovery contract are documented in
+**[docs/architecture.md](docs/architecture.md)**.
+
+Built on the split MCP v2 packages (`@modelcontextprotocol/server` and `@modelcontextprotocol/client`
+2.0.0), Zod 4, `@trionlabs/stellar8004`, TypeScript ESM, Node ≥ 20. The local stdio handshake currently
+negotiates protocol `2025-11-25`; the remote handler targets the modern stateless `2026-07-28` protocol while
+retaining a stateless legacy compatibility lane. That is an implementation target, not a live conformance
+claim until the remote canary is recorded.
 
 ---
 
@@ -168,8 +204,7 @@ Built on the stable MCP **1.x** SDK (`@modelcontextprotocol/sdk` 1.30.0, spec 20
 Reviewing this against a grant or SOW? Start at **[docs/evidence.md](docs/evidence.md)** — a
 deliverable-to-evidence map with verification steps, written to be checked without a technical background.
 
-Known open work — including one defect that reaches users of the published package — is tracked in
-**[issues/](issues/README.md)**, one file per issue.
+Known open work and release blockers are tracked in **[issues/](issues/README.md)**, one file per issue.
 
 Bug reports and PRs welcome. Read **[CONTRIBUTING.md](CONTRIBUTING.md)** first — it covers the project layout and
 the four invariants CI enforces (read-only/keyless, stdout-is-JSON-RPC-only, the trust boundary, and
