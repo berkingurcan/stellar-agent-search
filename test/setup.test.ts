@@ -14,7 +14,7 @@ import {
 const temporaryDirectories: string[] = [];
 
 async function temporaryDirectory(): Promise<string> {
-  const path = await mkdtemp(join(tmpdir(), "stellar-agent-mcp-setup-"));
+  const path = await mkdtemp(join(tmpdir(), "stellar-agent-market-setup-"));
   temporaryDirectories.push(path);
   return path;
 }
@@ -39,7 +39,7 @@ function runtime(
     runCommand: vi.fn(async () => commandResult()),
     handshake: vi.fn(async () => ({
       ok: true,
-      server: { name: "stellar-agent-mcp", version: "0.1.0" },
+      server: { name: "stellar-agent-market", version: "0.1.0" },
       toolCount: 13,
       tools: ["find_agent", "rank_agent", "get_agent_profile", "list_services"],
       missingCoreTools: [],
@@ -102,7 +102,7 @@ describe("setup flag parsing", () => {
     );
     expect(prerelease.report.launch.args).toEqual([
       "-y",
-      "stellar-agent-mcp@0.2.0-rc.1",
+      "stellar-agent-market@0.2.0-rc.1",
       "mcp",
     ]);
   });
@@ -128,7 +128,7 @@ describe("Cursor setup", () => {
     expect(config.mcpServers.other).toEqual({ command: "other" });
     expect(config.mcpServers["stellar-agent"]).toEqual({
       command: "npx",
-      args: ["-y", "stellar-agent-mcp@0.1.0", "mcp"],
+      args: ["-y", "stellar-agent-market@0.1.0", "mcp"],
       env: { STELLAR_NETWORK: "mainnet" },
     });
 
@@ -166,7 +166,7 @@ describe("Cursor setup", () => {
       mcpServers: {
         "stellar-agent": {
           command: "npx",
-          args: ["-y", "stellar-agent-mcp@0.1.0", "mcp"],
+          args: ["-y", "stellar-agent-market@0.1.0", "mcp"],
           env: {
             STELLAR_NETWORK: "mainnet",
             STELLAR_PRIVATE_KEY: "S-DO-NOT-FORWARD",
@@ -197,7 +197,7 @@ describe("Cursor setup", () => {
     await mkdir(configDirectory, { recursive: true });
     const entry = {
       command: "npx",
-      args: ["-y", "stellar-agent-mcp@0.1.0", "mcp"],
+      args: ["-y", "stellar-agent-market@0.1.0", "mcp"],
       env: { STELLAR_NETWORK: "mainnet" },
       ...extra,
     };
@@ -218,7 +218,7 @@ describe("Cursor setup", () => {
     const cwd = await temporaryDirectory();
     const configDirectory = join(cwd, ".cursor");
     const configPath = join(configDirectory, "mcp.json");
-    const lockPath = `${configPath}.stellar-agent-mcp.lock`;
+    const lockPath = `${configPath}.stellar-agent-market.lock`;
     await mkdir(configDirectory, { recursive: true });
     await writeFile(configPath, "{}\n");
     await writeFile(lockPath, "another setup owns this lock\n", { mode: 0o600 });
@@ -311,7 +311,7 @@ describe("CLI-backed setup", () => {
         "stellar-agent",
         "--env", "EXPLORER_BASE_URL=https://example.test/api?literal=$(never-executed)",
         "--env", "STELLAR_NETWORK=mainnet",
-        "--", "npx", "-y", "stellar-agent-mcp@0.1.0", "mcp",
+        "--", "npx", "-y", "stellar-agent-market@0.1.0", "mcp",
       ],
     });
   });
@@ -326,7 +326,7 @@ describe("CLI-backed setup", () => {
           "stellar-agent": {
             type: "stdio",
             command: "npx",
-            args: ["-y", "stellar-agent-mcp@0.1.0", "mcp"],
+            args: ["-y", "stellar-agent-market@0.1.0", "mcp"],
             env: { STELLAR_NETWORK: "mainnet" },
           },
         },
@@ -351,7 +351,7 @@ describe("CLI-backed setup", () => {
               "stellar-agent:",
               "  Type: stdio",
               "  Command: npx",
-              "  Args: -y stellar-agent-mcp@0.1.0 mcp",
+              "  Args: -y stellar-agent-market@0.1.0 mcp",
               "  Environment: STELLAR_NETWORK=mainnet",
             ].join("\n"),
           })),
@@ -371,7 +371,7 @@ describe("CLI-backed setup", () => {
               transport: {
                 type: "stdio",
                 command: "npx",
-                args: ["-y", "stellar-agent-mcp@0.1.0", "mcp"],
+                args: ["-y", "stellar-agent-market@0.1.0", "mcp"],
                 env: { STELLAR_NETWORK: "mainnet" },
               },
             }),

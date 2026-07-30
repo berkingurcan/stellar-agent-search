@@ -11,8 +11,8 @@
  */
 export const SITE = 'https://mcp.stellar8004.com';
 
-export const GITHUB = 'https://github.com/berkingurcan/stellar-agent-mcp';
-export const NPM = 'https://www.npmjs.com/package/stellar-agent-mcp';
+export const GITHUB = 'https://github.com/berkingurcan/stellar-agent-market';
+export const NPM = 'https://www.npmjs.com/package/stellar-agent-market';
 export const EXPLORER = 'https://stellar8004.com';
 export const SDK_DOCS = 'https://stellar8004.com/developers';
 export const MCP_SPEC = 'https://modelcontextprotocol.io';

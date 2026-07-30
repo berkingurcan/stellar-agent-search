@@ -1,6 +1,6 @@
 # Third-party notices
 
-The `stellar-agent-mcp` executable embeds selected compiled code from
+The `stellar-agent-market` executable embeds selected compiled code from
 `@trionlabs/stellar8004@0.0.11`, the canonical Stellar 8004 TypeScript SDK.
 That code is licensed under the MIT License:
 

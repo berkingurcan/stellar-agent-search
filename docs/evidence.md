@@ -1,6 +1,6 @@
 # Evidence package — Instawards SOW
 
-**Project:** Stellar Agent MCP (Stellar 8004 agent discovery)
+**Project:** Stellar Agent Market (Stellar 8004 agent discovery)
 **Builder / Team:** Algoria Team
 **Ambassador Chapter:** Stellar Türkiye
 
@@ -29,7 +29,7 @@ the non-default `bootstrap` tag while private → public repository → protecte
 
 | # | What to check | Where | Expected |
 |---|---|---|---|
-| 1 | The code is public and MIT-licensed | [github.com/berkingurcan/stellar-agent-mcp](https://github.com/berkingurcan/stellar-agent-mcp) | Repository opens; `LICENSE` says MIT |
+| 1 | The code is public and MIT-licensed | [github.com/berkingurcan/stellar-agent-market](https://github.com/berkingurcan/stellar-agent-market) | Repository opens; `LICENSE` says MIT |
 | 2 | Automated tests pass | Repo → **Actions** tab | Latest CI run green across Node 22/24 on Linux + macOS, plus the Worker job |
 | 3 | The four SOW tools exist and are documented | [docs/tools.md](tools.md) | `find_agent`, `rank_agent`, `get_agent_profile`, `list_services` each documented with inputs and outputs |
 | 4 | The x402 reference script exists | [examples/x402-demo.ts](../examples/x402-demo.ts) | TypeScript file in `/examples`, as the SOW specifies |
@@ -46,8 +46,8 @@ Anything deeper — installing the server, running the demo — is covered below
 
 | Evidence required by SOW | Status | Link |
 |---|---|---|
-| Public GitHub repository | 🟡 | [github.com/berkingurcan/stellar-agent-mcp](https://github.com/berkingurcan/stellar-agent-mcp) — canonical owner selected; repository transfer/creation and public visibility are still pending |
-| npm package | ⬜ | `‹npmjs.com/package/stellar-agent-mcp — after publish›` |
+| Public GitHub repository | 🟡 | [github.com/berkingurcan/stellar-agent-market](https://github.com/berkingurcan/stellar-agent-market) — canonical owner selected; repository transfer/creation and public visibility are still pending |
+| npm package | ⬜ | `‹npmjs.com/package/stellar-agent-market — after publish›` |
 | Screen recording of the 4 tools in Claude Code | ⬜ | `‹recording link›` |
 | Tool reference docs | ✅ | [docs/tools.md](tools.md) |
 
@@ -103,15 +103,15 @@ that it shares a snapshot with the Explorer, or that the reviewers are Sybil-res
 ### How to verify yourself
 
 ```bash
-npx -y stellar-agent-mcp@0.1.0 doctor              # self-check: environment, explorer, RPC, contract reachability
-npx -y stellar-agent-mcp@0.1.0 find "web scraper"  # the find_agent tool from the terminal
-npx -y stellar-agent-mcp@0.1.0 profile 10          # declared profile + fail-closed evidence block
+npx -y stellar-agent-market@0.1.0 doctor              # self-check: environment, explorer, RPC, contract reachability
+npx -y stellar-agent-market@0.1.0 find "web scraper"  # the find_agent tool from the terminal
+npx -y stellar-agent-market@0.1.0 profile 10          # declared profile + fail-closed evidence block
 ```
 
 Inside an MCP client, install with one line and call the tools directly:
 
 ```bash
-npx -y stellar-agent-mcp@0.1.0 setup --client claude --scope user --handshake
+npx -y stellar-agent-market@0.1.0 setup --client claude --scope user --handshake
 ```
 
 ---
@@ -166,7 +166,7 @@ cannot silently erode.
 |---|---|---|
 | Skill package install command | 🟡 | [`skills/mcp/SKILL.md`](../skills/mcp/SKILL.md) — served from this repository; `main` is now the default branch, so **the command resolves as soon as the repo is public** (outstanding item 01) |
 | One-command MCP bootstrap | 🟡 | [`src/cli/setup.ts`](../src/cli/setup.ts) + [`test/setup.test.ts`](../test/setup.test.ts) — implemented and covered by local tests for Claude, Cursor, and Codex, but real clean-environment evidence still requires the first npm publish and Recording 3 |
-| Developer docs URL | 🟡 | [Repository docs](https://github.com/berkingurcan/stellar-agent-mcp#readme) — files are complete locally, but the URL is not independently accessible until the repository is transferred/created and made public |
+| Developer docs URL | 🟡 | [Repository docs](https://github.com/berkingurcan/stellar-agent-market#readme) — files are complete locally, but the URL is not independently accessible until the repository is transferred/created and made public |
 | Install + usage screen recording | ⬜ | `‹recording link›` |
 
 ### One-command MCP bootstrap and optional skill acquisition
@@ -176,17 +176,17 @@ overwrite a conflicting entry, and can prove the package works with a live MCP h
 
 ```bash
 # Claude Code, user scope
-npx -y stellar-agent-mcp@0.1.0 setup --client claude --scope user --handshake
+npx -y stellar-agent-market@0.1.0 setup --client claude --scope user --handshake
 
 # Cursor, project scope; use this in Recording 3 as the required second client
-npx -y stellar-agent-mcp@0.1.0 setup --client cursor --scope project --handshake
+npx -y stellar-agent-market@0.1.0 setup --client cursor --scope project --handshake
 
 # Codex, user scope
-npx -y stellar-agent-mcp@0.1.0 setup --client codex --scope user --handshake
+npx -y stellar-agent-market@0.1.0 setup --client codex --scope user --handshake
 
 # Non-mutating verification or preview
-npx -y stellar-agent-mcp@0.1.0 setup --client cursor --scope project --check --handshake
-npx -y stellar-agent-mcp@0.1.0 setup --client cursor --scope project --dry-run --json
+npx -y stellar-agent-market@0.1.0 setup --client cursor --scope project --check --handshake
+npx -y stellar-agent-market@0.1.0 setup --client cursor --scope project --dry-run --json
 ```
 
 Codex `project` scope is deliberately not auto-written: its CLI has no project-scoped MCP add operation.
@@ -196,7 +196,7 @@ into `.codex/config.toml`. This limitation must not be presented as an automated
 The optional skill is the usage guide an agent reads before calling the server:
 
 ```bash
-npx skills add berkingurcan/stellar-agent-mcp --skill mcp
+npx skills add berkingurcan/stellar-agent-market --skill mcp
 ```
 
 The SOW's example command names the `trionlabs/stellar-8004` repository and allows *"or equivalent"*. We serve
@@ -249,7 +249,7 @@ Registry manifests are in place for three directories: [`server.json`](../server
 [`smithery.yaml`](../smithery.yaml), [`glama.json`](../glama.json).
 
 **Quality signals not required by the SOW:** a full automated suite green on every push across Node 22/24 ×
-Linux/macOS (count and result in the [Actions tab](https://github.com/berkingurcan/stellar-agent-mcp/actions) —
+Linux/macOS (count and result in the [Actions tab](https://github.com/berkingurcan/stellar-agent-market/actions) —
 deliberately not restated here, so it cannot go stale), clean TypeScript typecheck, and automated/internal
 adversarial review passes. The repository has **not** had an independent external human code review; the
 remaining consumer dependency finding is tracked explicitly under [`issues/`](../issues/README.md).
@@ -279,7 +279,7 @@ file per item under [`issues/`](../issues/); this table is the ordering, not a s
 | [02](../issues/P0-02-set-default-branch-to-main.md) | Default branch is `main`; delete the still-present stale working branch | Repository hygiene; no longer blocks default-branch installs |
 | [03 phase A](../issues/P0-03-first-npm-publish.md) | Reserve inert `bootstrap: 0.0.0` while private | Safe public visibility without advertising an unclaimed command |
 | [01 phase B](../issues/P0-01-make-repository-public.md) | Make the finalized canonical repository public | Anonymous review, npm provenance, and MCP Registry OIDC |
-| [03 phase B](../issues/P0-03-first-npm-publish.md) | Configure protected OIDC and publish the real release | D1's npm link; makes the pinned `npx -y stellar-agent-mcp@0.1.0` resolve |
+| [03 phase B](../issues/P0-03-first-npm-publish.md) | Configure protected OIDC and publish the real release | D1's npm link; makes the pinned `npx -y stellar-agent-market@0.1.0` resolve |
 | [04](../issues/P0-04-funded-mainnet-x402-run.md) | Funded mainnet run of `examples/x402-demo.ts` | D2's two transaction hashes |
 | [05](../issues/P0-05-record-three-demos.md) | Recordings 1–3 | The D1, D2 and D3 recordings |
 

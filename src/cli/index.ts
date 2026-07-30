@@ -350,7 +350,7 @@ async function gatherByIds(deps: ToolDeps, ids: number[]): Promise<AgentResponse
 async function cmdFind(deps: ToolDeps, flags: CliFlags): Promise<number> {
   const query = flags.positionals.slice(1).join(" ").trim();
   if (!query) {
-    err("usage: stellar-agent-mcp find <query> [--x402] [--mpp] [--limit N] [--verify] [--json]");
+    err("usage: stellar-agent-market find <query> [--x402] [--mpp] [--limit N] [--verify] [--json]");
     return 2;
   }
   const discovery = await gatherByQuery(deps, query, flags);
@@ -383,7 +383,7 @@ async function cmdFind(deps: ToolDeps, flags: CliFlags): Promise<number> {
 async function cmdRank(deps: ToolDeps, flags: CliFlags): Promise<number> {
   const rest = flags.positionals.slice(1);
   if (rest.length === 0) {
-    err("usage: stellar-agent-mcp rank <query | id id ...> [--limit N] [--no-verify] [--json]");
+    err("usage: stellar-agent-market rank <query | id id ...> [--limit N] [--no-verify] [--json]");
     return 2;
   }
   // All positionals numeric ⇒ explicit id set; otherwise treat as a query.
@@ -460,7 +460,7 @@ async function cmdRank(deps: ToolDeps, flags: CliFlags): Promise<number> {
 async function cmdProfile(deps: ToolDeps, flags: CliFlags): Promise<number> {
   const ref = flags.positionals[1];
   if (!ref) {
-    err("usage: stellar-agent-mcp profile <id | stellar:...#id> [--no-verify] [--json]");
+    err("usage: stellar-agent-market profile <id | stellar:...#id> [--no-verify] [--json]");
     return 2;
   }
   const id = resolveAgentId(ref, {
@@ -835,11 +835,11 @@ export async function startMcpServer(flags: CliFlags, version: string): Promise<
 // ---------------------------------------------------------------------------
 
 export function printHelp(): void {
-  out(`stellar-agent-mcp — discover, rank & inspect on-chain Stellar 8004 agents (read-only)
+  out(`stellar-agent-market — discover, rank & inspect on-chain Stellar 8004 agents (read-only)
 
 USAGE
-  stellar-agent-mcp <command> [args] [flags]
-  stellar-agent-mcp                       # no args, launched by an MCP client → stdio server
+  stellar-agent-market <command> [args] [flags]
+  stellar-agent-market                       # no args, launched by an MCP client → stdio server
 
 COMMANDS
   find <query>            Natural-language discovery → ranked candidates

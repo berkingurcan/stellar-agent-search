@@ -1,7 +1,7 @@
 /**
  * ranking.ts — the deterministic declared-reputation ordering heuristic.
  *
- * Local policy version: stellar-agent-mcp-declared-evidence-v1.
+ * Local policy version: stellar-agent-market-declared-evidence-v1.
  *
  *   q       = clamp(avg / scoreMax, 0, 1) (0 when unrated)
  *   effUc   = min(validSafeInt(uc), validSafeInt(fc))
@@ -38,7 +38,7 @@ import { RANK_SCORE_MAX } from "../config.js";
 // ---------------------------------------------------------------------------
 
 export const RANKING = {
-  VERSION: "stellar-agent-mcp-declared-evidence-v1",
+  VERSION: "stellar-agent-market-declared-evidence-v1",
   /** feedbackCount at which the volume axis ≈ 1 (log saturation). */
   VOL_SAT: 50,
   /** uniqueClients at which the breadth axis ≈ 1 (log saturation). */

@@ -1,6 +1,6 @@
 # Security Policy
 
-`stellar-agent-mcp` is a **read-only, keyless** MCP server over a **permissionless mainnet registry**. Its
+`stellar-agent-market` is a **read-only, keyless** MCP server over a **permissionless mainnet registry**. Its
 local stdio transport is available now. A separate stateless Cloudflare Worker is implemented but **not
 deployed**; `https://mcp.stellar8004.com/mcp` currently returns the landing site's 404. Both adapters hold no
 signing secrets, perform no writes, and treat every agent-authored byte as untrusted data. This document
@@ -10,7 +10,7 @@ describes their threat boundaries and how to report a vulnerability.
 
 Please report suspected vulnerabilities **privately**:
 
-- **GitHub:** open a [private security advisory](https://github.com/berkingurcan/stellar-agent-mcp/security/advisories/new)
+- **GitHub:** open a [private security advisory](https://github.com/berkingurcan/stellar-agent-market/security/advisories/new)
   on the repository (preferred).
 - Do **not** open a public issue for an undisclosed vulnerability.
 

@@ -1,19 +1,19 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.berkingurcan/stellar-agent-mcp",
-  "title": "Stellar Agent MCP",
+  "name": "io.github.berkingurcan/stellar-agent-market",
+  "title": "Stellar Agent Market",
   "description": "Discover and rank Stellar 8004 agents with a read-only MCP server and fail-closed contract probes.",
   "version": "0.1.0",
-  "websiteUrl": "https://github.com/berkingurcan/stellar-agent-mcp",
+  "websiteUrl": "https://github.com/berkingurcan/stellar-agent-market",
   "repository": {
-    "url": "https://github.com/berkingurcan/stellar-agent-mcp",
+    "url": "https://github.com/berkingurcan/stellar-agent-market",
     "source": "github"
   },
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
-      "identifier": "stellar-agent-mcp",
+      "identifier": "stellar-agent-market",
       "version": "0.1.0",
       "runtimeHint": "npx",
       "transport": {
