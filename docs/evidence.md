@@ -130,13 +130,16 @@ npx -y stellar-agent-search@0.1.0 setup --client claude --scope user --handshake
 | Evidence required by SOW | Status | Link |
 |---|---|---|
 | Reference script in the repo | ✅ | [examples/x402-demo.ts](../examples/x402-demo.ts) |
-| Demo video (3–5 min) | ⬜ | `‹video link›` |
-| Mainnet tx hash — x402 USDC payment | ⬜ | `‹stellar.expert link›` |
-| Mainnet tx hash — Reputation Registry feedback | ⬜ | `‹stellar.expert link›` |
+| Demo video (3–5 min) | 🟡 | `‹video link — recorded, awaiting upload›` |
+| Mainnet tx hash — x402 USDC payment | ✅ | [59a5fb60…19e640](https://stellar.expert/explorer/public/tx/59a5fb60b43bca68ee6383b66acc551b3e7a6ab1f8d42c08fca2a8cc1919e640) |
+| Mainnet tx hash — Reputation Registry feedback | ✅ | [87520294…c6dbed](https://stellar.expert/explorer/public/tx/875202943e10dd337c4b91e64cfc99afa034f2ec27fd4aceda7c6bf4e2c6dbed) |
 
-The script is written and dry-run tested; what remains is one funded mainnet execution, which produces both
-hashes and the footage in a single pass. See [Recording 2](#recording-2--x402-mainnet-demo-35-min) for the exact
-run procedure.
+The funded mainnet run executed on 2026-07-30T07:05Z: payment settled in ledger 63714695, the paid scrape
+result validated (`resultOk: true`), and feedback landed in ledger 63714696 — both hashes are Horizon-verified
+(`successful: true`). An earlier funded run also settled payment
+[bd8ab74d…5c5e55](https://stellar.expert/explorer/public/tx/bd8ab74d117067498b6174b569e563e7812b7ea98a7d212dea7f8214aa5c5e55)
+(ledger 63714129) but aborted before feedback because the client rejected soroban-rpc's int64-string
+`createdAt`; that bug is fixed and regression-tested (commit `a4336dd`).
 
 ### What the script does, in order
 
