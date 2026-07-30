@@ -14,11 +14,13 @@ checked in a browser in about five minutes.
 > the reviewer can see exactly what is outstanding rather than having to infer it.
 
 > [!IMPORTANT]
-> **`berkingurcan` is the selected canonical owner, but the repository move and public release are not done.**
-> The target links on this page therefore still return 404. Move/create the private destination first, then
-> reserve the npm name with the inert, non-install-default `bootstrap: 0.0.0` package. Only after that
-> reservation is independently verified should the destination become public; then configure the protected
-> OIDC publisher and perform the real release.
+> **Release state (verified 30 July 2026):** the repository is public under the canonical owner
+> `berkingurcan`, and `stellar-agent-search@0.1.0` is live on npm — published from tag `v0.1.0` through the
+> protected OIDC workflow, with Sigstore provenance naming this repository, `publish.yml`, and the tagged
+> commit. The MCP Registry version is not yet visible: the publish run's npm phase succeeded, but an npm
+> attestation-propagation race failed the job before the MCP Registry steps ran; re-running the failed job
+> is the one outstanding release step. What remains for the SOW itself is the funded mainnet run
+> (Deliverable 2) and the three recordings.
 
 **Mandatory first-release order:** private move to selected owner `berkingurcan` → inert `0.0.0` reservation under
 the non-default `bootstrap` tag while private → public repository → protected OIDC real release.
@@ -46,8 +48,8 @@ Anything deeper — installing the server, running the demo — is covered below
 
 | Evidence required by SOW | Status | Link |
 |---|---|---|
-| Public GitHub repository | 🟡 | [github.com/berkingurcan/stellar-agent-search](https://github.com/berkingurcan/stellar-agent-search) — canonical owner selected; repository transfer/creation and public visibility are still pending |
-| npm package | ⬜ | `‹npmjs.com/package/stellar-agent-search — after publish›` |
+| Public GitHub repository | ✅ | [github.com/berkingurcan/stellar-agent-search](https://github.com/berkingurcan/stellar-agent-search) — public, default branch `main`, verified from a logged-out session |
+| npm package | ✅ | [npmjs.com/package/stellar-agent-search](https://www.npmjs.com/package/stellar-agent-search) — `0.1.0`, OIDC Trusted Publishing with a Sigstore provenance badge resolving to this repository and tag `v0.1.0` |
 | Screen recording of the 4 tools in Claude Code | ⬜ | `‹recording link›` |
 | Tool reference docs | ✅ | [docs/tools.md](tools.md) |
 
@@ -164,9 +166,9 @@ cannot silently erode.
 
 | Evidence required by SOW | Status | Link |
 |---|---|---|
-| Skill package install command | 🟡 | [`skills/mcp/SKILL.md`](../skills/mcp/SKILL.md) — served from this repository; `main` is now the default branch, so **the command resolves as soon as the repo is public** (outstanding item 01) |
-| One-command MCP bootstrap | 🟡 | [`src/cli/setup.ts`](../src/cli/setup.ts) + [`test/setup.test.ts`](../test/setup.test.ts) — implemented and covered by local tests for Claude, Cursor, and Codex, but real clean-environment evidence still requires the first npm publish and Recording 3 |
-| Developer docs URL | 🟡 | [Repository docs](https://github.com/berkingurcan/stellar-agent-search#readme) — files are complete locally, but the URL is not independently accessible until the repository is transferred/created and made public |
+| Skill package install command | ✅ | [`skills/mcp/SKILL.md`](../skills/mcp/SKILL.md) — `npx skills add berkingurcan/stellar-agent-search --skill mcp` resolves against the public default branch |
+| One-command MCP bootstrap | 🟡 | [`src/cli/setup.ts`](../src/cli/setup.ts) + [`test/setup.test.ts`](../test/setup.test.ts) — published `0.1.0` verified end-to-end (`setup --client cursor --scope project --handshake` → 13 tools, idempotent `--check` pass) in an isolated directory; the on-camera clean-environment proof is Recording 3 |
+| Developer docs URL | ✅ | [Repository docs](https://github.com/berkingurcan/stellar-agent-search#readme) — publicly accessible |
 | Install + usage screen recording | ⬜ | `‹recording link›` |
 
 ### One-command MCP bootstrap and optional skill acquisition
@@ -269,24 +271,17 @@ for the follow-on SCF scope.
 
 ## 6. Outstanding items and their order
 
-These are the items that block **delivery**, in the order they should be done. Each needs credentials, funds, or
-a GitHub setting only the builder holds. Full detail — verification steps and acceptance criteria — lives in one
-file per item under [`issues/`](../issues/); this table is the ordering, not a second copy of it.
+These are the items that block **delivery**. Full detail — verification steps and acceptance criteria — lives
+in one file per item under [`issues/`](../issues/); this table is the state, not a second copy of it.
 
-| # | Item | Unblocks |
+| # | Item | State |
 |---|---|---|
-| [01 phase A](../issues/P0-01-make-repository-public.md) | Transfer/create the private repo under selected owner `berkingurcan` | Stable GitHub/npm/MCP provenance identity |
-| [02](../issues/P0-02-set-default-branch-to-main.md) | Default branch is `main`; delete the still-present stale working branch | Repository hygiene; no longer blocks default-branch installs |
-| [03 phase A](../issues/P0-03-first-npm-publish.md) | Reserve inert `bootstrap: 0.0.0` while private | Safe public visibility without advertising an unclaimed command |
-| [01 phase B](../issues/P0-01-make-repository-public.md) | Make the finalized canonical repository public | Anonymous review, npm provenance, and MCP Registry OIDC |
-| [03 phase B](../issues/P0-03-first-npm-publish.md) | Configure protected OIDC and publish the real release | D1's npm link; makes the pinned `npx -y stellar-agent-search@0.1.0` resolve |
-| [04](../issues/P0-04-funded-mainnet-x402-run.md) | Funded mainnet run of `examples/x402-demo.ts` | D2's two transaction hashes |
-| [05](../issues/P0-05-record-three-demos.md) | Recordings 1–3 | The D1, D2 and D3 recordings |
+| [01](../issues/P0-01-make-repository-public.md) | Canonical repository public under `berkingurcan` | ✅ done — verified logged-out |
+| [02](../issues/P0-02-set-default-branch-to-main.md) | Default branch is `main` | ✅ done |
+| [03](../issues/P0-03-first-npm-publish.md) | Inert bootstrap reservation, then protected OIDC real release | ✅ npm `0.1.0` live with provenance · 🟡 MCP Registry version awaits the failed-job re-run |
+| [04](../issues/P0-04-funded-mainnet-x402-run.md) | Funded mainnet run of `examples/x402-demo.ts` | 🟡 payer funded (XLM + USDC trustline), preflight green, live challenge validates; awaiting the recorded run |
+| [05](../issues/P0-05-record-three-demos.md) | Recordings 1–3 | ⬜ the last SOW-blocking step |
 
-The owner/transfer half of item 01 blocks item 03's inert reservation; that reservation in turn blocks item
-01's visibility change. Public visibility then blocks item 03's protected real release. Item 02's
-default-branch blocker is resolved but its stale branch still needs deletion; the real release gates the
-actual `setup` bootstrap and the two install recordings; item 04 gates the payment recording.
 [docs/recordings.md](recordings.md) has the shot-by-shot scripts.
 
 Known engineering work that does **not** block SOW delivery — including one defect that reaches users of the

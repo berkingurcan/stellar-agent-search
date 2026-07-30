@@ -1,7 +1,7 @@
 # P0-01 — Move to the selected canonical owner; reserve npm; then make it public
 
 **Owner:** Builder + current repository owner + Berkin Gürcan · **Blocks:** everything reviewer-facing, 05 ·
-**Status:** open — canonical owner selected as `berkingurcan`; private repository move still pending
+**Status:** resolved 30 July 2026 — `berkingurcan/stellar-agent-search` is public with default branch `main`, verified from a logged-out session
 
 ## Problem
 

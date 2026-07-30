@@ -21,10 +21,10 @@ the non-default `bootstrap` tag while private → public repository → protecte
 
 | # | P | Title | Owner |
 |---|---|---|---|
-| [01](P0-01-make-repository-public.md) | P0 | Move to selected owner `berkingurcan` while private; make public only after 03 phase A | Builder + current repo owner + Berkin |
+| [01](P0-01-make-repository-public.md) | P0 | ~~Move to selected owner `berkingurcan`; make public only after 03 phase A~~ **resolved** | Builder + current repo owner + Berkin |
 | [02](P0-02-set-default-branch-to-main.md) | P0 | ~~Set the default branch to `main`, delete the working branch~~ **resolved** | Builder |
-| [03](P0-03-first-npm-publish.md) | P0 | Inert private bootstrap, then protected OIDC real publish after 01 phase B | Builder |
-| [04](P0-04-funded-mainnet-x402-run.md) | P0 | Funded mainnet x402 run → two transaction hashes — **blocked by live HTTP challenge mismatch** | Builder |
+| [03](P0-03-first-npm-publish.md) | P0 | ~~Inert private bootstrap, then protected OIDC real publish~~ **npm resolved**; MCP Registry awaits the failed-job re-run | Builder |
+| [04](P0-04-funded-mainnet-x402-run.md) | P0 | Funded mainnet x402 run → two transaction hashes — **ready: payer funded, challenge validates under the reviewed policy** | Builder |
 | [05](P0-05-record-three-demos.md) | P0 | Record the three demo videos | Builder |
 | [06](P1-06-published-package-ships-vulnerable-axios.md) | P1 | Published package ships a vulnerable, proxy-broken axios | Code |
 | [07](P1-07-testnet-mode-has-no-explorer.md) | P1 | ~~`STELLAR_NETWORK=testnet` has no explorer and cannot work~~ **resolved** | Code |

@@ -1,7 +1,10 @@
 # P0-04 — Funded mainnet x402 run → two transaction hashes
 
-**Owner:** Builder (spends real USDC) · **Blocks:** Deliverable 2, recording 2 · **Status:** blocked by
-[08](P2-08-verify-scrapper-endpoint-is-live.md) — do not fund while the live challenge advertises HTTP
+**Owner:** Builder (spends real USDC) · **Blocks:** Deliverable 2, recording 2 · **Status:** ready to execute —
+payer funded 30 July 2026 (XLM + USDC trustline + 1 USDC), preflight green. [08](P2-08-verify-scrapper-endpoint-is-live.md)'s
+`http://` echo is now tolerated by a reviewed client-side policy: the unsigned challenge `resource.url` may match the
+pinned URL in either scheme, while the fetch target stays HTTPS-pinned and every payment field remains an exact
+match. The upstream HTTPS fix is still requested; only the recorded run remains here.
 
 ## Problem
 

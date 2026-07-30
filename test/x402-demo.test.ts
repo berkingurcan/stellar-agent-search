@@ -355,17 +355,25 @@ describe("x402 challenge policy", () => {
     expect(() => validatePaymentChallenge(config(false), required)).toThrow(/exactly one payment requirement/);
   });
 
-  it("requires the challenge resource to be the allowlisted endpoint", () => {
+  it("requires the challenge resource to be the pinned endpoint, tolerating only its http echo", () => {
+    // The live deployment behind a TLS-terminating proxy advertises `http://` in the
+    // unsigned `resource.url` echo (P2-08). `resource` is not covered by the payment
+    // signature and is never fetched — the request target stays HTTPS-pinned — so the
+    // policy accepts exactly the pinned URL in either scheme and nothing else.
     const required = challenge();
-    required.resource.url = "https://evil.example/task";
-    expect(() => validatePaymentChallenge(config(false), required)).toThrow(/resource mismatch/);
-
-    // This is the exact scheme mismatch returned by the live deployment on
-    // 2026-07-29. It is an upstream blocker, never a reason to weaken the pin.
     required.resource.url = "http://scrapper.stellar8004.com/task";
-    expect(() => validatePaymentChallenge(config(false), required)).toThrow(
-      /resource mismatch.*http:\/\/scrapper.*expected=https:\/\/scrapper/,
-    );
+    expect(() => validatePaymentChallenge(config(false), required)).not.toThrow();
+
+    for (const rejected of [
+      "https://evil.example/task",
+      "http://evil.example/task",
+      "http://scrapper.stellar8004.com/other", // same host, wrong path
+      "http://scrapper.stellar8004.com:8080/task", // same host, wrong port
+      "https://scrapper.stellar8004.com.evil.example/task", // prefix-spoofed host
+    ]) {
+      required.resource.url = rejected;
+      expect(() => validatePaymentChallenge(config(false), required)).toThrow(/resource mismatch/);
+    }
   });
 
   it("rejects malformed price limits rather than silently using a default", () => {

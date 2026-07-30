@@ -79,6 +79,18 @@ export const SCRAPPER_AGENT_ID = 10;
 export const SCRAPPER_OWNER = "GDDTQFQZK734EXIJE5LWU4G4YC5A6P5AHJ4UWVMV6WBFWT6BAAQQHV2V";
 export const SCRAPPER_EXPECTED_PAY_TO = "GDDTQFQZK734EXIJE5LWU4G4YC5A6P5AHJ4UWVMV6WBFWT6BAAQQHV2V";
 export const SCRAPPER_ALLOWED_ENDPOINTS = Object.freeze(["https://scrapper.stellar8004.com/task"] as const);
+/**
+ * Accepted values for the challenge's `resource.url` echo ONLY. The live deployment
+ * sits behind a TLS-terminating proxy and advertises `http://` here (P2-08); the x402
+ * exact-Stellar scheme does not sign `resource`, and this demo never fetches it — the
+ * request target is pinned to the HTTPS-only SCRAPPER_ALLOWED_ENDPOINTS above, and
+ * receipts are verified against that same HTTPS-only list. Every payment-moving field
+ * (network, asset, amount, payTo, timeout, sponsorship) remains an exact match.
+ */
+export const SCRAPPER_CHALLENGE_RESOURCE_URLS = Object.freeze([
+  "https://scrapper.stellar8004.com/task",
+  "http://scrapper.stellar8004.com/task",
+] as const);
 
 const REPUTATION_CONTRACT_MAINNET = "CBOIAIMMWAXI57OATLX6BWVDQLCC4YU55HV6MZXFRP6CBSGAMXSTEPPA";
 /**
@@ -1228,9 +1240,12 @@ export function validatePaymentChallenge(cfg: DemoConfig, required: PaymentRequi
       `402 challenge must contain exactly one payment requirement; got ${Array.isArray(required.accepts) ? required.accepts.length : "invalid"}`,
     );
   }
-  if (!isRecord(required.resource) || required.resource.url !== SCRAPPER_ALLOWED_ENDPOINTS[0]) {
+  if (
+    !isRecord(required.resource) ||
+    !(SCRAPPER_CHALLENGE_RESOURCE_URLS as readonly string[]).includes(required.resource.url as string)
+  ) {
     throw new Error(
-      `resource mismatch: challenge=${String((required.resource as any)?.url)} expected=${SCRAPPER_ALLOWED_ENDPOINTS[0]}`,
+      `resource mismatch: challenge=${String((required.resource as any)?.url)} expected one of=${SCRAPPER_CHALLENGE_RESOURCE_URLS.join(", ")}`,
     );
   }
   const accept = required.accepts[0];

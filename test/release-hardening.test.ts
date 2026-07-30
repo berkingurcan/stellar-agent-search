@@ -107,7 +107,6 @@ describe("real release fail-closed gates", () => {
       "private move to selected owner `berkingurcan` → inert `0.0.0` reservation under the non-default `bootstrap` tag while private → public repository → protected OIDC real release";
     const releaseDocs = [
       "CONTRIBUTING.md",
-      "instruction.md",
       "docs/evidence.md",
       "issues/P0-01-make-repository-public.md",
       "issues/P0-03-first-npm-publish.md",
@@ -235,20 +234,9 @@ describe("real release fail-closed gates", () => {
     );
   });
 
-  it("documents the exact npm publisher filename, environment, and post-publish landing gate", () => {
-    const runbook = read("instruction.md");
-    expect(runbook).toContain("workflow filename: **`publish.yml`**");
-    expect(runbook).toContain("environment name: **`npm-production`**");
-    expect(runbook).toContain("`web/src/lib/install.ts`");
-    expect(runbook).toContain("Never manually publish `0.1.0`");
-    expect(runbook).toContain("P1-06");
-    expect(runbook).toContain("npm audit --omit=dev --audit-level=high");
-    expect(runbook).toContain("canonical_owner='berkingurcan'");
-    expect(runbook).toContain("organization/user: **`berkingurcan`**");
-    expect(runbook.indexOf("Reserve the npm name once")).toBeLessThan(
-      runbook.indexOf("Make the canonical repository public"),
-    );
-
+  it("keeps the post-publish landing gate wired to the published surface", () => {
+    // The operational runbook (instruction.md) was retired after the 0.1.0
+    // release shipped; the machine-checkable landing gate below outlives it.
     const landing = read("web", "src", "routes", "+page.svelte");
     const installSelector = read("web", "src", "lib", "install.ts");
     const publishedSurface = read("web", "src", "lib", "install-published.ts");
