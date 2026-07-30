@@ -2,7 +2,14 @@
 
 **Owner:** Builder · **Phase A blocked by:** [01 phase A](P0-01-make-repository-public.md) (canonical
 owner/transfer) · **Phase A blocks:** 01 phase B (public visibility) · **Phase B blocked by:** 01 phase B ·
-**Blocks:** 05 · **Status:** npm publish resolved 30 July 2026 — `stellar-agent-search@0.1.0` is live via the protected OIDC workflow with verified provenance, `bootstrap: 0.0.0` reserved first; **open remainder:** the publish run failed *after* npm publication on an npm attestation-propagation race (`npm audit signatures` E404), so the MCP Registry steps were skipped — re-run the failed job and verify the registry version equals `server.json`
+**Blocks:** 05 · **Status:** resolved 30 July 2026 — `stellar-agent-search@0.1.0` is live on npm via the protected
+OIDC workflow with verified provenance (`bootstrap: 0.0.0` reserved first), and the MCP Registry version `0.1.0`
+is live and equal to `server.json` under the registry's schema-default normalization. The `v0.1.0` publish run
+shows red on its final verify step only: the first attempt hit an npm attestation-propagation race, the re-run hit
+the registry read-back lagging its own publish, and the tag-pinned comparator predates the normalization fix on
+`main`, so that run can never turn green retroactively. The publication is verified directly:
+`curl https://registry.modelcontextprotocol.io/v0.1/servers/io.github.berkingurcan%2Fstellar-agent-search/versions/0.1.0`
+piped through `node scripts/release/verify-mcp-registry.mjs` prints an exact match. Future tags verify green
 
 ## Problem
 

@@ -21,7 +21,23 @@ try {
   process.exit(1);
 }
 
-if (!response.server || !isDeepStrictEqual(response.server, expected)) {
+/**
+ * The registry stores server.json in a normalized form: schema-default fields
+ * (observed: environmentVariables[].isRequired=false on the live 0.1.0 record)
+ * are dropped before the object is re-served. Strip that default from both
+ * sides so the exact-match gate compares meaning, not serialization accidents.
+ */
+function normalized(server) {
+  const copy = JSON.parse(JSON.stringify(server));
+  for (const pkg of copy.packages ?? []) {
+    for (const variable of pkg.environmentVariables ?? []) {
+      if (variable.isRequired === false) delete variable.isRequired;
+    }
+  }
+  return copy;
+}
+
+if (!response.server || !isDeepStrictEqual(normalized(response.server), normalized(expected))) {
   process.stderr.write(
     "MCP Registry verification: the immutable registry version differs from local server.json\n",
   );

@@ -105,7 +105,7 @@
 
 		<div class="space-y-6" use:reveal>
 			{#each CONFIGS as cfg (cfg.id)}
-				<div class="space-y-2">
+				<div class="space-y-2" data-install-config={cfg.id}>
 					<div class="flex items-center gap-2">
 						<span class="text-[12px] font-medium text-text">{cfg.label}</span>
 					</div>

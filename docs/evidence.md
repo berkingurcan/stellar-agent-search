@@ -17,10 +17,13 @@ checked in a browser in about five minutes.
 > **Release state (verified 30 July 2026):** the repository is public under the canonical owner
 > `berkingurcan`, and `stellar-agent-search@0.1.0` is live on npm — published from tag `v0.1.0` through the
 > protected OIDC workflow, with Sigstore provenance naming this repository, `publish.yml`, and the tagged
-> commit. The MCP Registry version is not yet visible: the publish run's npm phase succeeded, but an npm
-> attestation-propagation race failed the job before the MCP Registry steps ran; re-running the failed job
-> is the one outstanding release step. What remains for the SOW itself is the funded mainnet run
-> (Deliverable 2) and the three recordings.
+> commit. The MCP Registry version `0.1.0` is **live** and returns a server object equal to `server.json`
+> (modulo the registry's own schema-default normalization, which the verify script now accounts for). The
+> `v0.1.0` publish run itself shows red on its final verify step: the registry's read-back lagged the
+> publish inside the poll window, and a re-run cannot go green because the tag-pinned comparator predates
+> the normalization fix — the publication is verified directly instead (`curl` the version endpoint and run
+> `node scripts/release/verify-mcp-registry.mjs` on the response). What remains for the SOW itself is the
+> funded mainnet run (Deliverable 2) and the three recordings.
 
 **Mandatory first-release order:** private move to selected owner `berkingurcan` → inert `0.0.0` reservation under
 the non-default `bootstrap` tag while private → public repository → protected OIDC real release.
@@ -278,7 +281,7 @@ in one file per item under [`issues/`](../issues/); this table is the state, not
 |---|---|---|
 | [01](../issues/P0-01-make-repository-public.md) | Canonical repository public under `berkingurcan` | ✅ done — verified logged-out |
 | [02](../issues/P0-02-set-default-branch-to-main.md) | Default branch is `main` | ✅ done |
-| [03](../issues/P0-03-first-npm-publish.md) | Inert bootstrap reservation, then protected OIDC real release | ✅ npm `0.1.0` live with provenance · 🟡 MCP Registry version awaits the failed-job re-run |
+| [03](../issues/P0-03-first-npm-publish.md) | Inert bootstrap reservation, then protected OIDC real release | ✅ done — npm `0.1.0` live with provenance; MCP Registry `0.1.0` live and verified against `server.json` |
 | [04](../issues/P0-04-funded-mainnet-x402-run.md) | Funded mainnet run of `examples/x402-demo.ts` | 🟡 payer funded (XLM + USDC trustline), preflight green, live challenge validates; awaiting the recorded run |
 | [05](../issues/P0-05-record-three-demos.md) | Recordings 1–3 | ⬜ the last SOW-blocking step |
 

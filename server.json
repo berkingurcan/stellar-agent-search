@@ -23,23 +23,19 @@
         {
           "name": "STELLAR_NETWORK",
           "description": "Stellar network to target: mainnet | testnet. testnet also requires EXPLORER_BASE_URL — the default explorer indexes mainnet only, and the server refuses to start on the mismatched pair.",
-          "isRequired": false,
           "default": "mainnet"
         },
         {
           "name": "EXPLORER_BASE_URL",
-          "description": "Override the stellar-8004 explorer API base URL.",
-          "isRequired": false
+          "description": "Override the stellar-8004 explorer API base URL."
         },
         {
           "name": "STELLAR_RPC_URL",
-          "description": "Override the Soroban RPC URL used for the bounded Reputation-contract probe.",
-          "isRequired": false
+          "description": "Override the Soroban RPC URL used for the bounded Reputation-contract probe."
         },
         {
           "name": "VERIFY_ONCHAIN",
           "description": "Set to 'false' to skip the bounded contract probe; reputation fields remain Explorer-declared either way.",
-          "isRequired": false,
           "default": "true"
         }
       ]
