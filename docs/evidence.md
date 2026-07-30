@@ -146,7 +146,7 @@ a second complete loop at 07:53Z
 and a settled payment at 06:12Z
 ([bd8ab74d…](https://stellar.expert/explorer/public/tx/bd8ab74d117067498b6174b569e563e7812b7ea98a7d212dea7f8214aa5c5e55))
 whose run aborted before feedback because the client rejected soroban-rpc's int64-string `createdAt`;
-that bug is fixed and regression-tested (commit `a4336dd`).
+that bug is fixed and regression-tested (commit `c002c79`).
 
 ### What the script does, in order
 
