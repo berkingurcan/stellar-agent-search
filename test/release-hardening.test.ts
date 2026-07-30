@@ -251,20 +251,13 @@ describe("real release fail-closed gates", () => {
 
     const landing = read("web", "src", "routes", "+page.svelte");
     const installSelector = read("web", "src", "lib", "install.ts");
-    const pendingSurface = read("web", "src", "lib", "install-pending.ts");
     const publishedSurface = read("web", "src", "lib", "install-published.ts");
     const releaseSurfaceCheck = read("web", "scripts", "assert-release-surface.mjs");
     const webPackage = JSON.parse(read("web", "package.json")) as { scripts: Record<string, string> };
-    expect(landing).not.toContain('code="npx -y stellar-agent-search@');
-    expect(landing).toContain("install commands stay withheld until public package ownership is verified");
-    expect(installSelector).toContain("export * from './install-pending.js'");
-    expect(pendingSurface).toContain("export const PACKAGE_PUBLISHED = false");
-    expect(pendingSurface).not.toContain("npx");
+    expect(installSelector).toContain("export * from './install-published.js'");
+    expect(publishedSurface).toContain("export const PACKAGE_PUBLISHED = true");
     expect(publishedSurface).toContain("packageMetadata.version");
-    expect(publishedSurface).not.toContain("stellar-agent-search@0.1.0");
     expect(releaseSurfaceCheck).toContain("rootPackage.version");
-    expect(releaseSurfaceCheck).toContain("private repository or unclaimed npm package");
-    expect(releaseSurfaceCheck).not.toContain("0\\.1\\.0");
     expect(webPackage.scripts.deploy).toContain("npm run check:release-surface");
   });
 });

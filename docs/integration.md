@@ -284,6 +284,46 @@ Claude Code, plus an optional `trust` field that skips the per-call approval pro
 
 ---
 
+## OpenClaw
+
+OpenClaw uses the standard `mcpServers` JSON shape, same as Claude Code. Add to your project `.mcp.json`
+or global OpenClaw config:
+
+```json
+{
+  "mcpServers": {
+    "stellar-agent": {
+      "command": "npx",
+      "args": ["-y", "stellar-agent-search@0.1.0", "mcp"],
+      "env": { "STELLAR_NETWORK": "mainnet" }
+    }
+  }
+}
+```
+
+OpenClaw agents can call all 13 read-only tools, pin resources via `@stellar-agent:stellar8004://…`,
+and use slash prompts like `/mcp__stellar-agent__find-and-vet-agent`.
+
+---
+
+## Hermes
+
+Hermes uses the same `mcpServers` JSON shape. Add to your Hermes MCP config file:
+
+```json
+{
+  "mcpServers": {
+    "stellar-agent": {
+      "command": "npx",
+      "args": ["-y", "stellar-agent-search@0.1.0", "mcp"],
+      "env": { "STELLAR_NETWORK": "mainnet" }
+    }
+  }
+}
+```
+
+---
+
 ## Config matrix
 
 | Client | Config file | Root key | Client-specific fields | Register via |
@@ -296,6 +336,8 @@ Claude Code, plus an optional `trust` field that skips the per-call approval pro
 | VS Code | `.vscode/mcp.json` | **`servers`** | `${input:}` | edit file |
 | Codex CLI | `~/.codex/config.toml` | **`mcp_servers`** (TOML) | — | `stellar-agent-search setup --client codex` |
 | Gemini CLI | `~/.gemini/settings.json` | `mcpServers` | `trust` | edit file |
+| OpenClaw | `.mcp.json` / global config | `mcpServers` | — | edit file |
+| Hermes | MCP config file | `mcpServers` | — | edit file |
 
 ---
 

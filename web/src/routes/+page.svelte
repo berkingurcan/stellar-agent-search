@@ -7,7 +7,8 @@
 	import { reveal } from '$lib/actions/reveal.js';
 	import { PACKAGE_PUBLISHED } from '$lib/install.js';
 	import { INVARIANTS } from '$lib/surface.js';
-	import { EXPLORER, GITHUB, MCP_SPEC, SDK_DOCS, SITE } from '$lib/links.js';
+	import { CONFIGS } from '$lib/install.js';
+	import { EXPLORER, GITHUB, NPM, MCP_SPEC, SDK_DOCS, SITE } from '$lib/links.js';
 </script>
 
 <svelte:head>
@@ -87,6 +88,39 @@
 		<div id="output" class="scroll-mt-24 space-y-6" use:reveal>
 			<AgentRank />
 			<HealthCheck />
+		</div>
+	</section>
+
+	<!-- Quick Start -->
+	<section id="install" class="mt-16 scroll-mt-24 border-t border-border pt-12 space-y-8 sm:mt-28 sm:pt-20 sm:space-y-12">
+		<div class="space-y-3" use:reveal>
+			<span class="text-[11px] tracking-[0.2em] text-text-dim uppercase">Quick start</span>
+			<h2 class="text-[1.5rem] leading-[1.1] font-light tracking-[-0.025em] text-text sm:text-[2.5rem] sm:leading-[1.1] sm:tracking-[-0.03em]">
+				One command. Any MCP client.
+			</h2>
+			<p class="max-w-md text-[14px] leading-[1.6] text-text-muted">
+				Node.js ≥ 22. No account, no API key, no wallet. Read-only by design.
+			</p>
+		</div>
+
+		<div class="space-y-6" use:reveal>
+			{#each CONFIGS as cfg (cfg.id)}
+				<div class="space-y-2">
+					<div class="flex items-center gap-2">
+						<span class="text-[12px] font-medium text-text">{cfg.label}</span>
+					</div>
+					<pre class="overflow-x-auto rounded-lg border border-border bg-[#0d0d0d] p-4 text-[13px] leading-[1.5] text-text-muted"><code>{cfg.code}</code></pre>
+					{#if cfg.note}
+						<p class="text-[11px] leading-relaxed text-text-dim">{cfg.note}</p>
+					{/if}
+				</div>
+			{/each}
+		</div>
+
+		<div class="flex flex-wrap gap-3" use:reveal>
+			<CtaButton href={GITHUB} variant="secondary" size="sm" external>GitHub</CtaButton>
+			<CtaButton href={NPM} variant="secondary" size="sm" external>npm</CtaButton>
+			<CtaButton href={`${GITHUB}/blob/main/docs/integration.md`} variant="secondary" size="sm" external>All clients</CtaButton>
 		</div>
 	</section>
 

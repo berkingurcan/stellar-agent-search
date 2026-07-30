@@ -8,10 +8,7 @@
 
 > **A read-only ERC-8004 discovery layer that keeps indexed reputation declared and reports the exact limits of its bounded Stellar contract probe. The funded x402 + feedback proof is implemented but still pending its first recorded mainnet run.**
 
-> **Pre-release security gate (29 July 2026):** the `stellar-agent-search` npm name is still unclaimed. Do not
-> run the `npx` commands below until the [official npm page](https://www.npmjs.com/package/stellar-agent-search)
-> shows a release owned by this project. Once installed, `setup` pins the exact package version in persistent
-> MCP client configuration rather than executing a mutable `latest` tag on every launch.
+[**npm**](https://www.npmjs.com/package/stellar-agent-search) · [**GitHub**](https://github.com/berkingurcan/stellar-agent-search) · [**Docs**](docs/getting-started.md) · [**Evidence package**](docs/evidence.md)
 
 There are two official interfaces, not two copies of the stack. TypeScript applications, registration, and
 signed writes use the canonical [`@trionlabs/stellar8004`](https://www.npmjs.com/package/@trionlabs/stellar8004)

@@ -27,7 +27,7 @@ metadata:
   contract probe verifies no reputation fields. It is not a trust or payment authorization.
 - Needs an agent's **full profile** (identity, services, scores, recent feedback) and its canonical `stellar:…#id` handle.
 - Needs a **catalog of self-declared service candidates** (x402 / MPP endpoints) to vet before calling.
-- Wants to **wire the stellar-agent-search server** into Claude Code / Cursor / Windsurf / Cline / Claude Desktop / VS Code.
+- Wants to **wire the stellar-agent-search server** into Claude Code / Cursor / Windsurf / Cline / Claude Desktop / VS Code / OpenClaw / Hermes.
 
 If you (the agent) are being asked to do any of the above and the `stellar-agent-search` tools are not already available
 in this session, **install the server now** using the [Install](#install-do-this-first) section below, then use its tools.
@@ -77,7 +77,7 @@ npx -y stellar-agent-search@0.1.0 setup --client cursor --scope project --handsh
 The setup command atomically merges strict JSON. It refuses to overwrite JSONC, symlinks, concurrent changes,
 or an existing non-matching `stellar-agent` registration and prints a manual merge instruction instead.
 
-### Manual JSON config (Claude Code project `./.mcp.json`, Cursor, Windsurf, Cline, Claude Desktop)
+### Manual JSON config (Claude Code project `./.mcp.json`, Cursor, Windsurf, Cline, Claude Desktop, OpenClaw, Hermes)
 
 Most stdio MCP clients share the identical `command` / `args` / `env` triple under an `mcpServers` key. Paste:
 
