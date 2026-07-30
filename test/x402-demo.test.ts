@@ -109,7 +109,10 @@ function paymentEnvelope(nonce = 1n) {
         auth: [auth],
       }),
     )
-    .setTimeout(30)
+    // Deterministic timebounds (nowMs fixture + 30s). `.setTimeout(30)` derives
+    // maxTime from wall-clock seconds, so two same-nonce envelopes built across
+    // a second boundary differ by one byte — a real CI flake on 2026-07-30.
+    .setTimebounds(0, 1_700_000_030)
     .build();
 }
 
