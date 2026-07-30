@@ -1829,9 +1829,7 @@ export function assertOnchainSettlement(
   if (!Number.isSafeInteger(transaction.ledger) || transaction.ledger <= 0) {
     throw new Error("settlement transaction has no valid ledger sequence");
   }
-  if (!Number.isFinite(transaction.createdAt)) {
-    throw new Error("settlement transaction has no valid close time");
-  }
+  const settlementCloseTime = assertCloseTimeSeconds("settlement transaction", transaction.createdAt);
   if (!/^[0-9a-f]{64}$/.test(expected.authorizationHash)) {
     throw new Error("expected payment authorization hash is invalid");
   }
@@ -1849,10 +1847,10 @@ export function assertOnchainSettlement(
   if (confirmedAuthorizationHash !== expected.authorizationHash) {
     throw new Error("settlement transaction does not contain this payment's signed Soroban authorization");
   }
-  // SDK v15 exposes `createdAt` only as whole Unix seconds. This check cannot
+  // The RPC exposes `createdAt` only as whole Unix seconds. This check cannot
   // distinguish two events inside one second, so authorizationHash above is the
   // replay boundary; time remains defense-in-depth for older-ledger receipts.
-  if (transaction.createdAt < Math.floor(expected.submittedAtMs / 1_000)) {
+  if (settlementCloseTime < Math.floor(expected.submittedAtMs / 1_000)) {
     throw new Error("settlement transaction predates this payment submission");
   }
   const facts = transferFacts(transaction);
@@ -1870,7 +1868,7 @@ export function assertOnchainSettlement(
   }
   return {
     ledger: transaction.ledger,
-    confirmedAt: new Date(transaction.createdAt * 1_000).toISOString(),
+    confirmedAt: new Date(settlementCloseTime * 1_000).toISOString(),
     recomputedTxHash,
     transactionXdr: transaction.envelopeXdr.toXDR("base64"),
   };
@@ -1891,6 +1889,20 @@ async function verifySettlementOnchain(
     }
     return assertOnchainSettlement(transaction, txHash, expected);
   });
+}
+
+/**
+ * soroban-rpc serializes `createdAt` as an int64 decimal string on the wire and
+ * @stellar/stellar-sdk passes it through unconverted, while test fixtures and
+ * some providers hand back a number. Accept exactly those two shapes.
+ */
+export function assertCloseTimeSeconds(label: string, value: unknown): number {
+  const seconds =
+    typeof value === "string" && /^\d{1,19}$/.test(value) ? Number(value) : value;
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) {
+    throw new Error(`${label} has no valid close time`);
+  }
+  return seconds;
 }
 
 export function assertTransactionHash(label: string, hash: unknown): string {
@@ -2142,10 +2154,8 @@ export function assertOnchainFeedback(
   if (!Number.isSafeInteger(transaction.ledger) || transaction.ledger <= 0) {
     throw new Error("feedback transaction has no valid ledger sequence");
   }
-  if (!Number.isFinite(transaction.createdAt)) {
-    throw new Error("feedback transaction has no valid close time");
-  }
-  if (transaction.createdAt < Math.floor(expected.submittedAtMs / 1_000)) {
+  const feedbackCloseTime = assertCloseTimeSeconds("feedback transaction", transaction.createdAt);
+  if (feedbackCloseTime < Math.floor(expected.submittedAtMs / 1_000)) {
     throw new Error("feedback transaction predates this submission");
   }
   if (!(transaction.envelopeXdr instanceof xdr.TransactionEnvelope)) {
@@ -2244,7 +2254,7 @@ export function assertOnchainFeedback(
   }
   return {
     ledger: transaction.ledger,
-    confirmedAt: new Date(transaction.createdAt * 1_000).toISOString(),
+    confirmedAt: new Date(feedbackCloseTime * 1_000).toISOString(),
     feedbackIndex: matches[0].feedbackIndex.toString(),
     transactionXdr: finalTransactionXdr,
     eventXdr: matches[0].eventXdr,

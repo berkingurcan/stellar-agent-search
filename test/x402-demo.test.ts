@@ -1042,6 +1042,21 @@ describe("x402 evidence integrity", () => {
     expect(() => assertOnchainSettlement({ ...tx, txHash: TX }, TX, expected)).toThrow(
       /envelope hash does not match/,
     );
+    // soroban-rpc serializes createdAt as an int64 decimal string and the SDK
+    // passes it through unconverted; a live mainnet settlement was rejected
+    // with "no valid close time" before this shape was accepted.
+    expect(assertOnchainSettlement({ ...tx, createdAt: "1700000001" }, txHash, expected)).toMatchObject({
+      ledger: 123,
+      confirmedAt: "2023-11-14T22:13:21.000Z",
+    });
+    expect(() =>
+      assertOnchainSettlement({ ...tx, createdAt: "1699999999" }, txHash, expected),
+    ).toThrow(/predates/);
+    for (const invalid of [undefined, null, "", "12a", "-5", NaN, Infinity, 0]) {
+      expect(() => assertOnchainSettlement({ ...tx, createdAt: invalid }, txHash, expected)).toThrow(
+        /no valid close time/,
+      );
+    }
   });
 
   it("rejects a prior identical transfer in the same RPC second unless its signed authorization matches", () => {
