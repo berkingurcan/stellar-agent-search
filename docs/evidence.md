@@ -131,15 +131,22 @@ npx -y stellar-agent-search@0.1.0 setup --client claude --scope user --handshake
 |---|---|---|
 | Reference script in the repo | ✅ | [examples/x402-demo.ts](../examples/x402-demo.ts) |
 | Demo video (3–5 min) | 🟡 | `‹video link — recorded, awaiting upload›` |
-| Mainnet tx hash — x402 USDC payment | ✅ | [59a5fb60…19e640](https://stellar.expert/explorer/public/tx/59a5fb60b43bca68ee6383b66acc551b3e7a6ab1f8d42c08fca2a8cc1919e640) |
-| Mainnet tx hash — Reputation Registry feedback | ✅ | [87520294…c6dbed](https://stellar.expert/explorer/public/tx/875202943e10dd337c4b91e64cfc99afa034f2ec27fd4aceda7c6bf4e2c6dbed) |
+| Mainnet tx hash — x402 USDC payment | ✅ | [de0717ec…be3c55](https://stellar.expert/explorer/public/tx/de0717ecb5b34b712fd196c8438cb20bff52e4f843fc7b8263e03b1dd5be3c55) |
+| Mainnet tx hash — Reputation Registry feedback | ✅ | [10d73971…740846](https://stellar.expert/explorer/public/tx/10d739713a02ae517bc96b8507d0d6ae28913ccdd7b10484f77e37bf8c740846) |
 
-The funded mainnet run executed on 2026-07-30T07:05Z: payment settled in ledger 63714695, the paid scrape
-result validated (`resultOk: true`), and feedback landed in ledger 63714696 — both hashes are Horizon-verified
-(`successful: true`). An earlier funded run also settled payment
-[bd8ab74d…5c5e55](https://stellar.expert/explorer/public/tx/bd8ab74d117067498b6174b569e563e7812b7ea98a7d212dea7f8214aa5c5e55)
-(ledger 63714129) but aborted before feedback because the client rejected soroban-rpc's int64-string
-`createdAt`; that bug is fixed and regression-tested (commit `a4336dd`).
+The recorded funded run executed on 2026-07-30T08:05Z: payment settled in ledger 63715338, the paid scrape
+result validated (`resultOk: true`), and feedback landed in ledger 63715340 — both hashes are Horizon-verified
+(`successful: true`) live inside the recording. Earlier funded runs provide additional on-chain evidence:
+a complete loop at 07:05Z
+([payment 59a5fb60…](https://stellar.expert/explorer/public/tx/59a5fb60b43bca68ee6383b66acc551b3e7a6ab1f8d42c08fca2a8cc1919e640),
+[feedback 87520294…](https://stellar.expert/explorer/public/tx/875202943e10dd337c4b91e64cfc99afa034f2ec27fd4aceda7c6bf4e2c6dbed)),
+a second complete loop at 07:53Z
+([payment bd80a28c…](https://stellar.expert/explorer/public/tx/bd80a28ccaa7ded4a1043c2575d6131514d5d75d8cacd5decddb356a59f0b350),
+[feedback 3f3837b1…](https://stellar.expert/explorer/public/tx/3f3837b159641633b266dc22c6dfafdc3bc24c31c7f1c42ff0d847a8bb050653)),
+and a settled payment at 06:12Z
+([bd8ab74d…](https://stellar.expert/explorer/public/tx/bd8ab74d117067498b6174b569e563e7812b7ea98a7d212dea7f8214aa5c5e55))
+whose run aborted before feedback because the client rejected soroban-rpc's int64-string `createdAt`;
+that bug is fixed and regression-tested (commit `a4336dd`).
 
 ### What the script does, in order
 
