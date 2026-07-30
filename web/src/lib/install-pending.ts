@@ -8,5 +8,5 @@ import type { InstallConfig } from './install-types.js';
 export const PACKAGE_PUBLISHED = false;
 export const HERO_CMD = '';
 export const CONFIGS: InstallConfig[] = [
-	{ id: 'pending', label: 'Pre-release', lang: 'text', code: '', note: '' }
+	{ id: 'pending', label: 'Pre-release', tagline: '', lang: 'text', code: '', note: '' }
 ];

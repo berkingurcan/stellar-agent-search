@@ -284,6 +284,27 @@ Claude Code, plus an optional `trust` field that skips the per-call approval pro
 
 ---
 
+## OpenCode
+
+OpenCode uses an `mcp` root key (not `mcpServers`) with a **command array**. Add to `opencode.json` at the
+project root, or globally in `~/.config/opencode/opencode.json`:
+
+```json
+{
+  "mcp": {
+    "stellar-agent": {
+      "type": "local",
+      "command": ["npx", "-y", "stellar-agent-search@0.1.0", "mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+Restart the TUI after saving; all 13 tools appear read-only.
+
+---
+
 ## OpenClaw
 
 OpenClaw uses the standard `mcpServers` JSON shape, same as Claude Code. Add to your project `.mcp.json`
@@ -336,6 +357,7 @@ Hermes uses the same `mcpServers` JSON shape. Add to your Hermes MCP config file
 | VS Code | `.vscode/mcp.json` | **`servers`** | `${input:}` | edit file |
 | Codex CLI | `~/.codex/config.toml` | **`mcp_servers`** (TOML) | — | `stellar-agent-search setup --client codex` |
 | Gemini CLI | `~/.gemini/settings.json` | `mcpServers` | `trust` | edit file |
+| OpenCode | `opencode.json` / `~/.config/opencode/opencode.json` | **`mcp`** (command array) | `type`, `enabled` | edit file |
 | OpenClaw | `.mcp.json` / global config | `mcpServers` | — | edit file |
 | Hermes | MCP config file | `mcpServers` | — | edit file |
 

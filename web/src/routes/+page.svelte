@@ -4,8 +4,11 @@
 	import AgentNetwork from '$lib/components/AgentNetwork.svelte';
 	import HealthCheck from '$lib/components/HealthCheck.svelte';
 	import VerdictCard from '$lib/components/VerdictCard.svelte';
+	import ClientIcon from '$lib/components/ClientIcon.svelte';
+	import InstallPicker from '$lib/components/InstallPicker.svelte';
+	import CopyCommand from '$lib/components/CopyCommand.svelte';
 	import { reveal } from '$lib/actions/reveal.js';
-	import { PACKAGE_PUBLISHED } from '$lib/install.js';
+	import { PACKAGE_PUBLISHED, HERO_CMD } from '$lib/install.js';
 	import { INVARIANTS } from '$lib/surface.js';
 	import { CONFIGS } from '$lib/install.js';
 	import { EXPLORER, GITHUB, NPM, MCP_SPEC, SDK_DOCS, SITE } from '$lib/links.js';
@@ -39,25 +42,42 @@
 			</p>
 		</div>
 
-		<div class="reveal reveal-d1">
-			<VerdictCard />
-		</div>
+		{#if PACKAGE_PUBLISHED}
+			<div class="reveal reveal-d1 max-w-xl">
+				<CopyCommand command={HERO_CMD} />
+			</div>
+		{:else}
+			<div class="reveal reveal-d1">
+				<VerdictCard />
+			</div>
+		{/if}
 
 		<div class="reveal reveal-d2 space-y-3">
 			<div class="flex flex-wrap items-center gap-3">
 				<CtaButton href={PACKAGE_PUBLISHED ? '#install' : SDK_DOCS} size="md" external={!PACKAGE_PUBLISHED}>
-					{PACKAGE_PUBLISHED ? 'Add to your client' : 'SDK docs'}
+					{PACKAGE_PUBLISHED ? 'Quick start' : 'SDK docs'}
 					<svg class="h-3.5 w-3.5 transition-transform duration-300 group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
 				</CtaButton>
 				<CtaButton href={EXPLORER} variant="secondary" size="md" external>Explore registry</CtaButton>
 			</div>
-			<p class="text-[11px] text-text-dim">
-				{#if !PACKAGE_PUBLISHED}
+			{#if !PACKAGE_PUBLISHED}
+				<p class="text-[11px] text-text-dim">
 					Pre-release · install commands stay withheld until public package ownership is verified
-				{:else}
-					Claude Code · Cursor · Windsurf · Cline · VS Code
-				{/if}
-			</p>
+				</p>
+			{:else}
+				<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+					{#each CONFIGS as cfg (cfg.id)}
+						<a
+							href="#install"
+							class="flex items-center gap-1.5 text-text-dim transition-colors hover:text-text-muted"
+							title={cfg.tagline}
+						>
+							<ClientIcon id={cfg.id} class="h-3.5 w-3.5" />
+							<span class="text-[11px]">{cfg.label}</span>
+						</a>
+					{/each}
+				</div>
+			{/if}
 		</div>
 	</section>
 
@@ -103,18 +123,8 @@
 			</p>
 		</div>
 
-		<div class="space-y-6" use:reveal>
-			{#each CONFIGS as cfg (cfg.id)}
-				<div class="space-y-2" data-install-config={cfg.id}>
-					<div class="flex items-center gap-2">
-						<span class="text-[12px] font-medium text-text">{cfg.label}</span>
-					</div>
-					<pre class="overflow-x-auto rounded-lg border border-border bg-[#0d0d0d] p-4 text-[13px] leading-[1.5] text-text-muted"><code>{cfg.code}</code></pre>
-					{#if cfg.note}
-						<p class="text-[11px] leading-relaxed text-text-dim">{cfg.note}</p>
-					{/if}
-				</div>
-			{/each}
+		<div use:reveal>
+			<InstallPicker configs={CONFIGS} />
 		</div>
 
 		<div class="flex flex-wrap gap-3" use:reveal>
