@@ -106,7 +106,7 @@ export function loadConfig(env: EnvironmentMap = defaultEnvironment()): Config {
   if (legacyRankingWeight) {
     throw new ConfigError(
       `${legacyRankingWeight} is no longer supported. Ranking policy ` +
-        `stellar-agent-mcp-declared-evidence-v1 uses fixed evidence weights ` +
+        `stellar-agent-market-declared-evidence-v1 uses fixed evidence weights ` +
         `(volume=0.4, breadth=0.6) so callers cannot silently redefine score semantics.`,
     );
   }
@@ -115,7 +115,7 @@ export function loadConfig(env: EnvironmentMap = defaultEnvironment()): Config {
     const configuredScoreMax = Number(rawScoreMax);
     if (!Number.isFinite(configuredScoreMax) || configuredScoreMax !== RANK_SCORE_MAX) {
       throw new ConfigError(
-        `RANK_SCORE_MAX cannot change stellar-agent-mcp-declared-evidence-v1 semantics; ` +
+        `RANK_SCORE_MAX cannot change stellar-agent-market-declared-evidence-v1 semantics; ` +
           `the only accepted value is ${RANK_SCORE_MAX}, got '${env.RANK_SCORE_MAX}'.`,
       );
     }

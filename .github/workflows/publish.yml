@@ -18,7 +18,7 @@ permissions:
 env:
   NPM_REGISTRY_URL: https://registry.npmjs.org
   MCP_REGISTRY_URL: https://registry.modelcontextprotocol.io
-  EXPECTED_REPOSITORY_URL: https://github.com/berkingurcan/stellar-agent-mcp
+  EXPECTED_REPOSITORY_URL: https://github.com/berkingurcan/stellar-agent-market
   EXPECTED_NPM_OWNERS: ${{ vars.NPM_PACKAGE_OWNERS }}
 
 jobs:
@@ -152,19 +152,19 @@ jobs:
           npm init -y
           npm install --ignore-scripts --no-audit --no-fund --save-exact "${{ steps.pack.outputs.path }}"
           expected_version="$(node -p "require('$GITHUB_WORKSPACE/package.json').version")"
-          actual_version="$(./node_modules/.bin/stellar-agent-mcp --version)"
+          actual_version="$(./node_modules/.bin/stellar-agent-market --version)"
           if [[ "$actual_version" != "$expected_version" ]]; then
             echo "::error::Packed CLI reported $actual_version, expected $expected_version."
             exit 1
           fi
           npm ls --all
-          npm sbom --omit=dev --sbom-format cyclonedx > "$GITHUB_WORKSPACE/stellar-agent-mcp.cdx.json"
+          npm sbom --omit=dev --sbom-format cyclonedx > "$GITHUB_WORKSPACE/stellar-agent-market.cdx.json"
 
       - name: Upload release SBOM
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: stellar-agent-mcp-${{ github.ref_name }}-sbom
-          path: stellar-agent-mcp.cdx.json
+          name: stellar-agent-market-${{ github.ref_name }}-sbom
+          path: stellar-agent-market.cdx.json
           if-no-files-found: error
 
       - name: Audit packed-consumer runtime graph

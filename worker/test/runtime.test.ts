@@ -1021,7 +1021,7 @@ describe("health and real MCP factory smoke", () => {
       ? Reflect.get(meta, "io.modelcontextprotocol/serverInfo")
       : undefined;
     expect(isRecord(serverInfo) ? Reflect.get(serverInfo, "name") : undefined).toBe(
-      "stellar-agent-mcp",
+      "stellar-agent-market",
     );
   });
 
@@ -1036,7 +1036,7 @@ describe("health and real MCP factory smoke", () => {
     const result = Reflect.get(payload, "result");
     const serverInfo = isRecord(result) ? Reflect.get(result, "serverInfo") : undefined;
     expect(isRecord(serverInfo) ? Reflect.get(serverInfo, "name") : undefined).toBe(
-      "stellar-agent-mcp",
+      "stellar-agent-market",
     );
     expect(isRecord(serverInfo) ? Reflect.get(serverInfo, "version") : undefined).toBe(
       WORKER_SERVER_VERSION,

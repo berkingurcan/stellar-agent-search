@@ -1,11 +1,11 @@
 # Getting started
 
 > **Pre-release:** the npm name is not yet owned by this project. Until the
-> [official package page](https://www.npmjs.com/package/stellar-agent-mcp) shows version 0.1.0, do not run an
-> `npx stellar-agent-mcp` command. The setup flow below pins `@0.1.0` into persistent client configuration
+> [official package page](https://www.npmjs.com/package/stellar-agent-market) shows version 0.1.0, do not run an
+> `npx stellar-agent-market` command. The setup flow below pins `@0.1.0` into persistent client configuration
 > after the official package exists.
 
-`stellar-agent-mcp` is a single Node binary with three entry points:
+`stellar-agent-market` is a single Node binary with three entry points:
 
 - **MCP stdio server** — how an MCP client (Claude Code, Cursor, Windsurf, Cline, VS Code) launches it.
 - **Client bootstrap** — the idempotent `setup` command registers that server with Claude Code, Cursor, or Codex.
@@ -25,29 +25,29 @@ the current release compares no reputation fields. It never signs, never writes,
 
 ```bash
 # Natural-language discovery → a ranked candidate table
-npx -y stellar-agent-mcp@0.1.0 find "a paid web scraper with a good reputation"
+npx -y stellar-agent-market@0.1.0 find "a paid web scraper with a good reputation"
 
 # Only agents that accept x402 (USDC pay-per-call)
-npx -y stellar-agent-mcp@0.1.0 find "scraper" --x402
+npx -y stellar-agent-market@0.1.0 find "scraper" --x402
 
 # Full profile for a specific agent (declared reputation + contract-probe limits, capabilities, services)
-npx -y stellar-agent-mcp@0.1.0 profile 10
+npx -y stellar-agent-market@0.1.0 profile 10
 
 # Rank a query's candidates or an explicit id set; attempted contract probes fail closed
-npx -y stellar-agent-mcp@0.1.0 rank "scraping agents"
-npx -y stellar-agent-mcp@0.1.0 rank 10 12 15
+npx -y stellar-agent-market@0.1.0 rank "scraping agents"
+npx -y stellar-agent-market@0.1.0 rank 10 12 15
 
 # Catalog of self-declared service endpoint candidates
-npx -y stellar-agent-mcp@0.1.0 services --x402
+npx -y stellar-agent-market@0.1.0 services --x402
 
 # Machine-readable output for any command
-npx -y stellar-agent-mcp@0.1.0 find "scraper" --json
+npx -y stellar-agent-market@0.1.0 find "scraper" --json
 ```
 
 ### Verify your environment
 
 ```bash
-npx -y stellar-agent-mcp@0.1.0 doctor
+npx -y stellar-agent-market@0.1.0 doctor
 ```
 
 `doctor` prints a pass/fail checklist and exits non-zero on failure — the first thing to run when something
@@ -61,7 +61,7 @@ does not work:
 ✔ soroban   https://mainnet.sorobanrpc.com  healthy
 ✔ contract  read path OK (sample #10 returned 4 address(es) from bounded indices 0..5; not an exhaustive client count; verification unavailable)
 ✔ tools     find_agent, rank_agent, get_agent_profile, list_services (+ list_agents, leaderboard)
-ℹ server    stellar-agent-mcp  ·  @modelcontextprotocol/server 2.0.0  ·  spec 2025-11-25
+ℹ server    stellar-agent-market  ·  @modelcontextprotocol/server 2.0.0  ·  spec 2025-11-25
 ```
 
 Add `--json` for CI.
@@ -72,16 +72,16 @@ Use the bootstrap instead of editing client config by hand:
 
 ```bash
 # Claude Code, all projects (uses the Claude CLI)
-npx -y stellar-agent-mcp@0.1.0 setup --client claude --scope user --handshake
+npx -y stellar-agent-market@0.1.0 setup --client claude --scope user --handshake
 
 # Cursor, current project (atomically updates .cursor/mcp.json)
-npx -y stellar-agent-mcp@0.1.0 setup --client cursor --scope project --handshake
+npx -y stellar-agent-market@0.1.0 setup --client cursor --scope project --handshake
 
 # Codex, user config (uses the Codex CLI)
-npx -y stellar-agent-mcp@0.1.0 setup --client codex --scope user --handshake
+npx -y stellar-agent-market@0.1.0 setup --client codex --scope user --handshake
 ```
 
-All three register the same version-pinned stdio launch: `npx -y stellar-agent-mcp@0.1.0 mcp`. Existing matching entries
+All three register the same version-pinned stdio launch: `npx -y stellar-agent-market@0.1.0 mcp`. Existing matching entries
 are left unchanged; conflicting entries are reported and never overwritten. `--handshake` starts the current
 package, initializes MCP, and prints the complete tool list.
 
@@ -89,10 +89,10 @@ Useful non-mutating modes:
 
 ```bash
 # Is this client already configured, and can this package list its tools?
-npx -y stellar-agent-mcp@0.1.0 setup --client cursor --scope project --check --handshake
+npx -y stellar-agent-market@0.1.0 setup --client cursor --scope project --check --handshake
 
 # Show the exact command/config that would be added
-npx -y stellar-agent-mcp@0.1.0 setup --client cursor --scope project --dry-run --json
+npx -y stellar-agent-market@0.1.0 setup --client cursor --scope project --dry-run --json
 ```
 
 `--check` and `--dry-run` are mutually exclusive; either can be combined with `--handshake`. Claude and Cursor
@@ -104,7 +104,7 @@ Optionally install the **skill** as well. It is the usage guide your agent reads
 which tools exist, when to request the bounded contract probe, and why current attempts return unavailable:
 
 ```bash
-npx skills add berkingurcan/stellar-agent-mcp --skill mcp
+npx skills add berkingurcan/stellar-agent-market --skill mcp
 ```
 
 The skill documents the registration step for eight clients, so it is also the quickest reference for clients
@@ -142,15 +142,15 @@ request, cache, trust, and rollout boundaries.
 the global bin:
 
 ```bash
-npm i -g stellar-agent-mcp@0.1.0
+npm i -g stellar-agent-market@0.1.0
 ```
 
 ```json
-{ "mcpServers": { "stellar-agent": { "command": "stellar-agent-mcp", "args": [] } } }
+{ "mcpServers": { "stellar-agent": { "command": "stellar-agent-market", "args": [] } } }
 ```
 
 This global-bin config is an advanced manual exception: `setup` intentionally records the portable
-`npx -y stellar-agent-mcp@0.1.0 mcp` launch so the same registration works without a prior global install. You can
+`npx -y stellar-agent-market@0.1.0 mcp` launch so the same registration works without a prior global install. You can
 also raise `MCP_TIMEOUT` for the client.
 
 ## Configuration knobs
@@ -163,7 +163,7 @@ also raise `MCP_TIMEOUT` for the client.
 | `VERIFY_ONCHAIN` | `true` | `false` = skip the probe; reputation remains declared-only either way |
 | `RANK_SCORE_MAX` | `100` | Fixed v1 compatibility assertion; any other value fails startup |
 
-The fixed `stellar-agent-mcp-declared-evidence-v1` rank policy normalizes quality against exactly `100` and
+The fixed `stellar-agent-market-declared-evidence-v1` rank policy normalizes quality against exactly `100` and
 uses evidence weights volume `0.4` and breadth `0.6`; a changed `RANK_SCORE_MAX` and retired `RANK_W_*`
 variables are rejected. CLI flags override env (`--network`, `--explorer-url`,
 `--rpc-url`, `--no-verify`, `--limit`, `--min-explorer-score`,

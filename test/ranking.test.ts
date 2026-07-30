@@ -1,5 +1,5 @@
 /**
- * Golden tests for stellar-agent-mcp-declared-evidence-v1.
+ * Golden tests for stellar-agent-market-declared-evidence-v1.
  *
  *   q     = clamp(avg / 100, 0, 1), or 0 when unrated
  *   effUc = min(validSafeInt(uniqueClients), validSafeInt(feedbackCount))
@@ -101,7 +101,7 @@ describe("golden high-rated example", () => {
 
   it("returns the exact versioned q × evidence breakdown", () => {
     const r = scoreAgent(example, OPTS);
-    expect(r.rankVersion).toBe("stellar-agent-mcp-declared-evidence-v1");
+    expect(r.rankVersion).toBe("stellar-agent-market-declared-evidence-v1");
     expect(r.quality.raw).toBe(96.75);
     expect(r.quality.norm).toBeCloseTo(0.9675, 10);
     expect(r.quality.weight).toBe(1);

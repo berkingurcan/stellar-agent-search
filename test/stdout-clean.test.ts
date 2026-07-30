@@ -124,7 +124,7 @@ describe("stdio server keeps stdout JSON-RPC-only", () => {
       .map((l) => JSON.parse(l) as Record<string, any>);
     const init = msgs.find((m) => m.id === 1);
     expect(init).toBeDefined();
-    expect(init!.result.serverInfo.name).toBe("stellar-agent-mcp");
+    expect(init!.result.serverInfo.name).toBe("stellar-agent-market");
     expect(init!.result.capabilities.tools).toEqual({ listChanged: false });
     expect(init!.result.capabilities.resources).toEqual({ listChanged: false });
     expect(init!.result.capabilities.prompts).toEqual({ listChanged: false });

@@ -1,5 +1,5 @@
 {
-  "name": "stellar-agent-mcp",
+  "name": "stellar-agent-market",
   "version": "0.1.0",
   "description": "Read-only MCP server and CLI for Stellar 8004 discovery, declared-evidence ranking, and bounded contract probes.",
   "type": "module",
@@ -15,7 +15,7 @@
     }
   },
   "bin": {
-    "stellar-agent-mcp": "dist/index.js"
+    "stellar-agent-market": "dist/index.js"
   },
   "files": [
     "dist",
@@ -26,14 +26,14 @@
   "publishConfig": {
     "access": "public"
   },
-  "mcpName": "io.github.berkingurcan/stellar-agent-mcp",
+  "mcpName": "io.github.berkingurcan/stellar-agent-market",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/berkingurcan/stellar-agent-mcp.git"
+    "url": "git+https://github.com/berkingurcan/stellar-agent-market.git"
   },
-  "homepage": "https://github.com/berkingurcan/stellar-agent-mcp#readme",
+  "homepage": "https://github.com/berkingurcan/stellar-agent-market#readme",
   "bugs": {
-    "url": "https://github.com/berkingurcan/stellar-agent-mcp/issues"
+    "url": "https://github.com/berkingurcan/stellar-agent-market/issues"
   },
   "keywords": [
     "mcp",

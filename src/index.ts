@@ -1,5 +1,5 @@
 /**
- * index.ts — the single `stellar-agent-mcp` bin entry (shebang injected by tsup).
+ * index.ts — the single `stellar-agent-market` bin entry (shebang injected by tsup).
  *
  * Dual CLI + MCP dispatch (research/B §3.4):
  *   - A known CLI subcommand (find/profile/rank/services/doctor/setup) → human CLI.

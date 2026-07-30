@@ -34,7 +34,7 @@ versioned public Explorer API
 @trionlabs/stellar8004 SDK
       │ typed client, retries, normalization
       ▼
-stellar-agent-mcp
+stellar-agent-market
       └── optional bounded Soroban contract-reachability probe
 ```
 
@@ -72,13 +72,13 @@ agent-facing MCP adapter over that boundary.
 | Contracts, event semantics, network addresses | `trionlabs/stellar-8004` | Imports versioned generated bindings/config; never copies them |
 | Indexer, Supabase schema, read projections | `trionlabs/stellar-8004` | Reads only through the versioned Explorer API |
 | Low-level TypeScript SDK | `@trionlabs/stellar8004` from the upstream repo | Exact dependency pin; SDK changes are released upstream first |
-| Human CLI, MCP tools/resources/prompts, client setup | this repo | One install surface: `stellar-agent-mcp` |
+| Human CLI, MCP tools/resources/prompts, client setup | this repo | One install surface: `stellar-agent-market` |
 | Remote MCP transport and Cloudflare admission controls | this repo | Calls `stellar8004-web` through an HTTP Service Binding |
 
 The CLI therefore **does belong here and already is here**. The SDK should be available to users, but not
 forked or vendored here: copying it would create two definitions of API pagination, errors, contract
 addresses, and network configuration. Programmatic consumers install `@trionlabs/stellar8004`; MCP/terminal
-consumers install `stellar-agent-mcp`, which depends on that exact SDK release internally.
+consumers install `stellar-agent-market`, which depends on that exact SDK release internally.
 
 A future monorepo move could place this package under `stellar-8004/webapp/packages/`, but it is an
 organizational choice, not an integration fix. Keeping the public MCP runtime separate currently gives a

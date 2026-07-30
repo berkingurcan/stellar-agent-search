@@ -28,7 +28,7 @@ startCommand:
   commandFunction: |
     (config) => ({
       command: "npx",
-      args: ["-y", "stellar-agent-mcp@0.1.0", "mcp"],
+      args: ["-y", "stellar-agent-market@0.1.0", "mcp"],
       env: {
         STELLAR_NETWORK: config.STELLAR_NETWORK || "mainnet",
         ...(config.EXPLORER_BASE_URL ? { EXPLORER_BASE_URL: config.EXPLORER_BASE_URL } : {}),

@@ -41,7 +41,7 @@ if (source.mcpName !== expectedMcpName) {
 const bootstrap = {
   name: source.name,
   version: "0.0.0",
-  description: "Non-installable name reservation for the official stellar-agent-mcp package.",
+  description: "Non-installable name reservation for the official stellar-agent-market package.",
   license: source.license,
   mcpName: source.mcpName,
   repository: source.repository,
@@ -59,7 +59,7 @@ writeFileSync(resolve(destination, "package.json"), `${JSON.stringify(bootstrap,
 });
 writeFileSync(
   resolve(destination, "README.md"),
-  "# stellar-agent-mcp bootstrap reservation\n\n" +
+  "# stellar-agent-market bootstrap reservation\n\n" +
     "This package contains no executable code. Version 0.0.0 only reserves the npm name so the " +
     "official GitHub Actions Trusted Publisher can be configured. Install a provenance-backed " +
     "release version instead.\n",

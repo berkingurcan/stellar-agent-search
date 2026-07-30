@@ -16,8 +16,8 @@ export const CAPTURED_ON = '29 July 2026';
 
 /** `rank` — the declared-reputation heuristic and fail-closed contract reachability status. */
 export const RANK = {
-	command: 'stellar-agent-mcp rank "scraping agents"',
-	output: `Ranked 2 agent(s) on mainnet (policy stellar-agent-mcp-declared-evidence-v1; evidence volume=0.4 breadth=0.6):
+	command: 'stellar-agent-market rank "scraping agents"',
+	output: `Ranked 2 agent(s) on mainnet (policy stellar-agent-market-declared-evidence-v1; evidence volume=0.4 breadth=0.6):
 
 #  ID  SCORE  STATUS   X402  MPP  SVC  NAME (self-declared, unverified)
 -  --  -----  -------  ----  ---  ---  --------------------------------
@@ -33,12 +33,12 @@ export const RANK = {
 
 /** `profile` — declared Explorer data plus the exact limit of the contract probe. */
 export const PROFILE = {
-	command: 'stellar-agent-mcp profile 10',
+	command: 'stellar-agent-market profile 10',
 	output: `Agent 10  (mainnet)
   stellarId : stellar:mainnet:CBGPDCJIHQ32G42BE7F2CIT3YW6XRN5ED6GQJHCRZSNAYH6TGMCL6X35#10
   owner     : GDDTQFQZK734EXIJE5LWU4G4YC5A6P5AHJ4UWVMV6WBFWT6BAAQQHV2V
   wallet    : (none — payTo comes from the x402 challenge)
-  score     : 50/100   evidence 0.520 (index, not probability; stellar-agent-mcp-declared-evidence-v1)
+  score     : 50/100   evidence 0.520 (index, not probability; stellar-agent-market-declared-evidence-v1)
   reputation: unavailable  (declared avg 96.75 over 8 feedback)
   evidence  : client-set-exhaustion-unprovable; snapshotComparable=no; no reputation field verified
   capability: x402=yes mpp=- services=1 trust=[reputation]
@@ -110,7 +110,7 @@ export const VERDICTS = [
 
 /** `doctor` — the self-check, and the plainest evidence of the keyless invariant. */
 export const DOCTOR = {
-	command: 'stellar-agent-mcp doctor',
+	command: 'stellar-agent-market doctor',
 	output: `✔ node      v26.4.0 (>=22 required)
 ✔ network   mainnet
 ✔ read-only keyless (no signer, no writes)
@@ -118,6 +118,6 @@ export const DOCTOR = {
 ✔ soroban   https://mainnet.sorobanrpc.com  healthy
 ✔ contract  read path OK (sample #10 returned 4 address(es) from bounded indices 0..5; not an exhaustive client count; verification unavailable)
 ✔ tools     find_agent, rank_agent, get_agent_profile, list_services (+ list_agents, leaderboard)
-ℹ server    stellar-agent-mcp  ·  @modelcontextprotocol/server 2.0.0  ·  spec 2025-11-25`,
+ℹ server    stellar-agent-market  ·  @modelcontextprotocol/server 2.0.0  ·  spec 2025-11-25`,
 	caption: undefined
 };

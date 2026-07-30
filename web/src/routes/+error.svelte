@@ -4,7 +4,7 @@
 	import CtaButton from '$lib/components/CtaButton.svelte';
 </script>
 
-<svelte:head><title>{page.status} · stellar-agent-mcp</title></svelte:head>
+<svelte:head><title>{page.status} · stellar-agent-market</title></svelte:head>
 
 <div class="flex min-h-[50vh] flex-col items-start justify-center gap-6">
 	<p class="font-mono text-[11px] tracking-[0.25em] text-text-dim uppercase">

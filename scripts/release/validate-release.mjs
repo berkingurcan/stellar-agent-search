@@ -79,8 +79,8 @@ check(
   "worker/package.json must use the contributor runtime range ^22.18.0 or >=24.11.0",
 );
 check(
-  pkg.bin?.["stellar-agent-mcp"] === "dist/index.js" && Object.keys(pkg.bin).length === 1,
-  "package.json must expose exactly the stellar-agent-mcp CLI bin",
+  pkg.bin?.["stellar-agent-market"] === "dist/index.js" && Object.keys(pkg.bin).length === 1,
+  "package.json must expose exactly the stellar-agent-market CLI bin",
 );
 for (const field of ["main", "module", "types", "typings", "exports"]) {
   check(!(field in pkg), `package.json is bin-only and must not declare ${field}`);
@@ -180,7 +180,7 @@ check(
   `smithery.yaml must persist the exact ${expectedRuntime} mcp launch`,
 );
 check(
-  !smithery.includes('args: ["-y", "stellar-agent-mcp"]'),
+  !smithery.includes('args: ["-y", "stellar-agent-market"]'),
   "smithery.yaml must not execute the mutable npm latest tag",
 );
 
@@ -195,18 +195,18 @@ const persistentDocs = [
 for (const path of persistentDocs) {
   const contents = read(path);
   check(
-    !/npx\s+(?:--yes|-y)\s+stellar-agent-mcp(?=[\s"'`]|$)/.test(contents),
+    !/npx\s+(?:--yes|-y)\s+stellar-agent-market(?=[\s"'`]|$)/.test(contents),
     `${path} contains an unpinned persistent npx launch`,
   );
   check(
-    !/npm\s+(?:i|install)\s+(?:-g\s+)?stellar-agent-mcp(?=[\s"'`]|$)/.test(contents),
+    !/npm\s+(?:i|install)\s+(?:-g\s+)?stellar-agent-market(?=[\s"'`]|$)/.test(contents),
     `${path} contains an unpinned persistent global install`,
   );
 }
 
 const publishedLanding = read("web/src/lib/install-published.ts");
 check(
-  publishedLanding.includes("packageMetadata.version") && !publishedLanding.includes("stellar-agent-mcp@0.1.0"),
+  publishedLanding.includes("packageMetadata.version") && !publishedLanding.includes("stellar-agent-market@0.1.0"),
   "published landing commands must derive their exact package pin from package.json.version",
 );
 

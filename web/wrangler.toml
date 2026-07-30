@@ -1,4 +1,4 @@
-# stellar-agent-mcp — landing page.
+# stellar-agent-market — landing page.
 #
 # ASSETS-ONLY WORKER. There is deliberately no `main` key: with only an [assets]
 # block, Cloudflare serves the directory as static files and never boots a Worker
@@ -13,7 +13,7 @@
 #
 # Deploy: `npm run deploy` in this directory (builds, then wrangler deploy).
 
-name = "stellar-agent-mcp-web"
+name = "stellar-agent-market-web"
 compatibility_date = "2026-07-29"
 
 # Top-level keys MUST stay above every [table] header. TOML assigns a bare key to
@@ -46,7 +46,7 @@ preview_urls = false
 # leaves docs deploys independent of the registry. Discoverability comes from a nav
 # link on the explorer, which is needed either way.
 #
-# The separate `stellar-agent-mcp` runtime Worker owns the exact `/mcp` and
+# The separate `stellar-agent-market` runtime Worker owns the exact `/mcp` and
 # `/healthz` zone routes. Cloudflare evaluates those more-specific routes before
 # this custom-domain origin, so the landing remains assets-only while both
 # surfaces share one canonical hostname. Deploy this custom domain first so its

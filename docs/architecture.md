@@ -1,6 +1,6 @@
 # Architecture
 
-`stellar-agent-mcp` has one shared TypeScript service/tool layer with two adapters: a Node (ESM, NodeNext)
+`stellar-agent-market` has one shared TypeScript service/tool layer with two adapters: a Node (ESM, NodeNext)
 binary that is both an MCP stdio server and a human CLI, and a separate stateless Cloudflare Worker. The
 runtime uses the split MCP v2 packages (`@modelcontextprotocol/server` and `@modelcontextprotocol/client`
 2.0.0) with Zod 4 and requires Node ≥ 22 for the local binary. Both adapters are read-only and keyless.
@@ -17,7 +17,7 @@ LOCAL — available now
 MCP client (Claude Code / Cursor / Windsurf / Cline / VS Code)   +   human terminal
         │  stdio (stdout = JSON-RPC only · stderr = logs)             │  TTY subcommands
         ▼                                                             ▼
-  stellar-agent-mcp  (src/index.ts dispatches → MCP server | CLI | doctor | setup)
+  stellar-agent-market  (src/index.ts dispatches → MCP server | CLI | doctor | setup)
         │
         └─ buildServer(config) → Tools · Resources (stellar8004://…) · Prompts
                  │
@@ -97,7 +97,7 @@ unavailable/no-field result without implying that `get_summary` ran.
 ## The 3-axis ranking engine (`lib/ranking.ts`)
 
 Deterministic and **pure**: identical inputs (with an explicit `now` for the freshness flag) yield
-byte-identical output. The versioned local policy is `stellar-agent-mcp-declared-evidence-v1`:
+byte-identical output. The versioned local policy is `stellar-agent-market-declared-evidence-v1`:
 
 ```
 effectiveUniqueClients = min(validSafeInt(uniqueClients), validSafeInt(feedbackCount))
@@ -180,8 +180,8 @@ an accepted or deployed API; until it lands, coverage fields are the honesty bou
 
 The public hostname is deliberately split between two independently deployable Workers:
 
-- `stellar-agent-mcp-web` is an assets-only Worker and owns the `mcp.stellar8004.com` custom domain.
-- `stellar-agent-mcp` is the runtime Worker. Exact zone routes for `/mcp` and `/healthz` are more specific
+- `stellar-agent-market-web` is an assets-only Worker and owns the `mcp.stellar8004.com` custom domain.
+- `stellar-agent-market` is the runtime Worker. Exact zone routes for `/mcp` and `/healthz` are more specific
   than the custom-domain origin and therefore direct only those paths to the runtime.
 - `workers.dev` and preview URLs are disabled, so they cannot bypass the canonical hostname policy.
 
