@@ -6,7 +6,7 @@
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen.svg)](https://nodejs.org)
 [![MCP](https://img.shields.io/badge/MCP-SDK%20v2-6E56CF.svg)](https://modelcontextprotocol.io)
 
-> **A read-only ERC-8004 discovery layer that keeps indexed reputation declared and reports the exact limits of its bounded Stellar contract probe. The funded x402 + feedback proof is implemented but still pending its first recorded mainnet run.**
+> **A read-only discovery layer built on top of the [stellar-8004](https://stellar8004.com) registry (the ERC-8004-style Identity/Reputation/Validation contracts on Stellar mainnet). It adds no contracts and forks nothing — it exposes the existing on-chain registry to MCP clients, keeps indexed reputation explicitly declared-vs-verified, and proves the full agent-finds-agent loop with recorded mainnet transactions ([x402 USDC payment](https://stellar.expert/explorer/public/tx/de0717ecb5b34b712fd196c8438cb20bff52e4f843fc7b8263e03b1dd5be3c55) + [reputation feedback](https://stellar.expert/explorer/public/tx/10d739713a02ae517bc96b8507d0d6ae28913ccdd7b10484f77e37bf8c740846)).**
 
 [**npm**](https://www.npmjs.com/package/stellar-agent-search) · [**GitHub**](https://github.com/berkingurcan/stellar-agent-search) · [**Docs**](docs/getting-started.md) · [**Evidence package**](docs/evidence.md)
 
