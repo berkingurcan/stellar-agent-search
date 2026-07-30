@@ -85,7 +85,7 @@ candidate at 0% or restore the recorded stable UUID:
 ```bash
 npm exec wrangler -- rollback STABLE_WORKER_VERSION_UUID \
   --config worker/wrangler.jsonc \
-  --message "rollback failed stellar-agent-market canary"
+  --message "rollback failed stellar-agent-search canary"
 ```
 
 If this is the first runtime deployment and no stable runtime version exists,

@@ -24,7 +24,7 @@ import { registerResources } from "./resources/index.js";
 import { registerPrompts } from "./prompts/index.js";
 
 /** Canonical server identity (matches the npm bin + `mcpName`). */
-export const SERVER_NAME = "stellar-agent-market";
+export const SERVER_NAME = "stellar-agent-search";
 
 /** Fallback version if the caller does not supply one from package.json. */
 export const DEFAULT_SERVER_VERSION = "0.1.0";

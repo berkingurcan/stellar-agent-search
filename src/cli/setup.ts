@@ -31,8 +31,8 @@ import {
 } from "@modelcontextprotocol/client/stdio";
 
 export const SETUP_SERVER_NAME = "stellar-agent";
-const PACKAGE_NAME = "stellar-agent-market";
-const CURSOR_LOCK_SUFFIX = ".stellar-agent-market.lock";
+const PACKAGE_NAME = "stellar-agent-search";
+const CURSOR_LOCK_SUFFIX = ".stellar-agent-search.lock";
 const CORE_TOOLS = ["find_agent", "rank_agent", "get_agent_profile", "list_services"] as const;
 
 export type SetupClient = "claude" | "cursor" | "codex";
@@ -736,7 +736,7 @@ export async function runHandshake(
     env: { ...getDefaultEnvironment(), ...env },
     stderr: "pipe",
   });
-  const client = new Client({ name: "stellar-agent-market-setup", version }, { capabilities: {} });
+  const client = new Client({ name: "stellar-agent-search-setup", version }, { capabilities: {} });
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     const operation = (async () => {

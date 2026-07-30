@@ -7,7 +7,7 @@ import packageMetadata from '../../../package.json';
  * artifact integrity, provenance, and the MCP Registry entry are verified.
  */
 export const PACKAGE_PUBLISHED = true;
-const PACKAGE_SPEC = `stellar-agent-market@${packageMetadata.version}`;
+const PACKAGE_SPEC = `stellar-agent-search@${packageMetadata.version}`;
 export const HERO_CMD =
 	`npx -y ${PACKAGE_SPEC} find "a paid web scraper with a good reputation"`;
 
@@ -22,7 +22,7 @@ export const CONFIGS: InstallConfig[] = [
 # npx -y ${PACKAGE_SPEC} mcp
 
 # Optional: install the skill your agent reads before calling anything
-npx skills add berkingurcan/stellar-agent-market --skill mcp`,
+npx skills add berkingurcan/stellar-agent-search --skill mcp`,
 		note: 'Re-run with --check --handshake to verify without changing config, or use --dry-run to preview the registration.'
 	},
 	{

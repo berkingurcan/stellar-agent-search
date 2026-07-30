@@ -35,7 +35,7 @@ async function walk(directory) {
 }
 await walk(BUILD);
 
-const command = /npx\s+(?:(?:--yes|-y)\s+)?stellar-agent-market(?:@[^\s"'`]+)?(?:\s|["'`])/i;
+const command = /npx\s+(?:(?:--yes|-y)\s+)?stellar-agent-search(?:@[^\s"'`]+)?(?:\s|["'`])/i;
 let exactPinnedCommandFound = false;
 let installSectionCount = 0;
 const installConfigsFound = new Set();
@@ -48,7 +48,7 @@ for (const path of files) {
 	for (const match of contents.matchAll(/data-install-config=["']([^"']+)["']/gi)) {
 		installConfigsFound.add(match[1]);
 	}
-	for (const match of contents.matchAll(/stellar-agent-market@([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)/g)) {
+	for (const match of contents.matchAll(/stellar-agent-search@([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)/g)) {
 		if (match[0] !== packageSpec) {
 			throw new Error(`built landing contains stale package pin ${match[0]} (expected ${packageSpec}) in ${path}`);
 		}
@@ -58,7 +58,7 @@ for (const path of files) {
 	}
 	if (published) {
 		for (const match of contents.matchAll(
-			/npx\s+(?:(?:--yes|-y)\s+)?(stellar-agent-market(?:@[^\s"'`<>]+)?)(?=\s|["'`<])/gi
+			/npx\s+(?:(?:--yes|-y)\s+)?(stellar-agent-search(?:@[^\s"'`<>]+)?)(?=\s|["'`<])/gi
 		)) {
 			if (match[1] !== packageSpec) {
 				throw new Error(`published build contains an unpinned or mismatched command for ${match[1]} in ${path}`);

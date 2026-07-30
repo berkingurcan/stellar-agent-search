@@ -695,7 +695,7 @@ describe("x402 one-shot submission state machines", () => {
 
 describe("x402 crash-safe filesystem state", () => {
   it("writes private durable JSONL and atomically replaces the final receipt on a real filesystem", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "stellar-agent-market-x402-durability-"));
+    const directory = await mkdtemp(join(tmpdir(), "stellar-agent-search-x402-durability-"));
     try {
       const journal = join(directory, "run.journal.jsonl");
       await appendDurableJsonLine(journal, { sequence: 1 });
@@ -721,7 +721,7 @@ describe("x402 crash-safe filesystem state", () => {
   });
 
   it("allows only one concurrent funded process for the same canonical request", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "stellar-agent-market-x402-lock-"));
+    const directory = await mkdtemp(join(tmpdir(), "stellar-agent-search-x402-lock-"));
     try {
       const identity = canonicalRequestIdentity(config(false), OTHER_ACCOUNT, SCRAPPER_AGENT_ID, ENDPOINT);
       const startedAt = "2026-07-29T00:00:00.000Z";
@@ -820,7 +820,7 @@ describe("x402 crash-safe filesystem state", () => {
   });
 
   it("fails closed when a prepared lock cannot be reconciled to its artifact and journal", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "stellar-agent-market-x402-reconcile-"));
+    const directory = await mkdtemp(join(tmpdir(), "stellar-agent-search-x402-reconcile-"));
     try {
       const identity = canonicalRequestIdentity(config(false), OTHER_ACCOUNT, SCRAPPER_AGENT_ID, ENDPOINT);
       const lock = await acquireFundedRunLock(identity, paymentAttempt().startedAt, directory);
