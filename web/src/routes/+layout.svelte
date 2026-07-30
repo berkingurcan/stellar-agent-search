@@ -19,7 +19,7 @@
 		<nav class="mx-auto flex w-full max-w-4xl items-center justify-between px-6 py-3">
 			<a href="{base}/" class="flex items-center gap-2 text-text">
 				<img src="{base}/favicon.svg" alt="" class="h-4 w-4" />
-				<span class="font-mono text-[12px]">stellar-agent-market</span>
+				<span class="font-mono text-[12px]">stellar-agent-search</span>
 			</a>
 
 			<div class="flex items-center gap-0.5">
@@ -68,7 +68,7 @@
 			class="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-x-6 gap-y-3 px-6 py-6 text-[11px] text-text-dim"
 		>
 			<div class="flex flex-wrap items-center gap-3">
-				<span class="font-mono">stellar-agent-market</span>
+				<span class="font-mono">stellar-agent-search</span>
 				<span class="text-border">&middot;</span>
 				<span>MIT</span>
 				<span class="text-border">&middot;</span>

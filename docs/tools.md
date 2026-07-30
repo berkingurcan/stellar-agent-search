@@ -263,7 +263,7 @@ non-negative ledger integers, and boolean stale flags are accepted; malformed su
   "id": 10,
   "rank": 1,                       // 1-based position
   "score": 50,                     // score100 (0..100), versioned local declared-evidence heuristic
-  "rankVersion": "stellar-agent-market-declared-evidence-v1",
+  "rankVersion": "stellar-agent-search-declared-evidence-v1",
   "evidenceStrength": 0.5199,       // uncalibrated index, not probability
   "stellarId": "stellar:mainnet:CBGP…6X35#10",
   "caip2Id":  "stellar:pubnet:CBGP…6X35#10",

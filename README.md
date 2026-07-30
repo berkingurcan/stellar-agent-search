@@ -1,15 +1,15 @@
-# stellar-agent-market
+# stellar-agent-search
 
-[![CI](https://github.com/berkingurcan/stellar-agent-market/actions/workflows/ci.yml/badge.svg)](https://github.com/berkingurcan/stellar-agent-market/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/stellar-agent-market.svg)](https://www.npmjs.com/package/stellar-agent-market)
+[![CI](https://github.com/berkingurcan/stellar-agent-search/actions/workflows/ci.yml/badge.svg)](https://github.com/berkingurcan/stellar-agent-search/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/stellar-agent-search.svg)](https://www.npmjs.com/package/stellar-agent-search)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen.svg)](https://nodejs.org)
 [![MCP](https://img.shields.io/badge/MCP-SDK%20v2-6E56CF.svg)](https://modelcontextprotocol.io)
 
 > **A read-only ERC-8004 discovery layer that keeps indexed reputation declared and reports the exact limits of its bounded Stellar contract probe. The funded x402 + feedback proof is implemented but still pending its first recorded mainnet run.**
 
-> **Pre-release security gate (29 July 2026):** the `stellar-agent-market` npm name is still unclaimed. Do not
-> run the `npx` commands below until the [official npm page](https://www.npmjs.com/package/stellar-agent-market)
+> **Pre-release security gate (29 July 2026):** the `stellar-agent-search` npm name is still unclaimed. Do not
+> run the `npx` commands below until the [official npm page](https://www.npmjs.com/package/stellar-agent-search)
 > shows a release owned by this project. Once installed, `setup` pins the exact package version in persistent
 > MCP client configuration rather than executing a mutable `latest` tag on every launch.
 
@@ -28,7 +28,7 @@ separate Cloudflare Worker implementation exposes the same surface over stateles
 remote endpoint is **not live yet**; use the local stdio transport until its deployment canary passes.
 
 ```bash
-npx -y stellar-agent-market@0.1.0 find "a paid web scraper with a good reputation"
+npx -y stellar-agent-search@0.1.0 find "a paid web scraper with a good reputation"
 ```
 
 ---
@@ -103,10 +103,10 @@ server holds no keys.
 **One-command MCP setup (Claude Code):**
 
 ```bash
-npx -y stellar-agent-market@0.1.0 setup --client claude --scope user --handshake
+npx -y stellar-agent-search@0.1.0 setup --client claude --scope user --handshake
 ```
 
-This downloads the package, registers a version-pinned `npx -y stellar-agent-market@0.1.0 mcp` stdio launch through
+This downloads the package, registers a version-pinned `npx -y stellar-agent-search@0.1.0 mcp` stdio launch through
 Claude Code's own CLI, then performs a real MCP initialize + `tools/list` handshake. It is idempotent: rerun
 with `--check --handshake` to verify without changing config, or use `--dry-run` to preview the registration.
 Cursor and Codex examples, config paths, and scope limitations are in
@@ -116,18 +116,18 @@ Cursor and Codex examples, config paths, and scope limitations are in
 Optionally install the **skill** first — the usage guide your agent reads before it calls anything:
 
 ```bash
-npx skills add berkingurcan/stellar-agent-market --skill mcp
+npx skills add berkingurcan/stellar-agent-search --skill mcp
 ```
 
 **Terminal (human CLI):**
 
 ```bash
-npx -y stellar-agent-market@0.1.0 find "web scraper" --x402       # discover
-npx -y stellar-agent-market@0.1.0 profile 10                       # full profile for agent 10
-npx -y stellar-agent-market@0.1.0 rank "scraping agents" --json    # rank + fail-closed contract-probe status, machine-readable
-npx -y stellar-agent-market@0.1.0 services --x402                  # declared paid-endpoint candidates
-npx -y stellar-agent-market@0.1.0 doctor                           # self-check: env, explorer, RPC, bounded read path
-npx -y stellar-agent-market@0.1.0 setup --client cursor --scope project --dry-run  # preview client config
+npx -y stellar-agent-search@0.1.0 find "web scraper" --x402       # discover
+npx -y stellar-agent-search@0.1.0 profile 10                       # full profile for agent 10
+npx -y stellar-agent-search@0.1.0 rank "scraping agents" --json    # rank + fail-closed contract-probe status, machine-readable
+npx -y stellar-agent-search@0.1.0 services --x402                  # declared paid-endpoint candidates
+npx -y stellar-agent-search@0.1.0 doctor                           # self-check: env, explorer, RPC, bounded read path
+npx -y stellar-agent-search@0.1.0 setup --client cursor --scope project --dry-run  # preview client config
 ```
 
 New here? Start with **[docs/getting-started.md](docs/getting-started.md)**.
@@ -162,7 +162,7 @@ All configuration is via environment variables (canonical for MCP mode); CLI fla
 | `VERIFY_ONCHAIN` | `true` | Set `false` to skip the probe; reputation remains declared-only either way |
 | `RANK_SCORE_MAX` | `100` | Fixed v1 compatibility assertion; any value other than `100` is rejected |
 
-Ranking uses the fixed, versioned `stellar-agent-market-declared-evidence-v1` policy: indexed average normalized
+Ranking uses the fixed, versioned `stellar-agent-search-declared-evidence-v1` policy: indexed average normalized
 against exactly `100`, multiplied by `0.4 × capped volume + 0.6 × effective breadth`. Both a changed
 `RANK_SCORE_MAX` and legacy `RANK_W_*` variables are rejected so a deployment cannot silently redefine
 published score semantics.

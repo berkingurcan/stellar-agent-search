@@ -1,11 +1,11 @@
 # Integration — MCP client configuration
 
 > **Pre-release:** the npm name is not yet owned by this project. Do not execute these `npx` examples until
-> the [official package page](https://www.npmjs.com/package/stellar-agent-market) shows version 0.1.0. Persistent
-> client entries should pin `stellar-agent-market@0.1.0`; `setup` does this automatically.
+> the [official package page](https://www.npmjs.com/package/stellar-agent-search) shows version 0.1.0. Persistent
+> client entries should pin `stellar-agent-search@0.1.0`; `setup` does this automatically.
 
 The supported, usable transport today is the **local stdio** MCP server. Every client launches the same
-explicit version-pinned command — `npx -y stellar-agent-market@0.1.0 mcp`. The binary also auto-detects non-TTY launches, but the
+explicit version-pinned command — `npx -y stellar-agent-search@0.1.0 mcp`. The binary also auto-detects non-TTY launches, but the
 explicit subcommand removes ambiguity across clients. Below are copy-paste configs for each supported client.
 
 The local runtime uses `@modelcontextprotocol/server` 2.0.0 and currently negotiates protocol
@@ -23,7 +23,7 @@ The canonical stdio entry (works for Claude Code, Cursor, Windsurf, Claude Deskt
   "mcpServers": {
     "stellar-agent": {
       "command": "npx",
-      "args": ["-y", "stellar-agent-market@0.1.0", "mcp"],
+      "args": ["-y", "stellar-agent-search@0.1.0", "mcp"],
       "env": { "STELLAR_NETWORK": "mainnet" }
     }
   }
@@ -61,7 +61,7 @@ are in [architecture.md](architecture.md#remote-cloudflare-adapter-implemented-n
 **Safe bootstrap (recommended):**
 
 ```bash
-npx -y stellar-agent-market@0.1.0 setup --client claude --scope user --handshake
+npx -y stellar-agent-search@0.1.0 setup --client claude --scope user --handshake
 ```
 
 This is idempotent, checks for conflicts, registers through Claude's own CLI, and performs a real MCP
@@ -72,16 +72,16 @@ without changing anything, or `--dry-run --json` to preview the exact registrati
 
 ```bash
 # local scope (default; just you) — stored in ~/.claude.json
-claude mcp add stellar-agent -- npx -y stellar-agent-market@0.1.0 mcp
+claude mcp add stellar-agent -- npx -y stellar-agent-search@0.1.0 mcp
 
 # user scope (all your projects)
-claude mcp add --scope user stellar-agent -- npx -y stellar-agent-market@0.1.0 mcp
+claude mcp add --scope user stellar-agent -- npx -y stellar-agent-search@0.1.0 mcp
 
 # project scope (committed to .mcp.json, shared with the team)
-claude mcp add --scope project stellar-agent -- npx -y stellar-agent-market@0.1.0 mcp
+claude mcp add --scope project stellar-agent -- npx -y stellar-agent-search@0.1.0 mcp
 
 # with a network override
-claude mcp add --env STELLAR_NETWORK=mainnet stellar-agent -- npx -y stellar-agent-market@0.1.0 mcp
+claude mcp add --env STELLAR_NETWORK=mainnet stellar-agent -- npx -y stellar-agent-search@0.1.0 mcp
 ```
 
 > **The `--` is mandatory.** Everything after `--` is the server command, passed untouched. Without it,
@@ -95,7 +95,7 @@ claude mcp add --env STELLAR_NETWORK=mainnet stellar-agent -- npx -y stellar-age
   "mcpServers": {
     "stellar-agent": {
       "command": "npx",
-      "args": ["-y", "stellar-agent-market@0.1.0", "mcp"],
+      "args": ["-y", "stellar-agent-search@0.1.0", "mcp"],
       "env": { "STELLAR_NETWORK": "mainnet" }
     }
   }
@@ -116,7 +116,7 @@ claude mcp add --env STELLAR_NETWORK=mainnet stellar-agent -- npx -y stellar-age
 **Safe bootstrap (recommended):**
 
 ```bash
-npx -y stellar-agent-market@0.1.0 setup --client cursor --scope project --handshake
+npx -y stellar-agent-search@0.1.0 setup --client cursor --scope project --handshake
 ```
 
 The command parses strict JSON, refuses symlinks/JSONC/conflicting registrations, and writes through a
@@ -133,7 +133,7 @@ is never silently retained.
   "mcpServers": {
     "stellar-agent": {
       "command": "npx",
-      "args": ["-y", "stellar-agent-market@0.1.0", "mcp"],
+      "args": ["-y", "stellar-agent-search@0.1.0", "mcp"],
       "env": { "STELLAR_NETWORK": "mainnet" }
     }
   }
@@ -156,7 +156,7 @@ SSE) and uses `${env:VAR}` interpolation.
   "mcpServers": {
     "stellar-agent": {
       "command": "npx",
-      "args": ["-y", "stellar-agent-market@0.1.0", "mcp"],
+      "args": ["-y", "stellar-agent-search@0.1.0", "mcp"],
       "env": { "STELLAR_NETWORK": "${env:STELLAR_NETWORK}" }
     }
   }
@@ -177,7 +177,7 @@ Manage it from the Cascade panel's **Manage plugins / raw config** button.
   "mcpServers": {
     "stellar-agent": {
       "command": "npx",
-      "args": ["-y", "stellar-agent-market@0.1.0", "mcp"],
+      "args": ["-y", "stellar-agent-search@0.1.0", "mcp"],
       "env": { "STELLAR_NETWORK": "mainnet" },
       "disabled": false,
       "autoApprove": ["find_agent", "get_agent_profile", "list_services", "rank_agent"]
@@ -201,7 +201,7 @@ Manage it from the Cascade panel's **Manage plugins / raw config** button.
   "servers": {
     "stellar-agent": {
       "command": "npx",
-      "args": ["-y", "stellar-agent-market@0.1.0", "mcp"],
+      "args": ["-y", "stellar-agent-search@0.1.0", "mcp"],
       "env": { "STELLAR_NETWORK": "mainnet" }
     }
   }
@@ -219,7 +219,7 @@ Manage it from the Cascade panel's **Manage plugins / raw config** button.
   "mcpServers": {
     "stellar-agent": {
       "command": "npx",
-      "args": ["-y", "stellar-agent-market@0.1.0", "mcp"],
+      "args": ["-y", "stellar-agent-search@0.1.0", "mcp"],
       "env": { "STELLAR_NETWORK": "mainnet" }
     }
   }
@@ -236,7 +236,7 @@ Codex uses **TOML**, not JSON, and the table is `[mcp_servers.<name>]` (snake_ca
 For user scope, prefer the safe bootstrap:
 
 ```bash
-npx -y stellar-agent-market@0.1.0 setup --client codex --scope user --handshake
+npx -y stellar-agent-search@0.1.0 setup --client codex --scope user --handshake
 ```
 
 Project scope is intentionally manual because `codex mcp add` has no project-scope operation; asking setup
@@ -247,14 +247,14 @@ for project scope prints the exact TOML without modifying anything.
 ```toml
 [mcp_servers.stellar-agent]
 command = "npx"
-args = ["-y", "stellar-agent-market@0.1.0", "mcp"]
+args = ["-y", "stellar-agent-search@0.1.0", "mcp"]
 env = { STELLAR_NETWORK = "mainnet" }
 ```
 
 Or add it from the CLI:
 
 ```bash
-codex mcp add stellar-agent -- npx -y stellar-agent-market@0.1.0 mcp
+codex mcp add stellar-agent -- npx -y stellar-agent-search@0.1.0 mcp
 ```
 
 > A JSON `mcpServers` block does nothing in Codex — the table name must be `mcp_servers`.
@@ -271,7 +271,7 @@ Claude Code, plus an optional `trust` field that skips the per-call approval pro
   "mcpServers": {
     "stellar-agent": {
       "command": "npx",
-      "args": ["-y", "stellar-agent-market@0.1.0", "mcp"],
+      "args": ["-y", "stellar-agent-search@0.1.0", "mcp"],
       "env": { "STELLAR_NETWORK": "mainnet" },
       "trust": true
     }
@@ -288,13 +288,13 @@ Claude Code, plus an optional `trust` field that skips the per-call approval pro
 
 | Client | Config file | Root key | Client-specific fields | Register via |
 |---|---|---|---|---|
-| Claude Code | `.mcp.json` / `~/.claude.json` | `mcpServers` | `type`, `timeout`, `alwaysLoad` | `stellar-agent-market setup --client claude` |
-| Cursor | `.cursor/mcp.json` / `~/.cursor/mcp.json` | `mcpServers` | — | `stellar-agent-market setup --client cursor` |
+| Claude Code | `.mcp.json` / `~/.claude.json` | `mcpServers` | `type`, `timeout`, `alwaysLoad` | `stellar-agent-search setup --client claude` |
+| Cursor | `.cursor/mcp.json` / `~/.cursor/mcp.json` | `mcpServers` | — | `stellar-agent-search setup --client cursor` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | `mcpServers` | `${env:VAR}` interpolation | Cascade → Manage plugins |
 | Cline | `cline_mcp_settings.json` | `mcpServers` | `disabled`, `autoApprove` | MCP Servers → Configure |
 | Claude Desktop | `claude_desktop_config.json` | `mcpServers` | `type` | edit file |
 | VS Code | `.vscode/mcp.json` | **`servers`** | `${input:}` | edit file |
-| Codex CLI | `~/.codex/config.toml` | **`mcp_servers`** (TOML) | — | `stellar-agent-market setup --client codex` |
+| Codex CLI | `~/.codex/config.toml` | **`mcp_servers`** (TOML) | — | `stellar-agent-search setup --client codex` |
 | Gemini CLI | `~/.gemini/settings.json` | `mcpServers` | `trust` | edit file |
 
 ---
@@ -303,21 +303,21 @@ Claude Code, plus an optional `trust` field that skips the per-call approval pro
 
 - **Force the server explicitly** (unambiguous config): use the `mcp` (or `serve`) subcommand.
   ```json
-  { "mcpServers": { "stellar-agent": { "command": "npx", "args": ["-y", "stellar-agent-market@0.1.0", "mcp"] } } }
+  { "mcpServers": { "stellar-agent": { "command": "npx", "args": ["-y", "stellar-agent-search@0.1.0", "mcp"] } } }
   ```
 - **Global install** (avoids `npx` cold-start latency):
   ```bash
-  npm i -g stellar-agent-market@0.1.0
+  npm i -g stellar-agent-search@0.1.0
   ```
   ```json
-  { "mcpServers": { "stellar-agent": { "command": "stellar-agent-market", "args": [] } } }
+  { "mcpServers": { "stellar-agent": { "command": "stellar-agent-search", "args": [] } } }
   ```
 
 ## Troubleshooting
 
 - **Server shows `failed` on first launch, works on retry** — cold `npx -y` download exceeded the client's
   connect budget. Install globally (above) or raise `MCP_TIMEOUT`.
-- **No tools appear / wrong network** — run `npx -y stellar-agent-market@0.1.0 doctor` in a terminal to check
+- **No tools appear / wrong network** — run `npx -y stellar-agent-search@0.1.0 doctor` in a terminal to check
   explorer reachability, RPC health, and the active network.
 - **Project-scoped server stuck pending (Claude Code)** — approve it in the `/mcp` panel (a security gate
   for committed `.mcp.json`).

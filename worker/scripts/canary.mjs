@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 
 const PRODUCTION_ORIGIN = "https://mcp.stellar8004.com";
 const PROTOCOL_VERSION = "2025-11-25";
-const SERVER_NAME = "stellar-agent-market";
+const SERVER_NAME = "stellar-agent-search";
 const packageMetadata = JSON.parse(
   readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
 );
@@ -44,7 +44,7 @@ function readArgs(argv) {
 }
 
 function overrideHeader(versionId) {
-  return `stellar-agent-market="${versionId}"`;
+  return `stellar-agent-search="${versionId}"`;
 }
 
 async function responsePayload(response) {
@@ -155,7 +155,7 @@ export async function runCanary(options) {
     params: {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: {},
-      clientInfo: { name: `stellar-agent-market-canary-${options.label}`, version: "1.0.0" },
+      clientInfo: { name: `stellar-agent-search-canary-${options.label}`, version: "1.0.0" },
     },
   });
   assertInitializeResult(initialized.payload);

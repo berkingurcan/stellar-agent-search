@@ -1,19 +1,19 @@
 ---
 name: mcp
-description: Use when an AI agent or MCP client needs to discover, rank, inspect evidence limits, and inspect self-declared service endpoint candidates for Stellar 8004 agents at runtime. Documents how to register the read-only, keyless stellar-agent-market server and use its tools, resources, and prompts; reputation values remain declared, while endpoint validation, payment, and invocation remain separate wallet-bearing steps.
+description: Use when an AI agent or MCP client needs to discover, rank, inspect evidence limits, and inspect self-declared service endpoint candidates for Stellar 8004 agents at runtime. Documents how to register the read-only, keyless stellar-agent-search server and use its tools, resources, and prompts; reputation values remain declared, while endpoint validation, payment, and invocation remain separate wallet-bearing steps.
 license: MIT
 metadata:
   author: berkingurcan
   version: "0.1.0"
-  mcp-package: "stellar-agent-market"
+  mcp-package: "stellar-agent-search"
   mcp-package-version: ">=0.1.0"
 ---
 
-# Stellar Agent Market — discover, rank and vet Stellar 8004 agents
+# Stellar Agent Search — discover, rank and vet Stellar 8004 agents
 
 > Companion skills (installed separately, see [Related](#related)): `/8004stellar` (identity / reputation /
 > validation reads), `/x402stellar` (USDC x402 payments).
-> This skill documents how to register and use the **stellar-agent-market** server — a **READ-ONLY, key-less** stdio MCP
+> This skill documents how to register and use the **stellar-agent-search** server — a **READ-ONLY, key-less** stdio MCP
 > server over the canonical on-chain **Stellar 8004** agent registry (Stellar **mainnet** by default). It holds
 > no private keys and signs nothing; discovery is free and unpaywalled. Paying an agent and writing reputation
 > is a separate, explicit step (see [Payment loop](#payment-loop-pointer)).
@@ -27,16 +27,16 @@ metadata:
   contract probe verifies no reputation fields. It is not a trust or payment authorization.
 - Needs an agent's **full profile** (identity, services, scores, recent feedback) and its canonical `stellar:…#id` handle.
 - Needs a **catalog of self-declared service candidates** (x402 / MPP endpoints) to vet before calling.
-- Wants to **wire the stellar-agent-market server** into Claude Code / Cursor / Windsurf / Cline / Claude Desktop / VS Code.
+- Wants to **wire the stellar-agent-search server** into Claude Code / Cursor / Windsurf / Cline / Claude Desktop / VS Code.
 
-If you (the agent) are being asked to do any of the above and the `stellar-agent-market` tools are not already available
+If you (the agent) are being asked to do any of the above and the `stellar-agent-search` tools are not already available
 in this session, **install the server now** using the [Install](#install-do-this-first) section below, then use its tools.
 
 ---
 
 ## What the server setup provides
 
-- The **`stellar-agent-market`** npm package: a read-only stdio MCP server wrapping `@trionlabs/stellar8004`'s
+- The **`stellar-agent-search`** npm package: a read-only stdio MCP server wrapping `@trionlabs/stellar8004`'s
   `ExplorerClient` (registry reads) + Soroban `ReputationClient` bindings (bounded reachability probe).
 - **13 read tools.** The 4 primary (documented below) — `find_agent`, `rank_agent`, `get_agent_profile`,
   `list_services` — plus 9 complete-core tools: `list_agents`, `leaderboard`, `resolve_agent`,
@@ -61,7 +61,7 @@ Requires **Node.js ≥ 22**. Pick the path for your client.
 ### Claude Code (recommended — run this one-liner)
 
 ```bash
-npx -y stellar-agent-market@0.1.0 setup --client claude --scope user --handshake
+npx -y stellar-agent-search@0.1.0 setup --client claude --scope user --handshake
 ```
 
 - Use `--scope project` instead of `--scope user` to write a committable `./.mcp.json` for the repo.
@@ -71,7 +71,7 @@ npx -y stellar-agent-market@0.1.0 setup --client claude --scope user --handshake
 ### Cursor
 
 ```bash
-npx -y stellar-agent-market@0.1.0 setup --client cursor --scope project --handshake
+npx -y stellar-agent-search@0.1.0 setup --client cursor --scope project --handshake
 ```
 
 The setup command atomically merges strict JSON. It refuses to overwrite JSONC, symlinks, concurrent changes,
@@ -86,7 +86,7 @@ Most stdio MCP clients share the identical `command` / `args` / `env` triple und
   "mcpServers": {
     "stellar-agent": {
       "command": "npx",
-      "args": ["-y", "stellar-agent-market@0.1.0", "mcp"],
+      "args": ["-y", "stellar-agent-search@0.1.0", "mcp"],
       "env": { "STELLAR_NETWORK": "mainnet" }
     }
   }
@@ -103,7 +103,7 @@ Most stdio MCP clients share the identical `command` / `args` / `env` triple und
 For user scope, prefer the idempotent bootstrap:
 
 ```bash
-npx -y stellar-agent-market@0.1.0 setup --client codex --scope user --handshake
+npx -y stellar-agent-search@0.1.0 setup --client codex --scope user --handshake
 ```
 
 Codex's CLI has no project-scope MCP add operation. `--client codex --scope project` therefore makes no change,
@@ -115,14 +115,14 @@ Codex reads MCP servers from `~/.codex/config.toml` under `[mcp_servers.<name>]`
 ```toml
 [mcp_servers.stellar-agent]
 command = "npx"
-args = ["-y", "stellar-agent-market@0.1.0", "mcp"]
+args = ["-y", "stellar-agent-search@0.1.0", "mcp"]
 env = { STELLAR_NETWORK = "mainnet" }
 ```
 
 Or the one-liner (same `--` rule as Claude Code; `--env` goes **before** `--`):
 
 ```bash
-codex mcp add stellar-agent --env STELLAR_NETWORK=mainnet -- npx -y stellar-agent-market@0.1.0 mcp
+codex mcp add stellar-agent --env STELLAR_NETWORK=mainnet -- npx -y stellar-agent-search@0.1.0 mcp
 ```
 
 ### Gemini CLI
@@ -135,7 +135,7 @@ read-only tools:
   "mcpServers": {
     "stellar-agent": {
       "command": "npx",
-      "args": ["-y", "stellar-agent-market@0.1.0", "mcp"],
+      "args": ["-y", "stellar-agent-search@0.1.0", "mcp"],
       "env": { "STELLAR_NETWORK": "mainnet" },
       "trust": true
     }
@@ -147,9 +147,9 @@ read-only tools:
 
 ```bash
 # 1. (optional) pull this skill's docs into the client
-npx skills add berkingurcan/stellar-agent-market --skill mcp
+npx skills add berkingurcan/stellar-agent-search --skill mcp
 # 2. register + verify the server
-npx -y stellar-agent-market@0.1.0 setup --client claude --scope user --handshake
+npx -y stellar-agent-search@0.1.0 setup --client claude --scope user --handshake
 # 3. restart the client, then call find_agent("web scraper")
 ```
 
@@ -267,7 +267,7 @@ reputation, that is a separate, deliberate step that lives outside this server:
   Pay only when the challenge's full tuple exactly matches separately reviewed/pinned policy.
 - Submit once with x402 v2 `PAYMENT-SIGNATURE`. Validate `PAYMENT-RESPONSE`, then independently verify
   finality and the exact USDC asset/payer/payee/amount transfer on Stellar RPC before using the result or rating.
-- See **`examples/x402-demo.ts`** in the `stellar-agent-market` repo for the end-to-end fetch → 402 → sign → retry →
+- See **`examples/x402-demo.ts`** in the `stellar-agent-search` repo for the end-to-end fetch → 402 → sign → retry →
   `giveFeedback` flow, and the **`/x402stellar`** companion skill.
 - **Security boundary:** private keys and any signing live *only* in that demo script / your own wallet tooling —
   never in this MCP server. Use `prepare-x402-call` to have the agent lay out the steps and stop before signing.
@@ -284,7 +284,7 @@ reputation, that is a separate, deliberate step that lives outside this server:
 | `VERIFY_ONCHAIN` | `true` \| `false` | `true` | Toggle the probe; reputation remains declared-only either way. |
 | `RANK_SCORE_MAX` | positive number | `100` | Local quality-normalization scale; it does not constrain upstream protocol values. |
 
-Rank policy `stellar-agent-market-declared-evidence-v1` fixes evidence weights at volume `0.4` / breadth `0.6`.
+Rank policy `stellar-agent-search-declared-evidence-v1` fixes evidence weights at volume `0.4` / breadth `0.6`.
 Legacy `RANK_W_QUALITY`, `RANK_W_VOLUME`, and `RANK_W_BREADTH` variables are rejected at startup.
 
 Mainnet contracts read by the server — Identity `CBGPDCJIHQ32G42BE7F2CIT3YW6XRN5ED6GQJHCRZSNAYH6TGMCL6X35`,
@@ -297,7 +297,7 @@ Validation `CBT6WWEVEPT2UFGFGVJJ7ELYGLQAGRYSVGDTGMCJTRWXOH27MWUO7UJG`; Soroban R
 
 - **Tools don't appear after install** → fully restart the client so it re-launches the stdio server; confirm the
   config lives under the right key (`mcpServers`, or `servers` for VS Code).
-- **`npx` errors / stale binary** → clear the npx cache (`npm cache clean --force`) and retry `npx -y stellar-agent-market@0.1.0`.
+- **`npx` errors / stale binary** → clear the npx cache (`npm cache clean --force`) and retry `npx -y stellar-agent-search@0.1.0`.
 - **`node: command not found` / engine error** → install Node.js **≥ 22**.
 - **Empty or unexpected results** → the default network is **mainnet**; check `STELLAR_NETWORK`. `find_agent`
   fetches a bounded window with structured `getAgents` filters and stem-matches agent name/description locally
@@ -313,7 +313,7 @@ Validation `CBT6WWEVEPT2UFGFGVJJ7ELYGLQAGRYSVGDTGMCJTRWXOH27MWUO7UJG`; Soroban R
 
 ## Related
 
-- Repo: `github.com/berkingurcan/stellar-agent-market` (README, `examples/x402-demo.ts`, full tool/resource/prompt docs).
+- Repo: `github.com/berkingurcan/stellar-agent-search` (README, `examples/x402-demo.ts`, full tool/resource/prompt docs).
 - Companion skills, from the registry's own repo — install separately, they are not pulled in by this one:
   ```bash
   npx skills add trionlabs/stellar-8004 --skill 8004stellar   # identity / reputation / validation reads

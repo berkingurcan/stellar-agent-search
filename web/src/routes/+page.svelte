@@ -11,10 +11,10 @@
 </script>
 
 <svelte:head>
-	<title>stellar-agent-market — discover and rank Stellar payment agents</title>
+	<title>stellar-agent-search — discover and rank Stellar payment agents</title>
 	<meta name="description" content="A read-only MCP server for discovering and ranking x402 payment agents on Stellar mainnet." />
 	<link rel="canonical" href={SITE} />
-	<meta property="og:title" content="stellar-agent-market" />
+	<meta property="og:title" content="stellar-agent-search" />
 	<meta property="og:description" content="A read-only MCP server for discovering and ranking x402 payment agents on Stellar mainnet." />
 	<meta property="og:url" content={SITE} />
 	<meta property="og:type" content="website" />

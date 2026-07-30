@@ -21,7 +21,7 @@ describe("npm bootstrap name reservation", () => {
 
       const pkg = JSON.parse(readFileSync(join(target, "package.json"), "utf8")) as Record<string, unknown>;
       const sourcePkg = JSON.parse(read("package.json")) as { mcpName: string };
-      expect(pkg.name).toBe("stellar-agent-market");
+      expect(pkg.name).toBe("stellar-agent-search");
       expect(pkg.version).toBe("0.0.0");
       expect(pkg.mcpName).toBe(sourcePkg.mcpName);
       expect(pkg.publishConfig).toEqual({ access: "public", tag: "bootstrap" });
@@ -41,7 +41,7 @@ describe("npm bootstrap name reservation", () => {
         files: Array<{ path: string }>;
       }>;
       expect(report).toHaveLength(1);
-      expect(report[0]?.id).toBe("stellar-agent-market@0.0.0");
+      expect(report[0]?.id).toBe("stellar-agent-search@0.0.0");
       expect(report[0]?.entryCount).toBe(3);
       expect(report[0]?.files.map((file) => file.path).sort()).toEqual([
         "LICENSE",
@@ -78,8 +78,8 @@ describe("npm bootstrap name reservation", () => {
 
 describe("real release fail-closed gates", () => {
   it("pins every machine-readable release identity to the selected Berkin repository", () => {
-    const repositoryUrl = "https://github.com/berkingurcan/stellar-agent-market";
-    const mcpName = "io.github.berkingurcan/stellar-agent-market";
+    const repositoryUrl = "https://github.com/berkingurcan/stellar-agent-search";
+    const mcpName = "io.github.berkingurcan/stellar-agent-search";
     const pkg = JSON.parse(read("package.json")) as {
       repository: { url: string };
       mcpName: string;
@@ -201,7 +201,7 @@ describe("real release fail-closed gates", () => {
       scripts: Record<string, string>;
     };
     expect(pkg.scripts.prepublishOnly).toBe("npm run validate:release");
-    expect(pkg.bin).toEqual({ "stellar-agent-market": "dist/index.js" });
+    expect(pkg.bin).toEqual({ "stellar-agent-search": "dist/index.js" });
     for (const field of ["main", "module", "types", "typings", "exports"]) {
       expect(pkg).not.toHaveProperty(field);
     }
@@ -255,13 +255,13 @@ describe("real release fail-closed gates", () => {
     const publishedSurface = read("web", "src", "lib", "install-published.ts");
     const releaseSurfaceCheck = read("web", "scripts", "assert-release-surface.mjs");
     const webPackage = JSON.parse(read("web", "package.json")) as { scripts: Record<string, string> };
-    expect(landing).not.toContain('code="npx -y stellar-agent-market@');
+    expect(landing).not.toContain('code="npx -y stellar-agent-search@');
     expect(landing).toContain("install commands stay withheld until public package ownership is verified");
     expect(installSelector).toContain("export * from './install-pending.js'");
     expect(pendingSurface).toContain("export const PACKAGE_PUBLISHED = false");
     expect(pendingSurface).not.toContain("npx");
     expect(publishedSurface).toContain("packageMetadata.version");
-    expect(publishedSurface).not.toContain("stellar-agent-market@0.1.0");
+    expect(publishedSurface).not.toContain("stellar-agent-search@0.1.0");
     expect(releaseSurfaceCheck).toContain("rootPackage.version");
     expect(releaseSurfaceCheck).toContain("private repository or unclaimed npm package");
     expect(releaseSurfaceCheck).not.toContain("0\\.1\\.0");

@@ -1,5 +1,5 @@
 /**
- * types.ts — FROZEN shared contracts for stellar-agent-market.
+ * types.ts — FROZEN shared contracts for stellar-agent-search.
  *
  * Every other module imports these shapes; treat them as the API surface.
  * Design sources: modules/01 §2.5, research/A §6, INFRA-BLUEPRINT §1.2/§3.2.

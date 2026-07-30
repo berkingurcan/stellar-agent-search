@@ -1,9 +1,9 @@
 {
-  "name": "stellar-agent-market-web",
+  "name": "stellar-agent-search-web",
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Landing page for stellar-agent-market. Not published — the npm package ships only dist/ (see the root package.json `files` field).",
+  "description": "Landing page for stellar-agent-search. Not published — the npm package ships only dist/ (see the root package.json `files` field).",
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",

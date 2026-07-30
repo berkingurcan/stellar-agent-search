@@ -9,7 +9,7 @@ import {
 } from "../scripts/validate-persisted-secrets.mjs";
 
 const EMPTY_ALLOWLIST = JSON.stringify({
-  worker: "stellar-agent-market",
+  worker: "stellar-agent-search",
   allowedSecretNames: [],
 });
 
@@ -28,7 +28,7 @@ describe("persisted Cloudflare secret deployment gate", () => {
     );
     const allowed = parseSecretAllowlist(
       JSON.stringify({
-        worker: "stellar-agent-market",
+        worker: "stellar-agent-search",
         allowedSecretNames: ["ERROR_REPORTING_DSN"],
       }),
     );
@@ -42,7 +42,7 @@ describe("persisted Cloudflare secret deployment gate", () => {
     expect(() =>
       parseSecretAllowlist(
         JSON.stringify({
-          worker: "stellar-agent-market",
+          worker: "stellar-agent-search",
           allowedSecretNames: ["SUPABASE_SERVICE_ROLE_KEY"],
         }),
       ),
@@ -74,7 +74,7 @@ describe("persisted Cloudflare secret deployment gate", () => {
     const absent = {
       status: 1,
       stdout: "",
-      stderr: 'Worker "stellar-agent-market" not found.\n\nIf this is a new Worker, run `wrangler deploy` first.',
+      stderr: 'Worker "stellar-agent-search" not found.\n\nIf this is a new Worker, run `wrangler deploy` first.',
     };
     expect(() => interpretWranglerResult(absent)).toThrow(/state is unknown/);
     expect(interpretWranglerResult(absent, { allowMissingWorker: true })).toEqual({
@@ -107,7 +107,7 @@ describe("persisted Cloudflare secret deployment gate", () => {
         "secret",
         "list",
         "--name",
-        "stellar-agent-market",
+        "stellar-agent-search",
         "--format",
         "json",
       ]),

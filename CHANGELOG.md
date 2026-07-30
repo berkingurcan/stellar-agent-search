@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `test/onchain-constants.test.ts` — asserts the USDC SAC address and CAIP-2 chain id the AgentCard advertises
   match `@x402/stellar`'s published constants. Those two values tell an A2A/AP2 client which asset on which
   chain to pay, so a hand-copied address that drifts sends a real payment to the wrong contract.
-- `stellar-agent-market setup` — an idempotent bootstrap for Claude Code, Cursor, and Codex with `user`/`project`
+- `stellar-agent-search setup` — an idempotent bootstrap for Claude Code, Cursor, and Codex with `user`/`project`
   scopes, non-mutating `--check` and `--dry-run` modes, machine-readable `--json`, and an optional live MCP
   handshake that lists all tools. Existing conflicting registrations are reported, never overwritten; Codex
   project scope emits exact manual TOML because its CLI cannot persist that scope.
@@ -78,18 +78,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Ranking now uses the versioned `stellar-agent-market-declared-evidence-v1` policy: normalized indexed quality
+- Ranking now uses the versioned `stellar-agent-search-declared-evidence-v1` policy: normalized indexed quality
   multiplied by a fixed evidence index (`0.4 × capped volume + 0.6 × effective breadth`). Owner-declared
   capabilities and verification state add zero points; there is no novelty floor. `rankVersion`,
   `evidenceStrength`, and `lowEvidence` make the semantics explicit. Mutable `RANK_W_*` settings and supplied
   `rank_agent.weights` are rejected. The ambiguous discovery input `minScore` is also rejected in favor of
   `minExplorerScore`, which names the upstream v1 `total_score` filter rather than implying a local-rank gate.
 - The skill now ships from this repository at `skills/mcp/SKILL.md` (was `skill/SKILL.md`, destined for
-  `trionlabs/stellar-8004`). Install with `npx skills add berkingurcan/stellar-agent-market --skill mcp`.
+  `trionlabs/stellar-8004`). Install with `npx skills add berkingurcan/stellar-agent-search --skill mcp`.
   Rationale: [docs/evidence.md §3](docs/evidence.md).
 - The skill's `mcp-package-version` pin is `>=0.1.0`, not `^0.1.0`. A caret range on a 0.x package resolves to
   `>=0.1.0 <0.2.0`, so the pin would have excluded the next minor release.
-- README and the getting-started guide now use the canonical `stellar-agent-market setup` bootstrap instead of
+- README and the getting-started guide now use the canonical `stellar-agent-search setup` bootstrap instead of
   hand-written client registration commands, and the guide documents the optional skill install it had been
   missing.
 - The tag release workflow now rejects tag/package/server version drift and resumes after npm publication only
@@ -171,7 +171,7 @@ Because the contract exposes neither an authoritative client count nor an exhaus
 not call `get_summary` or compare any Explorer reputation field. Attempted probes report `unavailable`, an empty
 `verifiedFields`, and explicit limitations; skipped probes report `skipped`.
 
-**Declared-evidence ranking** — versioned policy `stellar-agent-market-declared-evidence-v1` multiplies normalized
+**Declared-evidence ranking** — versioned policy `stellar-agent-search-declared-evidence-v1` multiplies normalized
 indexed quality by fixed evidence strength (`0.4 × capped volume + 0.6 × effective breadth`). Owner-declared
 x402/MPP/service metadata and probe status add zero points. This is a heuristic over indexer-declared inputs,
 not Sybil resistance, proof of personhood, or an authorization signal.
@@ -191,7 +191,7 @@ Claude Code, Cursor, and Codex, with machine-readable output and live MCP handsh
 writes on-chain reputation feedback. The only keyed code in the repo; run manually.
 
 **Distribution** — `server.json` (MCP Registry), `smithery.yaml`, `glama.json`, and `skills/mcp/SKILL.md` for
-`npx skills add berkingurcan/stellar-agent-market --skill mcp`.
+`npx skills add berkingurcan/stellar-agent-search --skill mcp`.
 
 **Docs** — README, getting-started, architecture, full tool reference, and integration guides for 8 clients
 (Claude Code, Cursor, Windsurf, Cline, VS Code, Claude Desktop, Codex CLI, Gemini CLI).

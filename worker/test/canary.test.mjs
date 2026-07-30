@@ -15,7 +15,7 @@ function jsonResponse(body, headers = {}) {
 function validInitializeResult() {
   return {
     protocolVersion: "2025-11-25",
-    serverInfo: { name: "stellar-agent-market", version: EXPECTED_SERVER_VERSION },
+    serverInfo: { name: "stellar-agent-search", version: EXPECTED_SERVER_VERSION },
     capabilities: {
       tools: { listChanged: false },
       resources: { listChanged: false },
@@ -110,7 +110,7 @@ describe("deployment canary", () => {
     ],
     [
       "binding-controlled version",
-      { ...validInitializeResult(), serverInfo: { name: "stellar-agent-market", version: "999.0.0" } },
+      { ...validInitializeResult(), serverInfo: { name: "stellar-agent-search", version: "999.0.0" } },
       /serverInfo\.version/,
     ],
     [

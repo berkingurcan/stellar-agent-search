@@ -1,4 +1,4 @@
-# Contributing to stellar-agent-market
+# Contributing to stellar-agent-search
 
 Thanks for your interest. This is a small, deliberately narrow project: a **read-only, keyless** MCP server
 over the on-chain [stellar-8004](https://stellar8004.com) agent registry. The constraints below are what make
@@ -7,8 +7,8 @@ it safe to point an autonomous agent at, so please read them before opening a PR
 ## Quick start
 
 ```bash
-git clone https://github.com/berkingurcan/stellar-agent-market
-cd stellar-agent-market
+git clone https://github.com/berkingurcan/stellar-agent-search
+cd stellar-agent-search
 npm ci
 npm run build      # tsup -> dist/
 npm test           # vitest
@@ -40,7 +40,7 @@ node dist/index.js                     # the MCP stdio surface (speaks JSON-RPC;
 | `src/cli/` | Human terminal surface |
 | `examples/` | `x402-demo.ts` — the *only* keyed code in the repo, run manually |
 | `test/` | vitest suites, including the invariant tests below |
-| `skills/mcp/` | `SKILL.md` — installed by `npx skills add berkingurcan/stellar-agent-market --skill mcp` |
+| `skills/mcp/` | `SKILL.md` — installed by `npx skills add berkingurcan/stellar-agent-search --skill mcp` |
 | `issues/` | Open work, one file per issue — see [issues/README.md](issues/README.md) |
 
 ## Non-negotiable invariants
@@ -133,7 +133,7 @@ git push origin vX.Y.Z
 
 Keep `version` in sync across `package.json`, `server.json` (both the top-level and `packages[].version`), and
 `metadata.version` in `skills/mcp/SKILL.md`. Also update `smithery.yaml` and every persistent onboarding example
-to the same exact `stellar-agent-market@X.Y.Z` pin. `test/skill-sync.test.ts`, `test/version-sync.test.ts`, and the
+to the same exact `stellar-agent-search@X.Y.Z` pin. `test/skill-sync.test.ts`, `test/version-sync.test.ts`, and the
 release validator enforce the machine-readable surfaces; review the complete pinned-command search before tagging.
 
 ### First release — one-time setup
@@ -146,7 +146,7 @@ supply-chain takeover window, while a real provenance-backed publish requires th
 public. Execute the one-time setup in this order:
 
 1. **Move the private repository to the selected canonical owner.** The chosen identity is
-   `berkingurcan/stellar-agent-market`. Transfer the existing repository if possible so history and settings stay
+   `berkingurcan/stellar-agent-search`. Transfer the existing repository if possible so history and settings stay
    intact; otherwise create the private destination and push the complete history. Validate every
    repository/MCP/npm identity-bearing file before reserving npm or making the destination public.
 2. **Reserve the name while the repository is still private.** Trusted Publisher configuration requires the
@@ -165,7 +165,7 @@ public. Execute the one-time setup in this order:
    npm pack --dry-run "$bootstrap_dir"
    npm login
    npm publish "$bootstrap_dir" --access public --tag bootstrap
-   npm view stellar-agent-market dist-tags --json
+   npm view stellar-agent-search dist-tags --json
    ```
 
    Do not publish `0.1.0` manually: that release must come from OIDC so it has verifiable provenance.

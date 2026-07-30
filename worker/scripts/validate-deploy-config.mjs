@@ -149,7 +149,7 @@ export function validateDeployConfig(rawConfig) {
     }
   }
 
-  if (config.name !== "stellar-agent-market") deployError("worker name must be stellar-agent-market");
+  if (config.name !== "stellar-agent-search") deployError("worker name must be stellar-agent-search");
   if (config.main !== "src/index.ts") deployError("worker main must be src/index.ts");
   if (config.workers_dev !== false) deployError("workers_dev must be explicitly false");
   if (config.preview_urls !== false) deployError("preview_urls must be explicitly false");

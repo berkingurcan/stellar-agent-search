@@ -1,10 +1,10 @@
-# Publishing `stellar-agent-market`
+# Publishing `stellar-agent-search`
 
 Operational runbook for the one-time npm name reservation and every real release after it. The blocking work
 is tracked in [`issues/`](issues/); this file is the ordered procedure.
 
 **State verified 29 July 2026:** `berkingurcan` is the selected canonical GitHub owner, but the source still
-lives in the private staging repository and `berkingurcan/stellar-agent-market` is not publicly accessible. The
+lives in the private staging repository and `berkingurcan/stellar-agent-search` is not publicly accessible. The
 npm name is unclaimed, the destination's `npm-production` environment is not configured, and
 `NPM_PACKAGE_OWNERS` is unset. Move the private repository first, then reserve the npm name with the inert
 bootstrap **before** making prepared commands public. Public onboarding stays disabled until both real
@@ -27,7 +27,7 @@ then does it publish or verify the immutable MCP Registry version.
 ## 1. Finalize repository identity while it is still private
 
 The permanent owner is **`berkingurcan`**. Move the repository to
-`berkingurcan/stellar-agent-market` while both source and destination remain private, then run the owner-string
+`berkingurcan/stellar-agent-search` while both source and destination remain private, then run the owner-string
 audit in [P0-01](issues/P0-01-make-repository-public.md). Prefer a GitHub transfer over a second disconnected
 copy because it preserves history and repository settings. Do not expose the destination yet: the npm name is
 still unclaimed and the prepared documentation contains exact future commands.
@@ -41,7 +41,7 @@ a GitHub redirect is not accepted as proof after a transfer.
 
 Start from a clean checkout. Keep the release version synchronized in `package.json`, both `server.json`
 version fields, and `skills/mcp/SKILL.md`'s `metadata.version`. Update `smithery.yaml` and every persistent
-onboarding example to the same exact `stellar-agent-market@X.Y.Z` pin; never persist an unversioned npm launch.
+onboarding example to the same exact `stellar-agent-search@X.Y.Z` pin; never persist an unversioned npm launch.
 
 ```bash
 npm ci
@@ -54,7 +54,7 @@ npm pack --dry-run
 
 Before tagging, reproduce [P1-06](issues/P1-06-published-package-ships-vulnerable-axios.md)'s locally green
 downstream proof rather than trusting this repository's root `overrides`: pack with `--ignore-scripts`, install
-that exact tarball in a new temporary npm project, run its `stellar-agent-market --version`, inspect `npm ls
+that exact tarball in a new temporary npm project, run its `stellar-agent-search --version`, inspect `npm ls
 --all`, and require `npm audit --omit=dev --audit-level=high` to pass. The current packed-consumer proof has no
 high/critical finding; the issue's final checkbox remains open only so the immutable OIDC-published artifact is
 checked again after release.
@@ -82,7 +82,7 @@ node scripts/release/create-bootstrap-package.mjs "$bootstrap_dir"
 npm pack --dry-run "$bootstrap_dir"
 npm login
 npm publish "$bootstrap_dir" --access public --tag bootstrap
-npm view stellar-agent-market dist-tags --json
+npm view stellar-agent-search dist-tags --json
 ```
 
 The dry run must contain exactly `package.json`, `README.md`, and `LICENSE`; it must contain no `bin`, scripts,
@@ -103,10 +103,10 @@ by accident:
 ```bash
 canonical_owner='berkingurcan'
 test "$canonical_owner" = 'berkingurcan'
-curl -fsS "https://raw.githubusercontent.com/${canonical_owner}/stellar-agent-market/main/skills/mcp/SKILL.md" >/dev/null
+curl -fsS "https://raw.githubusercontent.com/${canonical_owner}/stellar-agent-search/main/skills/mcp/SKILL.md" >/dev/null
 ```
 
-Also re-check that `npm view stellar-agent-market dist-tags --json` still shows only the owned bootstrap and no
+Also re-check that `npm view stellar-agent-search dist-tags --json` still shows only the owned bootstrap and no
 unexpected `latest` release.
 
 ## 5. Configure both protection layers
@@ -119,7 +119,7 @@ On npmjs.com → package → Settings → Trusted Publisher, set:
 
 - provider: **GitHub Actions**;
 - organization/user: **`berkingurcan`**;
-- repository: `stellar-agent-market`;
+- repository: `stellar-agent-search`;
 - workflow filename: **`publish.yml`** (filename only, not `.github/workflows/publish.yml`);
 - environment name: **`npm-production`**;
 - allowed action: **`npm publish`** only.
@@ -151,8 +151,8 @@ The MCP Registry step performs the same fail-closed check: an existing exact ver
 ## 7. Verify, then expose onboarding
 
 ```bash
-npm view stellar-agent-market@0.1.0 version dist.integrity repository --json
-npm view stellar-agent-market dist-tags --json
+npm view stellar-agent-search@0.1.0 version dist.integrity repository --json
+npm view stellar-agent-search dist-tags --json
 canonical_mcp_name_urlencoded="$(node -e "process.stdout.write(encodeURIComponent(require('./server.json').name))")"
 curl -fsS "https://registry.modelcontextprotocol.io/v0.1/servers/${canonical_mcp_name_urlencoded}/versions/0.1.0"
 ```
@@ -165,7 +165,7 @@ Only after both checks pass, make a reviewed follow-up that changes the single r
 `npm --prefix web run check:release-surface`, and deploys the assets-only landing Worker. The pre-release
 module graph contains no executable package commands; the published module supplies them only after this switch.
 Canary every copy button. Persistent configs must stay pinned to
-`stellar-agent-market@0.1.0`; do not replace them with mutable `latest` launches.
+`stellar-agent-search@0.1.0`; do not replace them with mutable `latest` launches.
 
 ## Non-negotiable stop conditions
 

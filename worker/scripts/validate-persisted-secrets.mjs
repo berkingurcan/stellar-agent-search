@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-export const WORKER_NAME = "stellar-agent-market";
+export const WORKER_NAME = "stellar-agent-search";
 
 const SAFE_BINDING_NAME = /^[A-Z][A-Z0-9_]{0,127}$/;
 const SECRET_TYPES = new Set(["secret_text", "secret_key"]);
