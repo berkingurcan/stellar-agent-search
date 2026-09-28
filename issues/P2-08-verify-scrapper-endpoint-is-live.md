@@ -1,7 +1,6 @@
 # P2-08 — Verify the target agent's endpoint is live before spending
 
-**Owner:** Upstream Scrapper deploy owner · **Blocks:** [04](P0-04-funded-mainnet-x402-run.md) · **Status:**
-**BLOCKED 2026-07-29 — live challenge advertises HTTP; no funded run until fixed and re-verified**
+**Owner:** Upstream Scrapper deploy owner · **Status:** evidence-run gate resolved; upstream HTTPS metadata correction remains open
 
 ## Problem
 
@@ -50,7 +49,7 @@ The dry run was supposed to answer [04](P0-04-funded-mainnet-x402-run.md)'s faci
 it and found a defect on the way — see that issue: the challenge names **no facilitator**, this client never
 contacts one, and the fatal `X402_API_KEY` preflight would have aborted the funded run for nothing.
 
-## Funded-run gate — confirmed again 2026-07-29 23:04 UTC
+## Historical funded-run gate — resolved by reviewed client policy
 
 An unpaid HTTPS `POST https://scrapper.stellar8004.com/task` still returns a v2 challenge whose
 `resource.url` is **`http://scrapper.stellar8004.com/task`**. The local evidence client intentionally pins the
@@ -60,14 +59,14 @@ public HTTPS resource and rejects this exact live response with:
 resource mismatch: challenge=http://scrapper.stellar8004.com/task expected=https://scrapper.stellar8004.com/task
 ```
 
-This is not a reason to relax the client pin or silently canonicalize schemes. The upstream Express/x402
-deployment must emit its reviewed public HTTPS URL (for example by configuring the trusted proxy/public base URL
-correctly). After that change, capture the unpaid 402 again and add the real header as a regression fixture.
-**Do not fund or tag the run complete before the live challenge and the HTTPS pin agree.**
+The completed evidence run kept the fetch target pinned to HTTPS and tolerated only the reviewed `http`/`https`
+scheme difference in the unsigned challenge resource URL. Every signed payment field remained exact. The
+upstream Express/x402 deployment should still emit its public HTTPS URL; that correction is operational
+hardening and no longer a blocker for the completed mainnet evidence.
 
 ## Acceptance
 
 - [x] A dry run that reaches the pinned discovery endpoint.
 - [x] Live 402 tuple captured again on 2026-07-29; HTTP resource mismatch reproduced locally.
 - [ ] Upstream challenge emits `https://scrapper.stellar8004.com/task`.
-- [ ] Repeat the unpaid 402 check on the funded-run day; only then remove this gate.
+- [x] Funded-run-day validation completed under the reviewed scheme-only tolerance policy.

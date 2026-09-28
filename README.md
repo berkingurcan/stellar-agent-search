@@ -236,6 +236,10 @@ claim until the remote canary is recorded.
 Reviewing this against a grant or SOW? Start at **[docs/evidence.md](docs/evidence.md)** — a
 deliverable-to-evidence map with verification steps, written to be checked without a technical background.
 
+The proposed continuation is documented in **[docs/provider-network-phase-2.md](docs/provider-network-phase-2.md)**.
+It turns the single-provider mainnet proof into a reusable provider kit, separate client runner and independent
+provider pilot while keeping this MCP read-only and keyless.
+
 Known open work and release blockers are tracked in **[issues/](issues/README.md)**, one file per issue.
 
 Bug reports and PRs welcome. Read **[CONTRIBUTING.md](CONTRIBUTING.md)** first — it covers the project layout and

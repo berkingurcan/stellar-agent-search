@@ -10,11 +10,11 @@ checked in a browser in about five minutes.
 
 **Status legend:** ✅ shipped and verifiable · 🟡 built, awaiting a mainnet run or recording · ⬜ not yet produced
 
-> Items marked `‹fill in›` are links that only exist after a publish or recording step. They are listed here so
-> the reviewer can see exactly what is outstanding rather than having to infer it.
+> Items marked `‹fill in›` are links that do not yet exist. They remain visible so a reviewer can distinguish
+> completed technical evidence from outstanding presentation evidence.
 
 > [!IMPORTANT]
-> **Release state (verified 30 July 2026):** the repository is public under the canonical owner
+> **Release state (verified 30 July 2026; transaction status rechecked through Horizon on 28 September 2026):** the repository is public under the canonical owner
 > `berkingurcan`, and `stellar-agent-search@0.1.0` is live on npm — published from tag `v0.1.0` through the
 > protected OIDC workflow, with Sigstore provenance naming this repository, `publish.yml`, and the tagged
 > commit. The MCP Registry version `0.1.0` is **live** and returns a server object equal to `server.json`
@@ -22,8 +22,9 @@ checked in a browser in about five minutes.
 > `v0.1.0` publish run itself shows red on its final verify step: the registry's read-back lagged the
 > publish inside the poll window, and a re-run cannot go green because the tag-pinned comparator predates
 > the normalization fix — the publication is verified directly instead (`curl` the version endpoint and run
-> `node scripts/release/verify-mcp-registry.mjs` on the response). What remains for the SOW itself is the
-> funded mainnet run (Deliverable 2) and the three recordings.
+> `node scripts/release/verify-mcp-registry.mjs` on the response). The funded mainnet run is complete and
+> independently verifiable through its payment and feedback transaction hashes. What remains is presentation
+> evidence: Recording 2 was captured but has no uploaded link here, while Recordings 1 and 3 are outstanding.
 
 **Mandatory first-release order:** private move to selected owner `berkingurcan` → inert `0.0.0` reservation under
 the non-default `bootstrap` tag while private → public repository → protected OIDC real release.
@@ -257,8 +258,8 @@ exercise Claude Code, and Recording 3 must exercise Cursor. Both links remain �
 | Remote Streamable HTTP Worker | 🟡 | [`worker/`](../worker/) — implemented behind exact `/mcp` and `/healthz` Cloudflare routes, but deliberately not claimed live until namespace configuration and production canary pass |
 | npm publishing setup | ✅ | [.github/workflows/publish.yml](../.github/workflows/publish.yml) — tag-triggered, OIDC Trusted Publishing with Sigstore provenance, plus MCP Registry publish |
 | Skill packaging + distribution | ✅ | [`skills/mcp/SKILL.md`](../skills/mcp/SKILL.md) — ships in the repository, where `npx skills add` fetches it; deliberately kept out of the npm tarball (`files` in [package.json](../package.json)) so the published package stays lean |
-| Mainnet gas | ⬜ | Consumed by the Deliverable 2 run |
-| Demo video production | ⬜ | See recordings below |
+| Mainnet gas | ✅ | Consumed by the successful Deliverable 2 run; payment and feedback transactions are linked above |
+| Demo video production | 🟡 | Recording 2 was captured but still needs an uploaded link; Recordings 1 and 3 remain outstanding |
 
 Registry manifests are in place for three directories: [`server.json`](../server.json) (official MCP Registry),
 [`smithery.yaml`](../smithery.yaml), [`glama.json`](../glama.json).
@@ -273,8 +274,11 @@ remaining consumer dependency finding is tracked explicitly under [`issues/`](..
 
 ## 5. Explicitly out of scope
 
-Per SOW §4.1, none of the following are part of this Instaward and none are claimed here: consumer chat product,
-backend message relayer, new Soroban contracts, additional first-party agents, explorer UI redesign.
+Per SOW §4.1, none of the following were part of this Instaward and none are claimed as delivered here:
+consumer chat product, backend message relayer, reusable provider kit, independent provider onboarding,
+general service execution/recovery, new Soroban contracts, additional first-party agents, or explorer UI
+redesign. The provider-side items are documented as a candidate follow-on phase, not retroactively counted as
+work completed under this SOW.
 
 The **Validation** registry is likewise not in scope — the SOW names Identity and Reputation usage only. The
 server reads Identity and Reputation, and reports Validation indexer health. A full Validation axis is planned
@@ -284,16 +288,16 @@ for the follow-on SCF scope.
 
 ## 6. Outstanding items and their order
 
-These are the items that block **delivery**. Full detail — verification steps and acceptance criteria — lives
-in one file per item under [`issues/`](../issues/); this table is the state, not a second copy of it.
+These are the remaining evidence items. Full detail — verification steps and acceptance criteria — lives in
+one file per item under [`issues/`](../issues/); this table is the state, not a second copy of it.
 
 | # | Item | State |
 |---|---|---|
 | [01](../issues/P0-01-make-repository-public.md) | Canonical repository public under `berkingurcan` | ✅ done — verified logged-out |
 | [02](../issues/P0-02-set-default-branch-to-main.md) | Default branch is `main` | ✅ done |
 | [03](../issues/P0-03-first-npm-publish.md) | Inert bootstrap reservation, then protected OIDC real release | ✅ done — npm `0.1.0` live with provenance; MCP Registry `0.1.0` live and verified against `server.json` |
-| [04](../issues/P0-04-funded-mainnet-x402-run.md) | Funded mainnet run of `examples/x402-demo.ts` | 🟡 payer funded (XLM + USDC trustline), preflight green, live challenge validates; awaiting the recorded run |
-| [05](../issues/P0-05-record-three-demos.md) | Recordings 1–3 | ⬜ the last SOW-blocking step |
+| [04](../issues/P0-04-funded-mainnet-x402-run.md) | Funded mainnet run of `examples/x402-demo.ts` | ✅ complete — successful payment and feedback transactions recorded on mainnet |
+| [05](../issues/P0-05-record-three-demos.md) | Recordings 1–3 | 🟡 Recording 2 captured but not uploaded; Recordings 1 and 3 outstanding |
 
 [docs/recordings.md](recordings.md) has the shot-by-shot scripts.
 

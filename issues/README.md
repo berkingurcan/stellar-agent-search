@@ -24,15 +24,15 @@ the non-default `bootstrap` tag while private → public repository → protecte
 | [01](P0-01-make-repository-public.md) | P0 | ~~Move to selected owner `berkingurcan`; make public only after 03 phase A~~ **resolved** | Builder + current repo owner + Berkin |
 | [02](P0-02-set-default-branch-to-main.md) | P0 | ~~Set the default branch to `main`, delete the working branch~~ **resolved** | Builder |
 | [03](P0-03-first-npm-publish.md) | P0 | ~~Inert private bootstrap, then protected OIDC real publish~~ **resolved** — npm + MCP Registry both live | Builder |
-| [04](P0-04-funded-mainnet-x402-run.md) | P0 | Funded mainnet x402 run → two transaction hashes — **ready: payer funded, challenge validates under the reviewed policy** | Builder |
-| [05](P0-05-record-three-demos.md) | P0 | Record the three demo videos | Builder |
+| [04](P0-04-funded-mainnet-x402-run.md) | P0 | ~~Funded mainnet x402 run → two transaction hashes~~ **resolved** — payment and feedback confirmed on mainnet | Builder |
+| [05](P0-05-record-three-demos.md) | P0 | Record three demo videos — **partial:** funded run captured; upload link plus recordings 1 and 3 outstanding | Builder |
 | [06](P1-06-published-package-ships-vulnerable-axios.md) | P1 | Published package ships a vulnerable, proxy-broken axios | Code |
 | [07](P1-07-testnet-mode-has-no-explorer.md) | P1 | ~~`STELLAR_NETWORK=testnet` has no explorer and cannot work~~ **resolved** | Code |
-| [08](P2-08-verify-scrapper-endpoint-is-live.md) | P2 | Fix and re-verify the target's HTTPS x402 challenge before spending | Upstream Scrapper deploy owner |
+| [08](P2-08-verify-scrapper-endpoint-is-live.md) | P2 | Correct the target's HTTP resource echo — evidence-run gate resolved; upstream metadata fix remains | Upstream Scrapper deploy owner |
 | [09](P2-09-substantiate-only-non-evm-claim.md) | P2 | ~~Substantiate or soften the "only live non-EVM" claim~~ **resolved** | Code |
 | [10](P3-10-validation-registry-axis.md) | P3 | Validation registry as a fourth trust axis | Code |
 | [11](P3-11-remote-stateless-deployment.md) | P3 | Remote / stateless deployment — **implemented; production canary blocked** | Code + Builder |
-| [12](P3-12-stellar-native-paid-tools.md) | P3 | Stellar-native paid MCP tools | Blocked upstream |
+| [12](P3-12-stellar-native-paid-tools.md) | P3 | Stellar-native paid MCP tools — direct core path available | Code |
 | [13](P3-13-upstream-discovery-api-v2.md) | P3 | Upstream cursor-based discovery API v2 | Blocked upstream |
 | [14](P3-14-upstream-reputation-aggregate-v2.md) | P3 | Upstream scalable reputation aggregate v2 | Blocked upstream |
 | [15](P1-15-upstream-stats-must-fail-closed.md) | P1 | Upstream `/stats` must fail closed on Supabase errors | Blocked upstream |
@@ -43,6 +43,7 @@ the non-default `bootstrap` tag while private → public repository → protecte
 | [20](P1-20-upstream-rate-limiter-must-fail-closed.md) | P1 | Stop allowing requests when the upstream limiter RPC fails | Blocked upstream |
 | [21](P1-21-upstream-indexer-integrity-watermark.md) | P1 | Expose durable checkpoint/dead-letter integrity state | Blocked upstream |
 | [22](P1-22-upstream-leaderboard-freshness.md) | P1 | Bind leaderboard freshness to its last successful projection refresh | Blocked upstream |
+| [23](P3-23-provider-network-phase-2.md) | P3 | Stellar Agent Search Phase 2: reusable provider network | Code + Builder |
 
 ## A note on review
 

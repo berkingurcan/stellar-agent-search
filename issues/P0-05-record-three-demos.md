@@ -1,11 +1,12 @@
 # P0-05 — Record the three demo videos
 
-**Owner:** Builder · **Blocked by:** [01](P0-01-make-repository-public.md), [02](P0-02-set-default-branch-to-main.md), [03](P0-03-first-npm-publish.md), [04](P0-04-funded-mainnet-x402-run.md) · **Status:** open
+**Owner:** Builder · **Status:** partially complete — Recording 2 captured but not uploaded; Recordings 1 and 3 outstanding
 
 ## Problem
 
-The SOW requires a screen recording per deliverable. None exist. Shot-by-shot scripts are written in
-[docs/recordings.md](../docs/recordings.md); this issue only tracks that they have not been shot.
+The SOW requires a screen recording per deliverable. The funded mainnet run was captured, but no durable video
+link has been added to the repository. The tool walkthrough and clean-environment install recordings remain
+outstanding. Shot-by-shot scripts are in [docs/recordings.md](../docs/recordings.md).
 
 ## Order matters
 
@@ -23,5 +24,5 @@ curl -sI https://raw.githubusercontent.com/berkingurcan/stellar-agent-search/mai
 
 ## Acceptance
 
-Three unlisted links pasted into `docs/evidence.md` §1–§3, replacing the `‹…›` placeholders, and the status
-markers flipped from ⬜ to ✅.
+Three durable links pasted into `docs/evidence.md` §1–§3, replacing the placeholders, with status markers
+changed to ✅ only after each link is reviewable.

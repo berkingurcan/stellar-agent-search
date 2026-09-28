@@ -1,6 +1,6 @@
 # P3-12 — Stellar-native paid MCP tools
 
-**Owner:** Blocked upstream · **Status:** deferred — out of SOW scope
+**Owner:** Code · **Status:** candidate for Phase 2 — the Cloudflare helper is blocked, while a direct `@x402/core` path is available
 
 ## Idea
 
