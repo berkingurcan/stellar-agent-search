@@ -1,46 +1,68 @@
 # Stellar Agent Search — Phase 2: Provider Network
 
-## Vision
+## The idea in one sentence
 
-Stellar Agent Search can grow from agent discovery and a reference payment loop into open infrastructure for
-finding, providing, hiring and paying AI agent services on Stellar.
+Make it easy for developers to offer paid AI services on Stellar, and easy for users to find, hire and pay them.
 
-## What Phase 1 proved
+## How we got here
 
-- Agents can be discovered, ranked and inspected through MCP and CLI.
-- A client can discover a registered service, validate an x402 challenge, pay USDC on Stellar mainnet, receive
-  a result and write reputation feedback.
-- Payment submission can fail closed, avoid automatic replay and leave durable recovery evidence.
+**Stellar Agent Search** was the first project. It helps AI assistants find and evaluate agents registered on
+Stellar. It is read-only and does not hold a wallet or make payments.
 
-## What remains product work
+**Algoria** was a hackathon prototype. It tested the next step: a user could ask Claude or Codex for a service,
+approve a Stellar payment and receive the result. It taught us how the buyer experience should work.
 
-The existing funded demo is pinned to one Scrapper agent and one reviewed request. There is no reusable
-provider server kit, no general client wallet runner, no standard asynchronous job/status/result contract and
-no independent provider onboarding flow.
+The remaining problem is the provider side. A developer still has to create the payment flow, service format
+and recovery logic alone. This makes every integration different and difficult to trust.
 
-## Proposed Phase 2
+## What Phase 2 will build
 
-### Provider Kit
+### 1. Provider Kit
 
-A reusable service template for Stellar x402 pricing, payment verification, receipts, request identity and
-Stellar 8004 service metadata.
+Starter code and a short guide for developers. It will show them how to describe a service, set a price, accept
+USDC on Stellar and return a result in a standard format.
 
-### Independent Provider Pilot
+### 2. Payment Client
 
-Two external developers connect independently operated services using the same kit. Pilot evidence records
-integration time, successful paid calls, failures and fixes without presenting incentives as adoption.
+A separate client will handle the user's wallet, spending limits and payment approval. Private keys will never
+enter the Stellar Agent Search server.
 
-### Job and Result Recovery
+### 3. Job Recovery
 
-A standard provider contract lets a client recover an interrupted paid job after a timeout or restart. The
-client checks payment and job state before any new charge; uncertain payment is never automatically replayed.
+Some services take time. If a connection closes after payment, the user will be able to check the same job and
+collect the result without paying again.
 
-### Separate Client Runner
+### 4. Independent Pilot
 
-Wallet custody, budgets, approvals and signing live in a separate client process. The Stellar Agent Search MCP
-remains read-only and keyless. The Algoria hackathon prototype supplies UX lessons, not a second project identity.
+Two independent developers will connect real services with the same Provider Kit. Five users will test the
+complete flow. The pilot will record what worked, what failed and what we fixed.
 
-## Intended outcome
+## A simple example
 
-The follow-on turns a secure single-provider reference flow into reusable infrastructure that independent
-providers and users can adopt, while preserving the trust boundaries established in Phase 1.
+1. A user asks an AI assistant to make a phone call or create a TikTok video.
+2. Stellar Agent Search finds a suitable service.
+3. The user sees the price and approves payment.
+4. The provider receives USDC and completes the work.
+5. The user receives the result and can leave feedback.
+6. If the job is delayed, the user can recover it without a second payment.
+
+## What already exists and what is new
+
+| Already built | Phase 2 work |
+| --- | --- |
+| Agent discovery, ranking and reputation | Reusable Provider Kit |
+| 13 read-only MCP tools | Separate payment client |
+| One successful mainnet payment and feedback flow | Standard job and result recovery |
+| Algoria buyer-experience prototype | Two-provider and five-user pilot |
+
+## Four-week plan
+
+- **Week 1:** Define the service format and safe payment flow.
+- **Week 2:** Build the Provider Kit and job recovery.
+- **Week 3:** Connect two independent services and fix integration problems.
+- **Week 4:** Test with five users and publish the demo, documentation and evidence.
+
+## Goal
+
+Continue Stellar Agent Search from a discovery tool into an open network where people can find, hire and pay AI
+services, and where developers can earn USDC by providing them.

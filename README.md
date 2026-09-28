@@ -236,9 +236,9 @@ claim until the remote canary is recorded.
 Reviewing this against a grant or SOW? Start at **[docs/evidence.md](docs/evidence.md)** — a
 deliverable-to-evidence map with verification steps, written to be checked without a technical background.
 
-The proposed continuation is documented in **[docs/provider-network-phase-2.md](docs/provider-network-phase-2.md)**.
-It turns the single-provider mainnet proof into a reusable provider kit, separate client runner and independent
-provider pilot while keeping this MCP read-only and keyless.
+The proposed continuation is **[Stellar Agent Search Phase 2](docs/provider-network-phase-2.md)**. The first phase
+helps users find agents. Phase 2 will give independent developers a standard way to offer paid services, while
+wallets and private keys remain outside this read-only search server.
 
 Known open work and release blockers are tracked in **[issues/](issues/README.md)**, one file per issue.
 

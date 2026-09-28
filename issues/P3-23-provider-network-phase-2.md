@@ -2,45 +2,50 @@
 
 **Owner:** Code + Builder · **Status:** proposed follow-on Instaward scope; not implemented
 
-## Continuation
+## Why this is the next phase
 
-Phase 1 shipped the read-only, keyless discovery layer and proved one tightly reviewed mainnet flow that finds,
-pays and reviews a specific x402 service. That proof is intentionally pinned to one agent, endpoint, payee,
-request and response contract. It is evidence that the chain works, not a reusable provider platform.
+Stellar Agent Search already helps AI assistants find and evaluate agents on Stellar. A mainnet reference demo
+also proved that a client can find one service, pay it, receive a result and write feedback.
 
-Phase 2 would generalize that proof while keeping the existing search MCP read-only and keyless.
+Algoria later tested the buyer experience during a hackathon: users could request and pay for services from
+Claude or Codex. It was a useful prototype, but it did not give independent providers a shared way to connect.
 
-## Proposed scope
+Phase 2 fills that gap. It is a continuation of Stellar Agent Search, not a separate product.
 
-1. **Provider Kit** — a reusable Stellar x402 service template with pricing, payment verification, request
-   identity, receipts and documented service metadata.
-2. **Job and result recovery** — a provider-independent contract for job creation, status and authenticated
-   result lookup after a timeout or client restart, without automatic payment replay.
-3. **Client runner** — a separate keyed client layer for wallet custody, budgets, payment approval and result
-   retrieval. Private keys must never enter the search MCP.
-4. **Independent provider pilot** — onboard two independently operated services and record integration issues,
-   successful paid calls and recovery evidence.
-5. **Public evidence** — provider documentation, tests, a working demo and a concise pilot report.
+## What Phase 2 will add
 
-## Existing foundation reused
+1. **Provider Kit:** starter code and documentation for listing a service, setting a price, accepting Stellar
+   USDC and returning a result.
+2. **Payment Client:** a separate client for wallets, spending limits and payment approval. Private keys stay
+   outside the read-only search server.
+3. **Job Recovery:** users can check a paid job after a timeout or restart and receive the result without paying
+   again.
+4. **Independent Pilot:** two outside developers connect real services with the same kit.
+5. **Public Evidence:** five user tests, a working demo, documentation, test results and payment records.
 
-- 13 read-only MCP discovery/evaluation tools, resources and prompts.
-- Exact-version client setup for Claude Code, Cursor and Codex.
-- Stellar x402 challenge validation, one-shot submission and independent settlement checks.
-- Durable payment journal/replay protection from the reference demo.
-- Stellar 8004 identity and feedback integration.
+## Example
 
-## Explicit boundaries
+A user asks an AI assistant to make a phone call or create a TikTok video. Stellar Agent Search finds a service,
+the user approves the price, the provider receives USDC and returns the work. If the job is delayed, the user
+can recover it without a second payment.
 
-- Do not add signing, wallets or provider execution to the existing read-only MCP process.
-- Do not claim self-declared endpoints are verified. Pilot evidence must state exactly what was tested and when.
-- Do not mix mainnet registry data with testnet payments. Every demonstration must name one coherent network.
-- Do not create a second registry, indexer or canonical database.
-- Do not count the Algoria hackathon prototype as Phase 2 delivery; it is prior UX/payment validation.
+## What Phase 1 already provides
 
-## Acceptance target
+- 13 read-only tools for discovery, ranking and reputation.
+- Setup for Claude Code, Cursor and Codex.
+- A successful mainnet payment, result and feedback flow.
+- Payment checks and replay protection in the reference demo.
 
-- Two independent providers use the same published kit without provider-specific client code.
-- A user completes paid service calls through the separate client runner.
-- At least one interrupted job is recovered through the standard job contract without a second payment.
-- Evidence includes source, integration docs, test output, transaction/receipt records and a public demo.
+## Boundaries
+
+- The search server remains read-only and never holds private keys.
+- A listed endpoint is not called verified unless the pilot actually tests it.
+- Each demo uses one clear Stellar network from start to finish.
+- Algoria is prior hackathon learning, not work claimed under Phase 2.
+
+## Success criteria
+
+- Two independent providers use the same Provider Kit.
+- Five users complete the full find, approve, pay and receive flow.
+- At least one delayed job is recovered without a second payment.
+- The code, guide, demo and evidence are public.
