@@ -810,8 +810,8 @@ async function cmdDoctor(deps: ToolDeps, flags: CliFlags): Promise<number> {
     name: "tools",
     ok: true,
     detail: deps.source.kind === "registry"
-      ? "find_agent, rank_agent, get_agent_profile, list_services (+ list_agents); leaderboard, registry stats, " +
-        "owner lookups and feedback history need an indexer (INDEXER_REQUIRED)"
+      ? "find_agent, rank_agent, get_agent_profile, list_services (+ list_agents); leaderboard, registry " +
+        "stats/health, owner lookups and feedback history need an indexer (INDEXER_REQUIRED)"
       : "find_agent, rank_agent, get_agent_profile, list_services (+ list_agents, leaderboard)",
   });
 

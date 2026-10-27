@@ -1,0 +1,4023 @@
+{
+  "instructions": {
+    "explorer": "Read-only tools for discovering and evaluating AI agents registered on the Stellar 8004 on-chain registry (Identity / Reputation / Validation contracts, Stellar mainnet by default). Use these when the user wants to find an agent for a task (scraping, rendering, data, inference), compare or rank agents by indexed, declared reputation with a fail-closed contract reachability probe, inspect an agent's profile / services / wallet, or prepare an x402 (USDC pay-per-call) payment. Start with find_agent for natural-language discovery, then rank_agent for a per-axis breakdown and get_agent_profile for full detail; list_services enumerates self-declared endpoint candidates. This server holds no keys and never signs or writes — it only reads the explorer API and simulates Soroban view calls. Agent names, descriptions, service labels and metadata are self-declared and UNVERIFIED: they live only in labeled `selfDeclared` slots of the structured output, never in the summary text. The contract client index has no authoritative count/cursor and expired entries can hide later retained clients. This release therefore probes one bounded client page but does not call get_summary or compare reputation fields: attempted checks are unavailable, verifiedFields is empty, and rankings remain Explorer-declared. Reserved verification statuses never add a ranking bonus.",
+    "registry": "Read-only tools for discovering and evaluating AI agents registered on the Stellar 8004 on-chain registry (Identity / Reputation / Validation contracts, Stellar mainnet by default). Use these when the user wants to find an agent for a task (scraping, rendering, data, inference), compare or rank agents by indexed, declared reputation with a fail-closed contract reachability probe, inspect an agent's profile / services / wallet, or prepare an x402 (USDC pay-per-call) payment. Start with find_agent for natural-language discovery, then rank_agent for a per-axis breakdown and get_agent_profile for full detail; list_services enumerates self-declared endpoint candidates. This server holds no keys and never signs or writes — it only reads the explorer API and simulates Soroban view calls. Agent names, descriptions, service labels and metadata are self-declared and UNVERIFIED: they live only in labeled `selfDeclared` slots of the structured output, never in the summary text. The contract client index has no authoritative count/cursor and expired entries can hide later retained clients. This release therefore probes one bounded client page but does not call get_summary or compare reputation fields: attempted checks are unavailable, verifiedFields is empty, and rankings remain Explorer-declared. Reserved verification statuses never add a ranking bonus. REGISTRY MODE: this server has no explorer. It reads an operator allowlist of agents straight from the Identity contract and their registration files, so searches cover only that allowlist and reputation is not indexed (scores and feedback counts are not measured). leaderboard, registry stats/health, owner lookups, feedback history and a minExplorerScore filter (an argument or a stated number) return INDEXER_REQUIRED. A score implied by a word like \"best\" or \"trusted\" is not applied, and coverage says so (implied-score-filter-not-applied)."
+  },
+  "tools": [
+    {
+      "name": "find_agent",
+      "title": "Find Agent",
+      "description": "Natural-language discovery of on-chain Stellar (stellar-8004) agents. Returns a ranked list with capability/reputation signals. Use rank_agent for per-axis breakdowns and get_agent_profile for full detail. Agent names/descriptions are self-declared (unverified) and live only in each row's labeled `selfDeclared` slot.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Natural-language description, e.g. 'a paid web scraper with a good reputation'."
+          },
+          "limit": {
+            "default": 10,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "x402": {
+            "description": "When present, require x402 (USDC pay-per-call) support.",
+            "type": "boolean",
+            "const": true
+          },
+          "mpp": {
+            "description": "When present, require MPP micropayment support.",
+            "type": "boolean",
+            "const": true
+          },
+          "hasServices": {
+            "description": "When present, require owner-declared service endpoint candidates.",
+            "type": "boolean",
+            "const": true
+          },
+          "trust": {
+            "description": "Require a trust model.",
+            "type": "string",
+            "enum": [
+              "reputation",
+              "crypto-economic",
+              "tee-attestation",
+              "validation",
+              "tee"
+            ]
+          },
+          "minExplorerScore": {
+            "description": "Minimum upstream v1 Explorer total_score in protocol units; not local rank.",
+            "type": "number",
+            "minimum": 0
+          },
+          "minScore": {
+            "description": "Deprecated ambiguous input; rejected. Use minExplorerScore.",
+            "type": "number",
+            "minimum": 0
+          },
+          "sortBy": {
+            "default": "relevance",
+            "type": "string",
+            "enum": [
+              "relevance",
+              "score",
+              "evidence",
+              "confidence",
+              "newest"
+            ]
+          },
+          "verify": {
+            "default": false,
+            "description": "Probe the Reputation contract for the top results (slower; current probe verifies no reputation fields).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "interpretedQuery": {
+            "type": "object",
+            "properties": {
+              "keywords": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "filters": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "matched": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "unsupported": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "keywords",
+              "filters",
+              "matched",
+              "unsupported"
+            ],
+            "additionalProperties": {}
+          },
+          "count": {
+            "type": "number"
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "number"
+                },
+                "rank": {
+                  "type": "number"
+                },
+                "score": {
+                  "type": "number"
+                },
+                "rankVersion": {
+                  "type": "string"
+                },
+                "evidenceStrength": {
+                  "type": "number"
+                },
+                "stellarId": {
+                  "type": "string"
+                },
+                "caip2Id": {
+                  "type": "string"
+                },
+                "network": {
+                  "type": "string"
+                },
+                "owner": {
+                  "type": "string"
+                },
+                "wallet": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "capabilities": {
+                  "type": "object",
+                  "properties": {
+                    "x402": {
+                      "type": "boolean"
+                    },
+                    "mpp": {
+                      "type": "boolean"
+                    },
+                    "hasServices": {
+                      "type": "boolean"
+                    },
+                    "supportedTrust": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "x402",
+                    "mpp",
+                    "hasServices",
+                    "supportedTrust"
+                  ],
+                  "additionalProperties": {}
+                },
+                "supportedTrust": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "scores": {
+                  "type": "object",
+                  "properties": {
+                    "average": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "total": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "feedbackCount": {
+                      "type": "number"
+                    },
+                    "uniqueClients": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "average",
+                    "total",
+                    "feedbackCount",
+                    "uniqueClients"
+                  ],
+                  "additionalProperties": {}
+                },
+                "flags": {
+                  "type": "object",
+                  "properties": {
+                    "unrated": {
+                      "type": "boolean"
+                    },
+                    "newAgent": {
+                      "type": "boolean"
+                    },
+                    "lowEvidence": {
+                      "type": "boolean"
+                    },
+                    "lowConfidence": {
+                      "type": "boolean"
+                    },
+                    "verified": {
+                      "type": "boolean"
+                    },
+                    "verificationMismatch": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "unrated",
+                    "newAgent",
+                    "lowEvidence",
+                    "lowConfidence",
+                    "verified",
+                    "verificationMismatch"
+                  ],
+                  "additionalProperties": {}
+                },
+                "breakdown": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                },
+                "verification": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "verified",
+                        "partial",
+                        "mismatch",
+                        "unavailable",
+                        "skipped"
+                      ]
+                    },
+                    "declared": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "snapshotComparable": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "limitations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "verified": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "deltas": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "checkedAt": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "verifiedFields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "unverifiedFields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "declared",
+                    "snapshotComparable",
+                    "limitations",
+                    "checkedAt"
+                  ],
+                  "additionalProperties": {}
+                },
+                "selfDeclared": {
+                  "type": "object",
+                  "properties": {
+                    "provenance": {
+                      "type": "string",
+                      "const": "self-declared"
+                    },
+                    "verified": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "note": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "provenance",
+                    "verified",
+                    "note",
+                    "value"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "id",
+                "rank",
+                "score",
+                "rankVersion",
+                "evidenceStrength",
+                "stellarId",
+                "caip2Id",
+                "network",
+                "owner",
+                "wallet",
+                "capabilities",
+                "supportedTrust",
+                "scores",
+                "flags",
+                "selfDeclared"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "coverage": {
+            "type": "object",
+            "properties": {
+              "coverageComplete": {
+                "type": "boolean"
+              },
+              "paginationExhausted": {
+                "type": "boolean"
+              },
+              "snapshotConsistent": {
+                "type": "boolean"
+              },
+              "pagesScanned": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "recordsScanned": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "hasMore": {
+                "type": "boolean"
+              },
+              "limitations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "coverageComplete",
+              "paginationExhausted",
+              "snapshotConsistent",
+              "pagesScanned",
+              "recordsScanned"
+            ],
+            "additionalProperties": {}
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "registry"
+              },
+              "allowlistSize": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "reputationIndexed": {
+                "type": "boolean",
+                "const": false
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "allowlistSize",
+              "reputationIndexed",
+              "note"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "interpretedQuery",
+          "count",
+          "agents",
+          "coverage"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Find Agent",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_agent_card",
+      "title": "Get Derived A2A Projection",
+      "description": "Unverified A2A-shaped projection from indexed Stellar 8004 metadata. It is not an agent-published AgentCard and proves neither A2A conformance nor endpoint ownership. Owner-authored metadata and service candidates are isolated under `card.selfDeclared`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              {
+                "type": "string",
+                "maxLength": 256,
+                "pattern": "^stellar:(mainnet|testnet|pubnet):(C[A-Z2-7]{55})#(\\d+)$"
+              },
+              {
+                "type": "string",
+                "maxLength": 256,
+                "pattern": "^\\d+$"
+              }
+            ],
+            "description": "Numeric agent id, numeric string, or a full stellar:{network}:{identity}#{id} handle."
+          },
+          "verify": {
+            "default": false,
+            "description": "Attempt the bounded Reputation-contract reachability probe; it does not verify reputation fields, A2A conformance, or endpoints.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "agent"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "card": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "conformance": {
+            "type": "string",
+            "const": "unverified-derived"
+          },
+          "note": {
+            "type": "string"
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "registry"
+              },
+              "allowlistSize": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "reputationIndexed": {
+                "type": "boolean",
+                "const": false
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "allowlistSize",
+              "reputationIndexed",
+              "note"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "card",
+          "conformance",
+          "note"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Get Derived A2A Projection",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_agent_feedback",
+      "title": "Get Agent Feedback",
+      "description": "Recent Explorer-indexed on-chain feedback for one agent (client-authored, untrusted → returned in a labeled `selfDeclared` slot, sanitized). Revoked entries are hidden unless includeRevoked is set.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              {
+                "type": "string",
+                "maxLength": 256,
+                "pattern": "^stellar:(mainnet|testnet|pubnet):(C[A-Z2-7]{55})#(\\d+)$"
+              },
+              {
+                "type": "string",
+                "maxLength": 256,
+                "pattern": "^\\d+$"
+              }
+            ],
+            "description": "Numeric agent id, numeric string, or a full stellar handle."
+          },
+          "limit": {
+            "default": 10,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "page": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "tag": {
+            "description": "Filter by feedback tag.",
+            "type": "string",
+            "maxLength": 64
+          },
+          "includeRevoked": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "agent"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "number"
+          },
+          "stellarId": {
+            "type": "string"
+          },
+          "page": {
+            "type": "number"
+          },
+          "count": {
+            "type": "number"
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "returned": {
+                "type": "number"
+              },
+              "revokedHidden": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "returned",
+              "revokedHidden"
+            ],
+            "additionalProperties": {}
+          },
+          "coverage": {
+            "type": "object",
+            "properties": {
+              "windowComplete": {
+                "type": "boolean"
+              },
+              "paginationExhausted": {
+                "type": "boolean"
+              },
+              "snapshotConsistent": {
+                "type": "boolean"
+              },
+              "pagesScanned": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "hasMore": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "windowComplete",
+              "paginationExhausted",
+              "snapshotConsistent",
+              "pagesScanned"
+            ],
+            "additionalProperties": {}
+          },
+          "feedback": {
+            "type": "object",
+            "properties": {
+              "provenance": {
+                "type": "string",
+                "const": "self-declared"
+              },
+              "verified": {
+                "type": "boolean",
+                "const": false
+              },
+              "note": {
+                "type": "string"
+              },
+              "value": {}
+            },
+            "required": [
+              "provenance",
+              "verified",
+              "note",
+              "value"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "agentId",
+          "stellarId",
+          "page",
+          "count",
+          "summary",
+          "coverage",
+          "feedback"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Get Agent Feedback",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_agent_profile",
+      "title": "Get Agent Profile",
+      "description": "Full profile for one agent: typed identity, capabilities, declared scores, a rank breakdown, bounded Reputation-contract reachability status, recent feedback, the canonical stellar:{network}:{identity}#{id} handle, and an explicitly unverified derived A2A-shaped projection. The current probe verifies no reputation fields. No A2A conformance or endpoint ownership is implied; self-declared text is confined to labeled `selfDeclared` slots.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              {
+                "type": "string",
+                "maxLength": 256,
+                "pattern": "^stellar:(mainnet|testnet|pubnet):(C[A-Z2-7]{55})#(\\d+)$"
+              },
+              {
+                "type": "string",
+                "maxLength": 256,
+                "pattern": "^\\d+$"
+              }
+            ],
+            "description": "Numeric agent id, numeric string, or a full stellar:{network}:{identity}#{id} handle."
+          },
+          "feedbackLimit": {
+            "default": 5,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50
+          },
+          "verify": {
+            "default": true,
+            "description": "Attempt the bounded Reputation-contract probe (default on; current probe verifies no reputation fields).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "agent"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "number"
+              },
+              "stellarId": {
+                "type": "string"
+              },
+              "caip2Id": {
+                "type": "string"
+              },
+              "network": {
+                "type": "string"
+              },
+              "owner": {
+                "type": "string"
+              },
+              "wallet": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "agentUri": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "capabilities": {
+                "type": "object",
+                "properties": {
+                  "x402": {
+                    "type": "boolean"
+                  },
+                  "mpp": {
+                    "type": "boolean"
+                  },
+                  "hasServices": {
+                    "type": "boolean"
+                  },
+                  "supportedTrust": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "x402",
+                  "mpp",
+                  "hasServices",
+                  "supportedTrust"
+                ],
+                "additionalProperties": {}
+              },
+              "supportedTrust": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "scores": {
+                "type": "object",
+                "properties": {
+                  "average": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "total": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "feedbackCount": {
+                    "type": "number"
+                  },
+                  "uniqueClients": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "average",
+                  "total",
+                  "feedbackCount",
+                  "uniqueClients"
+                ],
+                "additionalProperties": {}
+              },
+              "verification": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "verified",
+                      "partial",
+                      "mismatch",
+                      "unavailable",
+                      "skipped"
+                    ]
+                  },
+                  "declared": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "snapshotComparable": {
+                    "type": "boolean",
+                    "const": false
+                  },
+                  "limitations": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "verified": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "deltas": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "checkedAt": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "verifiedFields": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "unverifiedFields": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "status",
+                  "declared",
+                  "snapshotComparable",
+                  "limitations",
+                  "checkedAt"
+                ],
+                "additionalProperties": {}
+              },
+              "verified": {
+                "type": "boolean"
+              },
+              "flags": {
+                "type": "object",
+                "properties": {
+                  "unrated": {
+                    "type": "boolean"
+                  },
+                  "newAgent": {
+                    "type": "boolean"
+                  },
+                  "lowEvidence": {
+                    "type": "boolean"
+                  },
+                  "lowConfidence": {
+                    "type": "boolean"
+                  },
+                  "verified": {
+                    "type": "boolean"
+                  },
+                  "verificationMismatch": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "unrated",
+                  "newAgent",
+                  "lowEvidence",
+                  "lowConfidence",
+                  "verified",
+                  "verificationMismatch"
+                ],
+                "additionalProperties": {}
+              },
+              "rank": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "createdAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "txHash": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "resolveStatus": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "selfDeclared": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "id",
+              "stellarId",
+              "caip2Id",
+              "network",
+              "owner",
+              "wallet",
+              "agentUri",
+              "capabilities",
+              "supportedTrust",
+              "scores",
+              "verification",
+              "verified",
+              "flags",
+              "createdAt",
+              "txHash",
+              "resolveStatus",
+              "selfDeclared"
+            ],
+            "additionalProperties": {}
+          },
+          "agentCard": {
+            "type": "object",
+            "properties": {
+              "provenance": {
+                "type": "string",
+                "const": "self-declared"
+              },
+              "verified": {
+                "type": "boolean",
+                "const": false
+              },
+              "note": {
+                "type": "string"
+              },
+              "value": {}
+            },
+            "required": [
+              "provenance",
+              "verified",
+              "note",
+              "value"
+            ],
+            "additionalProperties": {}
+          },
+          "recentFeedback": {
+            "type": "object",
+            "properties": {
+              "provenance": {
+                "type": "string",
+                "const": "self-declared"
+              },
+              "verified": {
+                "type": "boolean",
+                "const": false
+              },
+              "note": {
+                "type": "string"
+              },
+              "value": {}
+            },
+            "required": [
+              "provenance",
+              "verified",
+              "note",
+              "value"
+            ],
+            "additionalProperties": {}
+          },
+          "feedbackCoverage": {
+            "type": "object",
+            "properties": {
+              "windowComplete": {
+                "type": "boolean"
+              },
+              "paginationExhausted": {
+                "type": "boolean"
+              },
+              "snapshotConsistent": {
+                "type": "boolean"
+              },
+              "pagesScanned": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "hasMore": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "windowComplete",
+              "paginationExhausted",
+              "snapshotConsistent",
+              "pagesScanned"
+            ],
+            "additionalProperties": {}
+          },
+          "verification": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "verified",
+                  "partial",
+                  "mismatch",
+                  "unavailable",
+                  "skipped"
+                ]
+              },
+              "declared": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "snapshotComparable": {
+                "type": "boolean",
+                "const": false
+              },
+              "limitations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "verified": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "deltas": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "checkedAt": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "verifiedFields": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "unverifiedFields": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "status",
+              "declared",
+              "snapshotComparable",
+              "limitations",
+              "checkedAt"
+            ],
+            "additionalProperties": {}
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "registry"
+              },
+              "allowlistSize": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "reputationIndexed": {
+                "type": "boolean",
+                "const": false
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "allowlistSize",
+              "reputationIndexed",
+              "note"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "profile",
+          "agentCard",
+          "recentFeedback",
+          "feedbackCoverage",
+          "verification"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Get Agent Profile",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_agents_by_owner",
+      "title": "Get Agents By Owner",
+      "description": "List the owner endpoint's current page (up to 20 agents), ranked by the 3-axis engine. Coverage explicitly reports whether more owner rows exist. Self-declared text lives in each row's labeled `selfDeclared` slot.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 56,
+            "description": "Owner account (Stellar G-address)."
+          },
+          "limit": {
+            "default": 20,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "verify": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "owner"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string"
+          },
+          "count": {
+            "type": "number"
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "number"
+                },
+                "rank": {
+                  "type": "number"
+                },
+                "score": {
+                  "type": "number"
+                },
+                "rankVersion": {
+                  "type": "string"
+                },
+                "evidenceStrength": {
+                  "type": "number"
+                },
+                "stellarId": {
+                  "type": "string"
+                },
+                "caip2Id": {
+                  "type": "string"
+                },
+                "network": {
+                  "type": "string"
+                },
+                "owner": {
+                  "type": "string"
+                },
+                "wallet": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "capabilities": {
+                  "type": "object",
+                  "properties": {
+                    "x402": {
+                      "type": "boolean"
+                    },
+                    "mpp": {
+                      "type": "boolean"
+                    },
+                    "hasServices": {
+                      "type": "boolean"
+                    },
+                    "supportedTrust": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "x402",
+                    "mpp",
+                    "hasServices",
+                    "supportedTrust"
+                  ],
+                  "additionalProperties": {}
+                },
+                "supportedTrust": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "scores": {
+                  "type": "object",
+                  "properties": {
+                    "average": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "total": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "feedbackCount": {
+                      "type": "number"
+                    },
+                    "uniqueClients": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "average",
+                    "total",
+                    "feedbackCount",
+                    "uniqueClients"
+                  ],
+                  "additionalProperties": {}
+                },
+                "flags": {
+                  "type": "object",
+                  "properties": {
+                    "unrated": {
+                      "type": "boolean"
+                    },
+                    "newAgent": {
+                      "type": "boolean"
+                    },
+                    "lowEvidence": {
+                      "type": "boolean"
+                    },
+                    "lowConfidence": {
+                      "type": "boolean"
+                    },
+                    "verified": {
+                      "type": "boolean"
+                    },
+                    "verificationMismatch": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "unrated",
+                    "newAgent",
+                    "lowEvidence",
+                    "lowConfidence",
+                    "verified",
+                    "verificationMismatch"
+                  ],
+                  "additionalProperties": {}
+                },
+                "breakdown": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                },
+                "verification": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "verified",
+                        "partial",
+                        "mismatch",
+                        "unavailable",
+                        "skipped"
+                      ]
+                    },
+                    "declared": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "snapshotComparable": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "limitations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "verified": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "deltas": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "checkedAt": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "verifiedFields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "unverifiedFields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "declared",
+                    "snapshotComparable",
+                    "limitations",
+                    "checkedAt"
+                  ],
+                  "additionalProperties": {}
+                },
+                "selfDeclared": {
+                  "type": "object",
+                  "properties": {
+                    "provenance": {
+                      "type": "string",
+                      "const": "self-declared"
+                    },
+                    "verified": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "note": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "provenance",
+                    "verified",
+                    "note",
+                    "value"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "id",
+                "rank",
+                "score",
+                "rankVersion",
+                "evidenceStrength",
+                "stellarId",
+                "caip2Id",
+                "network",
+                "owner",
+                "wallet",
+                "capabilities",
+                "supportedTrust",
+                "scores",
+                "flags",
+                "selfDeclared"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "coverage": {
+            "type": "object",
+            "properties": {
+              "coverageComplete": {
+                "type": "boolean"
+              },
+              "paginationExhausted": {
+                "type": "boolean"
+              },
+              "snapshotConsistent": {
+                "type": "boolean"
+              },
+              "pagesScanned": {
+                "type": "number"
+              },
+              "recordsScanned": {
+                "type": "number"
+              },
+              "hasMore": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "coverageComplete",
+              "paginationExhausted",
+              "snapshotConsistent",
+              "pagesScanned",
+              "recordsScanned"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "owner",
+          "count",
+          "agents",
+          "coverage"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Get Agents By Owner",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_registry_health",
+      "title": "Get Registry Health",
+      "description": "Per-registry indexer health: last indexed ledger and staleness for the identity, reputation, and validation indexers. Staleness weakens the freshness of Explorer-declared data; it does not make a bounded contract read exhaustive.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "anyStale": {
+            "type": "boolean"
+          },
+          "indexer": {
+            "type": "object",
+            "properties": {
+              "identity": {
+                "type": "object",
+                "properties": {
+                  "lastLedger": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "stale": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "lastLedger",
+                  "stale"
+                ],
+                "additionalProperties": false
+              },
+              "reputation": {
+                "type": "object",
+                "properties": {
+                  "lastLedger": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "stale": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "lastLedger",
+                  "stale"
+                ],
+                "additionalProperties": false
+              },
+              "validation": {
+                "type": "object",
+                "properties": {
+                  "lastLedger": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "stale": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "lastLedger",
+                  "stale"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "identity",
+              "reputation",
+              "validation"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "status",
+          "network",
+          "anyStale",
+          "indexer"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Get Registry Health",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_registry_stats",
+      "title": "Get Registry Stats",
+      "description": "Explorer v1 registry counts plus sampled metrics, with explicit metric definitions, 5,000-agent sample cap, non-global distribution warning, and snapshot limitations.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "network": {
+            "type": "string"
+          },
+          "totalAgents": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "totalFeedbacks": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "totalValidations": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "totalUniqueClients": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "averageFeedbackScore": {
+            "type": "number"
+          },
+          "agentsWithServices": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "agentsWithX402": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "agentsWithMpp": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "protocolDistribution": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "trustDistribution": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "metricDefinitions": {
+            "type": "object",
+            "properties": {
+              "totalAgents": {
+                "type": "string"
+              },
+              "totalFeedbacks": {
+                "type": "string"
+              },
+              "totalValidations": {
+                "type": "string"
+              },
+              "totalUniqueClients": {
+                "type": "string"
+              },
+              "averageFeedbackScore": {
+                "type": "string"
+              },
+              "agentsWithServices": {
+                "type": "string"
+              },
+              "agentsWithX402": {
+                "type": "string"
+              },
+              "agentsWithMpp": {
+                "type": "string"
+              },
+              "protocolDistribution": {
+                "type": "string"
+              },
+              "trustDistribution": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "totalAgents",
+              "totalFeedbacks",
+              "totalValidations",
+              "totalUniqueClients",
+              "averageFeedbackScore",
+              "agentsWithServices",
+              "agentsWithX402",
+              "agentsWithMpp",
+              "protocolDistribution",
+              "trustDistribution"
+            ],
+            "additionalProperties": false
+          },
+          "coverage": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "const": "stellar-8004-explorer-v1"
+              },
+              "exactCountMetrics": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "sampledMetrics": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "sampleCapAgents": {
+                "type": "number",
+                "const": 5000
+              },
+              "sampleSizeKnown": {
+                "type": "boolean",
+                "const": false
+              },
+              "distributionsGlobalExact": {
+                "type": "boolean",
+                "const": false
+              },
+              "snapshotConsistent": {
+                "type": "boolean",
+                "const": false
+              }
+            },
+            "required": [
+              "source",
+              "exactCountMetrics",
+              "sampledMetrics",
+              "sampleCapAgents",
+              "sampleSizeKnown",
+              "distributionsGlobalExact",
+              "snapshotConsistent"
+            ],
+            "additionalProperties": false
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "network",
+          "totalAgents",
+          "totalFeedbacks",
+          "totalValidations",
+          "totalUniqueClients",
+          "averageFeedbackScore",
+          "agentsWithServices",
+          "agentsWithX402",
+          "agentsWithMpp",
+          "protocolDistribution",
+          "trustDistribution",
+          "metricDefinitions",
+          "coverage",
+          "limitations"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Get Registry Stats",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "leaderboard",
+      "title": "Leaderboard",
+      "description": "Top-ranked agents in a bounded registry scan (or filter), by the 3-axis engine, with per-axis `breakdown`. On-chain verification of the top rows is optional. Coverage states whether the scan exhausted the filtered set; self-declared text lives in each row's labeled `selfDeclared` slot.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "default": 10,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "x402": {
+            "type": "boolean",
+            "const": true
+          },
+          "mpp": {
+            "description": "When present, require indexed MPP support.",
+            "type": "boolean",
+            "const": true
+          },
+          "hasServices": {
+            "type": "boolean",
+            "const": true
+          },
+          "trust": {
+            "type": "string",
+            "enum": [
+              "reputation",
+              "crypto-economic",
+              "tee-attestation",
+              "validation",
+              "tee"
+            ]
+          },
+          "minExplorerScore": {
+            "description": "Minimum upstream v1 Explorer total_score in protocol units; not local rank.",
+            "type": "number",
+            "minimum": 0
+          },
+          "minScore": {
+            "description": "Deprecated ambiguous input; rejected. Use minExplorerScore.",
+            "type": "number",
+            "minimum": 0
+          },
+          "verify": {
+            "default": false,
+            "description": "Probe the Reputation contract for the top results; current probe verifies no reputation fields.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number"
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "number"
+                },
+                "rank": {
+                  "type": "number"
+                },
+                "score": {
+                  "type": "number"
+                },
+                "rankVersion": {
+                  "type": "string"
+                },
+                "evidenceStrength": {
+                  "type": "number"
+                },
+                "stellarId": {
+                  "type": "string"
+                },
+                "caip2Id": {
+                  "type": "string"
+                },
+                "network": {
+                  "type": "string"
+                },
+                "owner": {
+                  "type": "string"
+                },
+                "wallet": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "capabilities": {
+                  "type": "object",
+                  "properties": {
+                    "x402": {
+                      "type": "boolean"
+                    },
+                    "mpp": {
+                      "type": "boolean"
+                    },
+                    "hasServices": {
+                      "type": "boolean"
+                    },
+                    "supportedTrust": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "x402",
+                    "mpp",
+                    "hasServices",
+                    "supportedTrust"
+                  ],
+                  "additionalProperties": {}
+                },
+                "supportedTrust": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "scores": {
+                  "type": "object",
+                  "properties": {
+                    "average": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "total": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "feedbackCount": {
+                      "type": "number"
+                    },
+                    "uniqueClients": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "average",
+                    "total",
+                    "feedbackCount",
+                    "uniqueClients"
+                  ],
+                  "additionalProperties": {}
+                },
+                "flags": {
+                  "type": "object",
+                  "properties": {
+                    "unrated": {
+                      "type": "boolean"
+                    },
+                    "newAgent": {
+                      "type": "boolean"
+                    },
+                    "lowEvidence": {
+                      "type": "boolean"
+                    },
+                    "lowConfidence": {
+                      "type": "boolean"
+                    },
+                    "verified": {
+                      "type": "boolean"
+                    },
+                    "verificationMismatch": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "unrated",
+                    "newAgent",
+                    "lowEvidence",
+                    "lowConfidence",
+                    "verified",
+                    "verificationMismatch"
+                  ],
+                  "additionalProperties": {}
+                },
+                "breakdown": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                },
+                "verification": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "verified",
+                        "partial",
+                        "mismatch",
+                        "unavailable",
+                        "skipped"
+                      ]
+                    },
+                    "declared": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "snapshotComparable": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "limitations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "verified": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "deltas": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "checkedAt": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "verifiedFields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "unverifiedFields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "declared",
+                    "snapshotComparable",
+                    "limitations",
+                    "checkedAt"
+                  ],
+                  "additionalProperties": {}
+                },
+                "selfDeclared": {
+                  "type": "object",
+                  "properties": {
+                    "provenance": {
+                      "type": "string",
+                      "const": "self-declared"
+                    },
+                    "verified": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "note": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "provenance",
+                    "verified",
+                    "note",
+                    "value"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "id",
+                "rank",
+                "score",
+                "rankVersion",
+                "evidenceStrength",
+                "stellarId",
+                "caip2Id",
+                "network",
+                "owner",
+                "wallet",
+                "capabilities",
+                "supportedTrust",
+                "scores",
+                "flags",
+                "selfDeclared"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "coverage": {
+            "type": "object",
+            "properties": {
+              "coverageComplete": {
+                "type": "boolean"
+              },
+              "paginationExhausted": {
+                "type": "boolean"
+              },
+              "snapshotConsistent": {
+                "type": "boolean"
+              },
+              "pagesScanned": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "recordsScanned": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "hasMore": {
+                "type": "boolean"
+              },
+              "limitations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "coverageComplete",
+              "paginationExhausted",
+              "snapshotConsistent",
+              "pagesScanned",
+              "recordsScanned"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "count",
+          "agents",
+          "coverage"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Leaderboard",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "list_agents",
+      "title": "List Agents",
+      "description": "Paginated, filterable listing of registered agents, ranked by the 3-axis engine. Filter by x402/mpp/hasServices/trust/minExplorerScore. Self-declared text lives in each row's labeled `selfDeclared` slot.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "x402": {
+            "type": "boolean",
+            "const": true
+          },
+          "mpp": {
+            "description": "When present, require indexed MPP support.",
+            "type": "boolean",
+            "const": true
+          },
+          "hasServices": {
+            "type": "boolean",
+            "const": true
+          },
+          "trust": {
+            "type": "string",
+            "enum": [
+              "reputation",
+              "crypto-economic",
+              "tee-attestation",
+              "validation",
+              "tee"
+            ]
+          },
+          "minExplorerScore": {
+            "description": "Minimum upstream v1 Explorer total_score in protocol units; not local rank.",
+            "type": "number",
+            "minimum": 0
+          },
+          "minScore": {
+            "description": "Deprecated ambiguous input; rejected. Use minExplorerScore.",
+            "type": "number",
+            "minimum": 0
+          },
+          "sortBy": {
+            "default": "score",
+            "type": "string",
+            "enum": [
+              "relevance",
+              "score",
+              "evidence",
+              "confidence",
+              "newest"
+            ]
+          },
+          "limit": {
+            "default": 20,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "page": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "verify": {
+            "default": false,
+            "description": "Probe the Reputation contract for the top results; current probe verifies no reputation fields.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number"
+          },
+          "page": {
+            "type": "number"
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "limit": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "total": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "hasMore": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "page",
+              "limit",
+              "total",
+              "hasMore"
+            ],
+            "additionalProperties": false
+          },
+          "coverage": {
+            "type": "object",
+            "properties": {
+              "coverageComplete": {
+                "type": "boolean"
+              },
+              "paginationExhausted": {
+                "type": "boolean"
+              },
+              "snapshotConsistent": {
+                "type": "boolean"
+              },
+              "pagesScanned": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "recordsScanned": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "hasMore": {
+                "type": "boolean"
+              },
+              "limitations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "coverageComplete",
+              "paginationExhausted",
+              "snapshotConsistent",
+              "pagesScanned",
+              "recordsScanned"
+            ],
+            "additionalProperties": {}
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "number"
+                },
+                "rank": {
+                  "type": "number"
+                },
+                "score": {
+                  "type": "number"
+                },
+                "rankVersion": {
+                  "type": "string"
+                },
+                "evidenceStrength": {
+                  "type": "number"
+                },
+                "stellarId": {
+                  "type": "string"
+                },
+                "caip2Id": {
+                  "type": "string"
+                },
+                "network": {
+                  "type": "string"
+                },
+                "owner": {
+                  "type": "string"
+                },
+                "wallet": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "capabilities": {
+                  "type": "object",
+                  "properties": {
+                    "x402": {
+                      "type": "boolean"
+                    },
+                    "mpp": {
+                      "type": "boolean"
+                    },
+                    "hasServices": {
+                      "type": "boolean"
+                    },
+                    "supportedTrust": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "x402",
+                    "mpp",
+                    "hasServices",
+                    "supportedTrust"
+                  ],
+                  "additionalProperties": {}
+                },
+                "supportedTrust": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "scores": {
+                  "type": "object",
+                  "properties": {
+                    "average": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "total": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "feedbackCount": {
+                      "type": "number"
+                    },
+                    "uniqueClients": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "average",
+                    "total",
+                    "feedbackCount",
+                    "uniqueClients"
+                  ],
+                  "additionalProperties": {}
+                },
+                "flags": {
+                  "type": "object",
+                  "properties": {
+                    "unrated": {
+                      "type": "boolean"
+                    },
+                    "newAgent": {
+                      "type": "boolean"
+                    },
+                    "lowEvidence": {
+                      "type": "boolean"
+                    },
+                    "lowConfidence": {
+                      "type": "boolean"
+                    },
+                    "verified": {
+                      "type": "boolean"
+                    },
+                    "verificationMismatch": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "unrated",
+                    "newAgent",
+                    "lowEvidence",
+                    "lowConfidence",
+                    "verified",
+                    "verificationMismatch"
+                  ],
+                  "additionalProperties": {}
+                },
+                "breakdown": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                },
+                "verification": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "verified",
+                        "partial",
+                        "mismatch",
+                        "unavailable",
+                        "skipped"
+                      ]
+                    },
+                    "declared": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "snapshotComparable": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "limitations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "verified": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "deltas": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "checkedAt": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "verifiedFields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "unverifiedFields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "declared",
+                    "snapshotComparable",
+                    "limitations",
+                    "checkedAt"
+                  ],
+                  "additionalProperties": {}
+                },
+                "selfDeclared": {
+                  "type": "object",
+                  "properties": {
+                    "provenance": {
+                      "type": "string",
+                      "const": "self-declared"
+                    },
+                    "verified": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "note": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "provenance",
+                    "verified",
+                    "note",
+                    "value"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "id",
+                "rank",
+                "score",
+                "rankVersion",
+                "evidenceStrength",
+                "stellarId",
+                "caip2Id",
+                "network",
+                "owner",
+                "wallet",
+                "capabilities",
+                "supportedTrust",
+                "scores",
+                "flags",
+                "selfDeclared"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "registry"
+              },
+              "allowlistSize": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "reputationIndexed": {
+                "type": "boolean",
+                "const": false
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "allowlistSize",
+              "reputationIndexed",
+              "note"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "count",
+          "page",
+          "pagination",
+          "coverage",
+          "agents"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "List Agents",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "list_services",
+      "title": "List Services",
+      "description": "Catalog of self-declared service endpoint candidates, each with its owning agent's indexed owner-declared capability/trust signals and ranked score. Filter by x402/mpp/trust/minExplorerScore/search. No endpoint is probed for liveness, ownership, protocol conformance, or payment behavior. Service labels/endpoints are unverified and live in each row's labeled `selfDeclared` slot.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "search": {
+            "description": "Free-text filter over agent name/description.",
+            "type": "string",
+            "maxLength": 256
+          },
+          "x402": {
+            "description": "When present, only x402 (USDC pay-per-call) services.",
+            "type": "boolean",
+            "const": true
+          },
+          "mpp": {
+            "description": "When present, only MPP micropayment services.",
+            "type": "boolean",
+            "const": true
+          },
+          "trust": {
+            "type": "string",
+            "enum": [
+              "reputation",
+              "crypto-economic",
+              "tee-attestation",
+              "validation",
+              "tee"
+            ]
+          },
+          "minExplorerScore": {
+            "description": "Minimum upstream v1 Explorer total_score in protocol units; not local rank.",
+            "type": "number",
+            "minimum": 0
+          },
+          "minScore": {
+            "description": "Deprecated ambiguous input; rejected. Use minExplorerScore.",
+            "type": "number",
+            "minimum": 0
+          },
+          "limit": {
+            "default": 20,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "page": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number"
+          },
+          "page": {
+            "type": "number"
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "agentId": {
+                  "type": "number"
+                },
+                "stellarId": {
+                  "type": "string"
+                },
+                "caip2Id": {
+                  "type": "string"
+                },
+                "capabilities": {
+                  "type": "object",
+                  "properties": {
+                    "x402": {
+                      "type": "boolean"
+                    },
+                    "mpp": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "x402",
+                    "mpp"
+                  ],
+                  "additionalProperties": {}
+                },
+                "capabilitiesVerified": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "supportedTrust": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "trustVerified": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "score": {
+                  "type": "number"
+                },
+                "rankVersion": {
+                  "type": "string"
+                },
+                "evidenceStrength": {
+                  "type": "number"
+                },
+                "flags": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                },
+                "endpointVerified": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "livenessVerified": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "protocolConformanceVerified": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "paymentVerified": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "service": {
+                  "type": "object",
+                  "properties": {
+                    "provenance": {
+                      "type": "string",
+                      "const": "self-declared"
+                    },
+                    "verified": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "note": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "provenance",
+                    "verified",
+                    "note",
+                    "value"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "agentId",
+                "stellarId",
+                "caip2Id",
+                "capabilities",
+                "capabilitiesVerified",
+                "supportedTrust",
+                "trustVerified",
+                "score",
+                "rankVersion",
+                "evidenceStrength",
+                "flags",
+                "endpointVerified",
+                "livenessVerified",
+                "protocolConformanceVerified",
+                "paymentVerified",
+                "service"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "coverage": {
+            "type": "object",
+            "properties": {
+              "coverageComplete": {
+                "type": "boolean"
+              },
+              "paginationExhausted": {
+                "type": "boolean"
+              },
+              "snapshotConsistent": {
+                "type": "boolean"
+              },
+              "pagesScanned": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "recordsScanned": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "hasMore": {
+                "type": "boolean"
+              },
+              "limitations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "coverageComplete",
+              "paginationExhausted",
+              "snapshotConsistent",
+              "pagesScanned",
+              "recordsScanned"
+            ],
+            "additionalProperties": {}
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "registry"
+              },
+              "allowlistSize": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "reputationIndexed": {
+                "type": "boolean",
+                "const": false
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "allowlistSize",
+              "reputationIndexed",
+              "note"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "count",
+          "page",
+          "services",
+          "coverage"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "List Services",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "rank_agent",
+      "title": "Rank Agent",
+      "description": "Rank an explicit agent set or a query's candidates using the deterministic declared-evidence policy: normalized indexed average × fixed evidence strength (0.4 capped volume + 0.6 breadth). Owner-declared capability fields add zero. On-chain checks are evidence metadata and never inflate rank. Every row carries a full per-axis `breakdown` and a declared-vs-verified `verification` block. Provide EITHER agentIds OR query.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentIds": {
+            "description": "Explicit agent ids to rank (maximum 50 on this transport). Provide EITHER agentIds OR query, not both.",
+            "minItems": 1,
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          },
+          "query": {
+            "description": "Natural-language query whose candidates are ranked. XOR with agentIds.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "limit": {
+            "default": 10,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "weights": {
+            "description": "Deprecated and rejected when supplied. The v1 policy fixes evidence weights at volume=0.4 and breadth=0.6.",
+            "type": "object",
+            "properties": {
+              "quality": {
+                "type": "number",
+                "minimum": 0
+              },
+              "volume": {
+                "type": "number",
+                "minimum": 0
+              },
+              "breadth": {
+                "type": "number",
+                "minimum": 0
+              }
+            }
+          },
+          "verify": {
+            "default": true,
+            "description": "Attempt the bounded Reputation-contract probe (default on; current probe verifies no reputation fields).",
+            "type": "boolean"
+          },
+          "sortBy": {
+            "default": "relevance",
+            "type": "string",
+            "enum": [
+              "relevance",
+              "score",
+              "evidence",
+              "confidence",
+              "newest"
+            ]
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "rankVersion": {
+            "type": "string"
+          },
+          "evidenceWeights": {
+            "type": "object",
+            "properties": {
+              "volume": {
+                "type": "number"
+              },
+              "breadth": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "volume",
+              "breadth"
+            ],
+            "additionalProperties": false
+          },
+          "count": {
+            "type": "number"
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "number"
+                },
+                "rank": {
+                  "type": "number"
+                },
+                "score": {
+                  "type": "number"
+                },
+                "rankVersion": {
+                  "type": "string"
+                },
+                "evidenceStrength": {
+                  "type": "number"
+                },
+                "stellarId": {
+                  "type": "string"
+                },
+                "caip2Id": {
+                  "type": "string"
+                },
+                "network": {
+                  "type": "string"
+                },
+                "owner": {
+                  "type": "string"
+                },
+                "wallet": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "capabilities": {
+                  "type": "object",
+                  "properties": {
+                    "x402": {
+                      "type": "boolean"
+                    },
+                    "mpp": {
+                      "type": "boolean"
+                    },
+                    "hasServices": {
+                      "type": "boolean"
+                    },
+                    "supportedTrust": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "x402",
+                    "mpp",
+                    "hasServices",
+                    "supportedTrust"
+                  ],
+                  "additionalProperties": {}
+                },
+                "supportedTrust": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "scores": {
+                  "type": "object",
+                  "properties": {
+                    "average": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "total": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "feedbackCount": {
+                      "type": "number"
+                    },
+                    "uniqueClients": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "average",
+                    "total",
+                    "feedbackCount",
+                    "uniqueClients"
+                  ],
+                  "additionalProperties": {}
+                },
+                "flags": {
+                  "type": "object",
+                  "properties": {
+                    "unrated": {
+                      "type": "boolean"
+                    },
+                    "newAgent": {
+                      "type": "boolean"
+                    },
+                    "lowEvidence": {
+                      "type": "boolean"
+                    },
+                    "lowConfidence": {
+                      "type": "boolean"
+                    },
+                    "verified": {
+                      "type": "boolean"
+                    },
+                    "verificationMismatch": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "unrated",
+                    "newAgent",
+                    "lowEvidence",
+                    "lowConfidence",
+                    "verified",
+                    "verificationMismatch"
+                  ],
+                  "additionalProperties": {}
+                },
+                "breakdown": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                },
+                "verification": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "verified",
+                        "partial",
+                        "mismatch",
+                        "unavailable",
+                        "skipped"
+                      ]
+                    },
+                    "declared": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "snapshotComparable": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "limitations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "verified": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "deltas": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "checkedAt": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "verifiedFields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "unverifiedFields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "declared",
+                    "snapshotComparable",
+                    "limitations",
+                    "checkedAt"
+                  ],
+                  "additionalProperties": {}
+                },
+                "selfDeclared": {
+                  "type": "object",
+                  "properties": {
+                    "provenance": {
+                      "type": "string",
+                      "const": "self-declared"
+                    },
+                    "verified": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "note": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "provenance",
+                    "verified",
+                    "note",
+                    "value"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "id",
+                "rank",
+                "score",
+                "rankVersion",
+                "evidenceStrength",
+                "stellarId",
+                "caip2Id",
+                "network",
+                "owner",
+                "wallet",
+                "capabilities",
+                "supportedTrust",
+                "scores",
+                "flags",
+                "selfDeclared"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "coverage": {
+            "type": "object",
+            "properties": {
+              "coverageComplete": {
+                "type": "boolean"
+              },
+              "paginationExhausted": {
+                "type": "boolean"
+              },
+              "snapshotConsistent": {
+                "type": "boolean"
+              },
+              "pagesScanned": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "recordsScanned": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "hasMore": {
+                "type": "boolean"
+              },
+              "limitations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "coverageComplete",
+              "paginationExhausted",
+              "snapshotConsistent",
+              "pagesScanned",
+              "recordsScanned"
+            ],
+            "additionalProperties": {}
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "registry"
+              },
+              "allowlistSize": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "reputationIndexed": {
+                "type": "boolean",
+                "const": false
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "allowlistSize",
+              "reputationIndexed",
+              "note"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "rankVersion",
+          "evidenceWeights",
+          "count",
+          "agents"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Rank Agent",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "resolve_agent",
+      "title": "Resolve Agent",
+      "description": "Resolve any agent reference (id, numeric string, stellar handle, or owner G-address) to the canonical typed identifiers (numeric id + stellar + CAIP-2). Owner addresses expand the current owner API page (up to 20); coverage reports whether more rows may exist.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            ],
+            "description": "Agent id, numeric string, stellar:{network}:{identity}#{id} handle, or owner G-address."
+          }
+        },
+        "required": [
+          "ref"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "id",
+              "stellarId",
+              "owner"
+            ]
+          },
+          "network": {
+            "type": "string"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "count": {
+            "type": "number"
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "number"
+                },
+                "stellarId": {
+                  "type": "string"
+                },
+                "caip2Id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "stellarId",
+                "caip2Id"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "coverage": {
+            "type": "object",
+            "properties": {
+              "coverageComplete": {
+                "type": "boolean"
+              },
+              "paginationExhausted": {
+                "type": "boolean"
+              },
+              "snapshotConsistent": {
+                "type": "boolean"
+              },
+              "pagesScanned": {
+                "type": "number"
+              },
+              "recordsScanned": {
+                "type": "number"
+              },
+              "hasMore": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "coverageComplete",
+              "paginationExhausted",
+              "snapshotConsistent",
+              "pagesScanned",
+              "recordsScanned"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "kind",
+          "network",
+          "owner",
+          "count",
+          "agents"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Resolve Agent",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "verify_reputation",
+      "title": "Verify Reputation",
+      "description": "Fail-closed reputation observation for one agent. The current Reputation contract has no authoritative client-set count/cursor and expired index entries can create holes, so the server performs one bounded reachability read but does not call get_summary or claim a diff. Current attempted checks return unavailable with explicit scope; skipped means not attempted.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              {
+                "type": "string",
+                "maxLength": 256,
+                "pattern": "^stellar:(mainnet|testnet|pubnet):(C[A-Z2-7]{55})#(\\d+)$"
+              },
+              {
+                "type": "string",
+                "maxLength": 256,
+                "pattern": "^\\d+$"
+              }
+            ],
+            "description": "Numeric agent id, numeric string, or a full stellar handle."
+          }
+        },
+        "required": [
+          "agent"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "number"
+          },
+          "stellarId": {
+            "type": "string"
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "verification": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "verified",
+                  "partial",
+                  "mismatch",
+                  "unavailable",
+                  "skipped"
+                ]
+              },
+              "declared": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "snapshotComparable": {
+                "type": "boolean",
+                "const": false
+              },
+              "limitations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "verified": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "deltas": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "checkedAt": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "verifiedFields": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "unverifiedFields": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "status",
+              "declared",
+              "snapshotComparable",
+              "limitations",
+              "checkedAt"
+            ],
+            "additionalProperties": {}
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "registry"
+              },
+              "allowlistSize": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "reputationIndexed": {
+                "type": "boolean",
+                "const": false
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "allowlistSize",
+              "reputationIndexed",
+              "note"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "agentId",
+          "stellarId",
+          "verified",
+          "verification"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Verify Reputation",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "prompts": [
+    {
+      "name": "compare-agents",
+      "title": "Compare agents side by side",
+      "description": "Compare 2-3 agents across declared quality/volume/breadth, evidence limits, x402, and services, then recommend one cautiously.",
+      "arguments": [
+        {
+          "name": "agent_a",
+          "description": "First agent (id, stellar:…#id, or G-address).",
+          "required": true
+        },
+        {
+          "name": "agent_b",
+          "description": "Second agent.",
+          "required": true
+        },
+        {
+          "name": "agent_c",
+          "description": "Optional third agent.",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "explore-registry",
+      "title": "Explore the registry",
+      "description": "Orient in the Stellar 8004 registry: counts, explicitly sampled distributions, and current top agents.",
+      "arguments": [
+        {
+          "name": "focus",
+          "description": "Optional angle, e.g. 'x402 services' or 'reputation'.",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "find-and-vet-agent",
+      "title": "Find and vet an agent",
+      "description": "Discover agents, expose the limits of the Reputation-contract probe, and recommend one cautiously.",
+      "arguments": [
+        {
+          "name": "task",
+          "description": "What you need an agent to do (natural language).",
+          "required": true
+        },
+        {
+          "name": "budget",
+          "description": "Optional budget hint, e.g. '0.10 USDC/call'.",
+          "required": false
+        },
+        {
+          "name": "require_x402",
+          "description": "'true' to require x402 (pay-per-call) support.",
+          "required": false
+        },
+        {
+          "name": "min_explorer_score",
+          "description": "Optional upstream v1 Explorer total_score threshold; not local rank.",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "prepare-x402-call",
+      "title": "Prepare an x402 call (no signing)",
+      "description": "Lay out the exact x402 pay-per-call steps for an agent's service endpoint and STOP before signing — this server is keyless.",
+      "arguments": [
+        {
+          "name": "agent",
+          "description": "Agent id, stellar:…#id handle, or owner G-address.",
+          "required": true
+        },
+        {
+          "name": "task",
+          "description": "Optional description of the call you want to make.",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "vet-agent",
+      "title": "Vet a single agent",
+      "description": "Produce an evidence-limit memo: profile, declared reputation, contract-probe status, review themes, freshness, and red flags.",
+      "arguments": [
+        {
+          "name": "agent",
+          "description": "Agent id, stellar:{network}:{identity}#{id} handle, or owner G-address.",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "resourceTemplates": [
+    {
+      "name": "agent-profile",
+      "title": "Agent Profile",
+      "uriTemplate": "stellar8004://agent/{id}",
+      "description": "Full AgentProfile (identity + declared reputation + fail-closed contract-probe status + rank + stellar:…#id).",
+      "mimeType": "application/json",
+      "annotations": {
+        "audience": [
+          "user",
+          "assistant"
+        ]
+      }
+    },
+    {
+      "name": "agent-card",
+      "title": "Derived A2A Projection (Unverified)",
+      "uriTemplate": "stellar8004://agent/{id}/card",
+      "description": "Unverified A2A-shaped projection from indexed registry metadata; not an agent-published AgentCard and not proof of protocol conformance or endpoint ownership.",
+      "mimeType": "application/json",
+      "annotations": {
+        "audience": [
+          "user",
+          "assistant"
+        ]
+      }
+    },
+    {
+      "name": "agent-feedback",
+      "title": "Agent Feedback",
+      "uriTemplate": "stellar8004://agent/{id}/feedback",
+      "description": "Explorer-indexed on-chain feedback for an agent: typed value + client, with self-declared tags/endpoints labeled and page coverage exposed.",
+      "mimeType": "application/json",
+      "annotations": {
+        "audience": [
+          "user",
+          "assistant"
+        ]
+      }
+    },
+    {
+      "name": "agent-reputation",
+      "title": "Agent Reputation (declared vs on-chain)",
+      "uriTemplate": "stellar8004://agent/{id}/reputation",
+      "description": "Declared indexer reputation plus a bounded on-chain reachability observation. Current checks are unavailable because the contract exposes no authoritative client-set exhaustion proof.",
+      "mimeType": "application/json",
+      "annotations": {
+        "audience": [
+          "user",
+          "assistant"
+        ]
+      }
+    },
+    {
+      "name": "owner-agents",
+      "title": "Agents by Owner",
+      "uriTemplate": "stellar8004://owner/{address}",
+      "description": "First owner endpoint page (up to 20 agents), with pagination coverage.",
+      "mimeType": "application/json",
+      "annotations": {
+        "audience": [
+          "user",
+          "assistant"
+        ]
+      }
+    }
+  ],
+  "resources": [
+    {
+      "name": "health",
+      "title": "Stellar 8004 Indexer Health",
+      "uri": "stellar8004://health",
+      "description": "Per-registry indexer staleness (lastLedger + stale flags).",
+      "mimeType": "application/json",
+      "annotations": {
+        "audience": [
+          "user",
+          "assistant"
+        ],
+        "priority": 0.4
+      }
+    },
+    {
+      "name": "leaderboard",
+      "title": "Stellar 8004 Leaderboard",
+      "uri": "stellar8004://leaderboard",
+      "description": "Top agents in a bounded scan, ranked client-side by the 3-axis score (declared-only snapshot with coverage).",
+      "mimeType": "application/json",
+      "annotations": {
+        "audience": [
+          "user",
+          "assistant"
+        ],
+        "priority": 0.8
+      }
+    },
+    {
+      "name": "registry",
+      "title": "Stellar 8004 Registry",
+      "uri": "stellar8004://registry",
+      "description": "Registry overview: contract addresses, network, and a /stats + /health snapshot.",
+      "mimeType": "application/json",
+      "annotations": {
+        "audience": [
+          "user",
+          "assistant"
+        ],
+        "priority": 1
+      }
+    }
+  ]
+}

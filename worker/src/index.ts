@@ -97,6 +97,8 @@ export interface WorkerEnv {
   STELLAR_NETWORK?: string;
   STELLAR_RPC_URL?: string;
   EXPLORER_BASE_URL?: string;
+  /** Read only so the canonical-config check can refuse it: the hosted Worker never runs registry mode. */
+  REGISTRY_AGENT_IDS?: string;
   VERIFY_ONCHAIN?: string;
   RANK_SCORE_MAX?: string;
   RANK_W_QUALITY?: string;
@@ -209,6 +211,7 @@ function workerEnvironment(env: WorkerEnv): EnvironmentMap {
     STELLAR_NETWORK: env.STELLAR_NETWORK,
     STELLAR_RPC_URL: env.STELLAR_RPC_URL,
     EXPLORER_BASE_URL: env.EXPLORER_BASE_URL,
+    REGISTRY_AGENT_IDS: env.REGISTRY_AGENT_IDS,
     VERIFY_ONCHAIN: env.VERIFY_ONCHAIN,
     RANK_SCORE_MAX: env.RANK_SCORE_MAX,
     RANK_W_QUALITY: env.RANK_W_QUALITY,

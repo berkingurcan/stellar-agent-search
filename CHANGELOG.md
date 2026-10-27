@@ -22,6 +22,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `implied-score-filter-not-applied`, so those common phrasings still search.
 - `AgentSource` (`src/lib/source.ts`): the interface tools, resources and the CLI read through. Indexer-only
   reads are reachable only via `requireIndexer`. `ToolDeps.explorer` is now `ToolDeps.source`.
+- CI checks for the MCP surface and registry mode:
+  - `test/mcp-surface.test.ts` pins the instructions, tool schemas, prompts and resources in
+    `test/__surface__/mcp-surface.json`. The new `MCP surface` workflow compares a PR's snapshot with `main`'s and
+    fails on a change that would break an existing client (`scripts/ci/surface-compat.mjs`), unless the PR is
+    labeled `breaking-change`.
+  - `test/stdio-registry-mode.test.ts` runs registry mode through the built binary: the startup refusals and their
+    exit code, the instructions, indexer-only tools refusing, an unreadable allowlist failing closed, and stdout
+    staying JSON-RPC-only.
+  - `test/registry-mode.test.ts` runs every tool in registry mode and fails when the README, the skill, the
+    error-code table, the server instructions or `doctor` name a different set of indexer-only tools.
+  - `Testnet smoke` (nightly and on demand) runs registry mode against the live testnet
+    (`scripts/ci/testnet-smoke.mjs`); `Mainnet parity` (manual) compares two builds' answers on live mainnet
+    (`scripts/ci/mainnet-parity.mjs`).
 
 - `CONTRIBUTING.md` — contribution notes, project layout, and the four enforced invariants.
 - This changelog.
@@ -114,6 +127,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remains with `@trionlabs/stellar8004`; this package now advertises only the executable it actually supports.
 
 ### Fixed
+
+- The hosted Worker now reads `REGISTRY_AGENT_IDS` so its canonical-config check can refuse it (503).
+  Before this, the Worker never passed the variable to its config, so the "never registry mode" guard
+  could not fire, and a Worker with an allowlist set would have served the mainnet explorer anyway.
+  The deploy validator already kept the variable out of `wrangler.jsonc`.
+- `doctor` in registry mode now lists registry health among the tools that need an indexer, as the
+  server instructions and docs already did.
 
 - Cached contract-probe results retain the timestamp of the actual Soroban read. A 10-minute-old cache
   hit no longer rewrites `verification.checkedAt` to the current response time and masquerades as fresh.

@@ -107,6 +107,7 @@ describe("fail-closed Worker deploy config validation", () => {
     "RANK_W_VOLUME",
     "RANK_W_BREADTH",
     "RANK_SIM_SOURCE",
+    "REGISTRY_AGENT_IDS",
     "SERVER_VERSION",
     "STELLAR_RPC_URL",
     "UNREVIEWED_VAR",

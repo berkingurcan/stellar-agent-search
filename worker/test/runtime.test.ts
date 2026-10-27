@@ -900,7 +900,7 @@ describe("health and real MCP factory smoke", () => {
     expect(limiter.calls).toBe(0);
   });
 
-  it("returns an explicit 503 for testnet or a non-canonical Explorer while health stays live", async () => {
+  it("returns an explicit 503 for testnet, registry mode or a non-canonical Explorer while health stays live", async () => {
     const binding = new ThrowingBinding();
     const worker = createWorker({ cache: null });
     const testnetEnv: WorkerEnv = {
@@ -913,8 +913,19 @@ describe("health and real MCP factory smoke", () => {
       STELLAR_NETWORK: "mainnet",
       EXPLORER_BASE_URL: "https://mirror.example",
     };
+    // Registry mode reads an operator allowlist, not the canonical explorer, on either network.
+    const registryMainnetEnv: WorkerEnv = {
+      ...workerEnv(binding),
+      STELLAR_NETWORK: "mainnet",
+      REGISTRY_AGENT_IDS: "10",
+    };
+    const registryTestnetEnv: WorkerEnv = {
+      ...workerEnv(binding),
+      STELLAR_NETWORK: "testnet",
+      REGISTRY_AGENT_IDS: "1,2",
+    };
 
-    for (const env of [testnetEnv, customMainnetEnv]) {
+    for (const env of [testnetEnv, customMainnetEnv, registryMainnetEnv, registryTestnetEnv]) {
       const mcp = await worker.fetch(legacyRequest(initializeBody), env, new TestContext());
       expect(mcp.status).toBe(503);
       const payload = await rpcPayload(mcp);

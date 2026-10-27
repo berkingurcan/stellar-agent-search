@@ -1,0 +1,56 @@
+name: Testnet smoke
+
+# Registry mode against the live testnet: the public Soroban RPC, the Identity contract and
+# the providers' registration files, through the built binary (scripts/ci/testnet-smoke.mjs).
+# Not a merge gate: a testnet reset or a provider's hosting can fail it for reasons unrelated
+# to a change, so it runs nightly and on demand. It needs no secrets; the server is keyless.
+#
+# Repository variables (Settings → Secrets and variables → Actions → Variables):
+#   TESTNET_AGENT_IDS    allowlisted agent ids; update them after a testnet reset
+#   TESTNET_SMOKE_QUERY  a query that matches at least one of those agents
+on:
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+    inputs:
+      agent_ids:
+        description: 'Agent ids to allowlist (default: the TESTNET_AGENT_IDS variable)'
+        required: false
+      query:
+        description: 'A query that matches at least one of them (default: the TESTNET_SMOKE_QUERY variable)'
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testnet-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: registry mode on testnet
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install (clean, from lockfile)
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Smoke-test registry mode on testnet
+        env:
+          REGISTRY_AGENT_IDS: ${{ inputs.agent_ids || vars.TESTNET_AGENT_IDS || '1,2,3,4,5,6,7,8,9,10,11,12,13' }}
+          SMOKE_QUERY: ${{ inputs.query || vars.TESTNET_SMOKE_QUERY || 'seller' }}
+        run: node scripts/ci/testnet-smoke.mjs

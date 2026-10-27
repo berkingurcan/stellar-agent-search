@@ -254,7 +254,7 @@ exercise Claude Code, and Recording 3 must exercise Cursor. Both links remain �
 | Line item from the budget rationale | Status | Evidence |
 |---|---|---|
 | Multi-client integration testing | 🟡 | [docs/integration.md](integration.md) contains per-client config and caveats; real clean-environment evidence for Claude Code + one additional client is still required |
-| CI/CD setup | ✅ | [.github/workflows/ci.yml](../.github/workflows/ci.yml) — Node 22/24 × Linux/macOS; typecheck, build, test, pack; separate Worker typecheck/test/bundle audit |
+| CI/CD setup | ✅ | [.github/workflows/ci.yml](../.github/workflows/ci.yml) — Node 22/24 × Linux/macOS; typecheck, build, test, pack; separate Worker typecheck/test/bundle audit. [surface.yml](../.github/workflows/surface.yml) fails a PR that would break an existing MCP client; [testnet-smoke.yml](../.github/workflows/testnet-smoke.yml) (nightly) and [mainnet-parity.yml](../.github/workflows/mainnet-parity.yml) (manual) check live networks |
 | Remote Streamable HTTP Worker | 🟡 | [`worker/`](../worker/) — implemented behind exact `/mcp` and `/healthz` Cloudflare routes, but deliberately not claimed live until namespace configuration and production canary pass |
 | npm publishing setup | ✅ | [.github/workflows/publish.yml](../.github/workflows/publish.yml) — tag-triggered, OIDC Trusted Publishing with Sigstore provenance, plus MCP Registry publish |
 | Skill packaging + distribution | ✅ | [`skills/mcp/SKILL.md`](../skills/mcp/SKILL.md) — ships in the repository, where `npx skills add` fetches it; deliberately kept out of the npm tarball (`files` in [package.json](../package.json)) so the published package stays lean |

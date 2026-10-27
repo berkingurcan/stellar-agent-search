@@ -1,0 +1,63 @@
+name: Mainnet parity
+
+# Manual, before a release: builds the ref this runs on and a base ref, runs both as MCP
+# stdio servers on live mainnet, and fails if any tool call or resource read answers
+# differently (scripts/ci/mainnet-parity.mjs). Not a PR check: the explorer rate-limits,
+# so a paced run takes several minutes, and the schema half of the question is already
+# answered on every PR by the MCP surface workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'Branch, tag or commit to compare against'
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mainnet-parity
+  cancel-in-progress: false
+
+jobs:
+  parity:
+    name: mainnet answers match the base
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout (full history, so the base ref resolves)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install and build this ref
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install and build the base
+        env:
+          BASE: ${{ inputs.base }}
+        shell: bash
+        run: |
+          if git rev-parse --verify --quiet "origin/${BASE}^{commit}" > /dev/null; then
+            ref="origin/${BASE}"
+          else
+            ref="${BASE}"
+          fi
+          git worktree add --detach "$RUNNER_TEMP/base" "$ref"
+          cd "$RUNNER_TEMP/base"
+          npm ci
+          npm run build
+
+      # The comparison script comes from this ref, so it also works against a base that predates it.
+      - name: Compare both builds on mainnet
+        run: node scripts/ci/mainnet-parity.mjs "$RUNNER_TEMP/base/dist" dist

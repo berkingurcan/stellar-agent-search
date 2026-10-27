@@ -8,7 +8,10 @@
  * what gets decoded.
  */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { StrKey } from "@stellar/stellar-sdk";
 import { buildMetadataJson, NotFoundError, toDataUri } from "@trionlabs/stellar8004";
@@ -19,9 +22,10 @@ import { ExplorerService } from "../src/lib/explorer.js";
 import { RegistryService } from "../src/lib/registry-source.js";
 import { ReputationVerifier } from "../src/lib/reputation.js";
 import type { IdentityReadClient } from "../src/lib/soroban.js";
-import { buildServer } from "../src/server.js";
+import { buildServer, REGISTRY_MODE_INSTRUCTIONS } from "../src/server.js";
 import { buildAgentProfile, type ToolDeps } from "../src/tools/shared.js";
 
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OWNER = "GDDTQFQZK734EXIJE5LWU4G4YC5A6P5AHJ4UWVMV6WBFWT6BAAQQHV2V";
 const WALLET = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 7));
 const MANIFEST_URL = "https://provider.example/.well-known/stellar-agent-services.json";
@@ -521,23 +525,38 @@ describe("tools in registry mode", () => {
   });
 });
 
-/** Keep the fixture honest: agent 7's registration is what provider-kit writes. */
+function captureStdout(): () => string {
+  let stdout = "";
+  vi.spyOn(process.stdout, "write").mockImplementation(((chunk: unknown) => {
+    stdout += String(chunk);
+    return true;
+  }) as typeof process.stdout.write);
+  vi.spyOn(process.stderr, "write").mockImplementation((() => true) as typeof process.stderr.write);
+  return () => stdout;
+}
+
+function cliDeps(): ToolDeps {
+  const config = registryConfig();
+  return { config, source: registry(), verifier: new ReputationVerifier(config) };
+}
+
+/** doctor's "tools" line, with the RPC health probe answered locally. */
+async function doctorToolsLine(): Promise<string> {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { status: "healthy" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    ),
+  );
+  const stdout = captureStdout();
+  await runCli(parseFlags(["doctor", "--json"]), "test", cliDeps());
+  return JSON.parse(stdout()).checks.find((check: { name: string }) => check.name === "tools").detail;
+}
+
 describe.sequential("CLI in registry mode", () => {
-  function captureStdout(): () => string {
-    let stdout = "";
-    vi.spyOn(process.stdout, "write").mockImplementation(((chunk: unknown) => {
-      stdout += String(chunk);
-      return true;
-    }) as typeof process.stdout.write);
-    vi.spyOn(process.stderr, "write").mockImplementation((() => true) as typeof process.stderr.write);
-    return () => stdout;
-  }
-
-  function cliDeps(): ToolDeps {
-    const config = registryConfig();
-    return { config, source: registry(), verifier: new ReputationVerifier(config) };
-  }
-
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -562,20 +581,112 @@ describe.sequential("CLI in registry mode", () => {
   });
 
   it("doctor does not list leaderboard as available", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { status: "healthy" } }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-      ),
-    );
-    const stdout = captureStdout();
-    await runCli(parseFlags(["doctor", "--json"]), "test", cliDeps());
-    const tools = JSON.parse(stdout()).checks.find((check: { name: string }) => check.name === "tools");
-    expect(tools.detail).toMatch(/leaderboard, registry stats, owner lookups and feedback history need an indexer/);
-    expect(tools.detail).not.toMatch(/\+ list_agents, leaderboard/);
+    const tools = await doctorToolsLine();
+    expect(tools).toMatch(/leaderboard, registry stats\/health, owner lookups and feedback history need an indexer/);
+    expect(tools).not.toMatch(/\+ list_agents, leaderboard/);
+  });
+});
+
+/**
+ * Which tools refuse in registry mode is decided by the code, then restated in the README,
+ * the skill, the error-code table, the server instructions and doctor. Run every tool, take
+ * the set that actually refuses, and hold each of those texts to it, so a tool that starts
+ * (or stops) needing an indexer cannot leave one of them stale.
+ */
+describe.sequential("every description of registry mode names the tools that refuse", () => {
+  /** One or more calls per registered tool; a tool that refuses on any call needs an indexer. */
+  const CALLS: Record<string, Array<Record<string, unknown>>> = {
+    find_agent: [{ query: "a scraper" }],
+    list_services: [{}],
+    list_agents: [{}],
+    rank_agent: [{ agentIds: [7], verify: false }],
+    get_agent_profile: [{ agent: 7, verify: false }],
+    get_agent_card: [{ agent: 7 }],
+    verify_reputation: [{ agent: 7 }],
+    resolve_agent: [{ ref: 7 }, { ref: OWNER }],
+    leaderboard: [{}],
+    get_registry_stats: [{}],
+    get_registry_health: [{}],
+    get_agents_by_owner: [{ owner: OWNER }],
+    get_agent_feedback: [{ agent: 7 }],
+  };
+
+  /** How the instructions and doctor, which use words rather than tool names, refer to each one. */
+  const PHRASES: Record<string, string> = {
+    leaderboard: "leaderboard",
+    get_registry_stats: "registry stats",
+    get_registry_health: "registry stats/health",
+    get_agents_by_owner: "owner lookups",
+    resolve_agent: "owner lookups",
+    get_agent_feedback: "feedback history",
+  };
+
+  const read = (...parts: string[]) => readFileSync(join(ROOT, ...parts), "utf8");
+  let toolNames: string[] = [];
+  let refusing: string[] = [];
+  let working: string[] = [];
+  const namesIn = (text: string) =>
+    [...new Set([...text.matchAll(/`([a-z_]+)`/g)].map((m) => m[1]!))].filter((n) => toolNames.includes(n)).sort();
+
+  beforeAll(async () => {
+    const client = await connect();
+    toolNames = (await client.listTools()).tools.map((t) => t.name).sort();
+    const needsIndexer = new Set<string>();
+    for (const [name, calls] of Object.entries(CALLS)) {
+      for (const args of calls) {
+        const result = await call(client, name, args);
+        if (!result.isError) continue;
+        const { code } = JSON.parse(textOf(result));
+        if (code !== "INDEXER_REQUIRED") throw new Error(`${name} ${JSON.stringify(args)} failed with ${code}`);
+        needsIndexer.add(name);
+      }
+    }
+    refusing = [...needsIndexer].sort();
+    working = toolNames.filter((name) => !needsIndexer.has(name));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("calls every registered tool", () => {
+    expect(Object.keys(CALLS).sort(), "add the new tool to CALLS").toEqual(toolNames);
+    expect(refusing.length).toBeGreaterThan(0);
+  });
+
+  it("README's registry-mode table", () => {
+    const lines = read("README.md").split("\n");
+    const header = lines.findIndex((line) => line.startsWith("| Works over the allowlist"));
+    const [works, needs] = lines[header + 2]!.split("|").slice(1, -1);
+    expect(namesIn(works!)).toEqual(working);
+    expect(namesIn(needs!)).toEqual(refusing);
+  });
+
+  it("the skill's registry-mode paragraph", () => {
+    const skill = read("skills", "mcp", "SKILL.md");
+    const start = skill.indexOf("**Registry mode (`REGISTRY_AGENT_IDS`).**");
+    const paragraph = skill.slice(start, skill.indexOf("\n\n", start));
+    const [works, needs] = paragraph.split("work over that allowlist");
+    expect(namesIn(works!)).toEqual(working);
+    expect(namesIn(needs!)).toEqual(refusing);
+  });
+
+  it("the INDEXER_REQUIRED row of the error-code table", () => {
+    const row = read("docs", "tools.md").split("\n").find((line) => line.startsWith("| `INDEXER_REQUIRED` |"));
+    expect(namesIn(row!)).toEqual(refusing);
+  });
+
+  it("the server instructions and doctor", async () => {
+    expect(Object.keys(PHRASES).sort(), "add how the instructions and doctor name it").toEqual(refusing);
+    const doctor = await doctorToolsLine();
+    for (const name of refusing) {
+      expect(REGISTRY_MODE_INSTRUCTIONS, name).toContain(PHRASES[name]);
+      expect(doctor, name).toContain(PHRASES[name]);
+    }
+    const [available] = doctor.split(";");
+    const listed = available!.match(/[a-z_]+/g)!.filter((word) => toolNames.includes(word));
+    expect(listed.filter((name) => refusing.includes(name))).toEqual([]);
   });
 });
 
