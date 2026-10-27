@@ -29,6 +29,7 @@ import {
   getDefaultEnvironment,
   StdioClientTransport,
 } from "@modelcontextprotocol/client/stdio";
+import { parseRegistryAgentIds } from "../config.js";
 
 export const SETUP_SERVER_NAME = "stellar-agent";
 const PACKAGE_NAME = "stellar-agent-search";
@@ -56,6 +57,7 @@ export interface SetupCommandOptions {
   json?: boolean;
   network?: string;
   explorerUrl?: string;
+  registryAgentIds?: string;
   rpcUrl?: string;
   noVerify?: boolean;
   version: string;
@@ -162,10 +164,18 @@ function parseOptions(options: SetupCommandOptions): ParsedOptions {
 
   const env: Record<string, string> = { STELLAR_NETWORK: network };
   if (options.explorerUrl) env.EXPLORER_BASE_URL = validateHttpUrl("--explorer-url", options.explorerUrl);
+  const registryAgentIds = parseRegistryAgentIds(options.registryAgentIds);
+  if (registryAgentIds) env.REGISTRY_AGENT_IDS = registryAgentIds.join(",");
   if (options.rpcUrl) env.STELLAR_RPC_URL = validateHttpUrl("--rpc-url", options.rpcUrl);
   if (options.noVerify) env.VERIFY_ONCHAIN = "false";
-  if (network === "testnet" && !env.EXPLORER_BASE_URL) {
-    throw new Error("setup --network testnet requires --explorer-url for a testnet indexer");
+  if (env.EXPLORER_BASE_URL && env.REGISTRY_AGENT_IDS) {
+    throw new Error("setup takes --explorer-url or --registry-agent-ids, not both");
+  }
+  if (network === "testnet" && !env.EXPLORER_BASE_URL && !env.REGISTRY_AGENT_IDS) {
+    throw new Error(
+      "setup --network testnet requires --explorer-url for a testnet indexer, or --registry-agent-ids " +
+        "to read those agents straight from the testnet Identity contract",
+    );
   }
 
   const version = validateExactVersion(options.version);

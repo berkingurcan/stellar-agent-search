@@ -193,7 +193,7 @@ describe("honest registry stats", () => {
     });
     const server = buildServer(config, {
       version: "test",
-      deps: { config, explorer, verifier: new ReputationVerifier(config) },
+      deps: { config, source: explorer, verifier: new ReputationVerifier(config) },
     });
     const client = new Client(
       { name: "registry-stats-test", version: "test" },

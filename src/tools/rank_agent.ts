@@ -23,6 +23,8 @@ import {
   mapWithConcurrency,
   MAX_QUERY_LENGTH,
   rankAndVerify,
+  sourceFields,
+  sourceText,
   summarizeRanked,
   toolResult,
   zLimit,
@@ -30,7 +32,7 @@ import {
   READ_ANNOTATIONS,
   type ToolDeps,
 } from "./shared.js";
-import { zDiscoveryCoverage, zRankedAgent } from "./schemas.js";
+import { zDiscoveryCoverage, zRankedAgent, zSourceNote } from "./schemas.js";
 import { MAX_AGENT_ID } from "../lib/identifier.js";
 
 const CANDIDATE_PAGE_SIZE = 50;
@@ -80,6 +82,7 @@ const outputShape = {
   // Only query-based ranking scans explorer pages. Explicit-id ranking has no
   // meaningful registry-wide coverage claim, so this field is absent there.
   coverage: zDiscoveryCoverage.optional(),
+  source: zSourceNote.optional(),
 };
 
 async function gatherByIds(deps: ToolDeps, ids: number[]): Promise<AgentResponse[]> {
@@ -88,7 +91,7 @@ async function gatherByIds(deps: ToolDeps, ids: number[]): Promise<AgentResponse
     deps.policy?.maxExplorerConcurrency ?? 6,
     async (id) => {
       try {
-        return (await deps.explorer.getAgent(id)).data;
+        return (await deps.source.getAgent(id)).data;
       } catch (err) {
         if (err instanceof NotFoundError) return null;
         throw err;
@@ -120,7 +123,7 @@ async function gatherByQuery(deps: ToolDeps, query: string): Promise<FindAgentsR
     filters.minScore = parsed.filters.minExplorerScore;
   }
 
-  return deps.explorer.findAgentsWithCoverage(parsed.keywords.join(" "), {
+  return deps.source.findAgentsWithCoverage(parsed.keywords.join(" "), {
     filters,
     pages: 2,
     match: "any",
@@ -187,7 +190,7 @@ export function registerRankAgent(server: McpServer, deps: ToolDeps): void {
         includeBreakdown: true,
       });
 
-      return toolResult(summarizeRanked(rows), {
+      return toolResult(summarizeRanked(rows) + sourceText(deps), {
         rankVersion: RANKING.VERSION,
         evidenceWeights: {
           volume: RANKING.EVIDENCE_VOLUME_WEIGHT,
@@ -196,6 +199,7 @@ export function registerRankAgent(server: McpServer, deps: ToolDeps): void {
         count: rows.length,
         agents: rows,
         ...(coverage ? { coverage } : {}),
+        ...sourceFields(deps),
       });
     }),
   );

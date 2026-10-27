@@ -56,6 +56,7 @@ export interface CliFlags {
   positionals: string[];
   network?: string;
   explorerUrl?: string;
+  registryAgentIds?: string;
   rpcUrl?: string;
   verify: boolean;
   noVerify: boolean;
@@ -83,6 +84,7 @@ const VALUE_FLAGS = new Map<string, keyof CliFlags>([
   ["--network", "network"],
   ["-n", "network"],
   ["--explorer-url", "explorerUrl"],
+  ["--registry-agent-ids", "registryAgentIds"],
   ["--rpc-url", "rpcUrl"],
   ["--limit", "limit"],
   ["--min-explorer-score", "minExplorerScore"],
@@ -193,6 +195,7 @@ export function buildConfig(flags: CliFlags, baseEnv: NodeJS.ProcessEnv = proces
   const env: NodeJS.ProcessEnv = { ...baseEnv };
   if (flags.network) env.STELLAR_NETWORK = flags.network;
   if (flags.explorerUrl) env.EXPLORER_BASE_URL = flags.explorerUrl;
+  if (flags.registryAgentIds) env.REGISTRY_AGENT_IDS = flags.registryAgentIds;
   if (flags.rpcUrl) env.STELLAR_RPC_URL = flags.rpcUrl;
   if (flags.verify) env.VERIFY_ONCHAIN = "true";
   if (flags.noVerify) env.VERIFY_ONCHAIN = "false";
@@ -313,7 +316,7 @@ async function gatherByQuery(deps: ToolDeps, query: string, flags: CliFlags): Pr
   if (trust !== undefined) filters.trust = trust;
   if (minExplorerScore !== undefined) filters.minScore = minExplorerScore;
 
-  return deps.explorer.findAgentsWithCoverage(parsed.keywords.join(" "), {
+  return deps.source.findAgentsWithCoverage(parsed.keywords.join(" "), {
     filters,
     pages: CANDIDATE_PAGES,
     match: "any",
@@ -333,7 +336,7 @@ async function gatherByIds(deps: ToolDeps, ids: number[]): Promise<AgentResponse
     cliFanoutConcurrency(deps),
     async (id) => {
       try {
-        return (await deps.explorer.getAgent(id)).data;
+        return (await deps.source.getAgent(id)).data;
       } catch (e) {
         if (e instanceof NotFoundError) return null;
         throw e;
@@ -472,7 +475,7 @@ async function cmdProfile(deps: ToolDeps, flags: CliFlags): Promise<number> {
     return 2;
   }
 
-  const detail = (await deps.explorer.getAgent(id)).data;
+  const detail = (await deps.source.getAgent(id)).data;
   const declared = declaredReputation(detail);
   const verification = await deps.verifier.verifyAgainst(id, declared, {
     skip: flags.noVerify,
@@ -513,9 +516,11 @@ async function cmdProfile(deps: ToolDeps, flags: CliFlags): Promise<number> {
   );
   out(
     `  reputation: ${verification.status}` +
-      (verification.verified
-        ? `  (declared avg ${declared.average ?? "n/a"} vs on-chain ${verification.verified.average})`
-        : `  (declared avg ${declared.average ?? "n/a"} over ${declared.feedbackCount} feedback)`),
+      (deps.source.kind === "registry"
+        ? "  (not indexed in registry mode)"
+        : verification.verified
+          ? `  (declared avg ${declared.average ?? "n/a"} vs on-chain ${verification.verified.average})`
+          : `  (declared avg ${declared.average ?? "n/a"} over ${declared.feedbackCount} feedback)`),
   );
   if (verification.verified) {
     out("  evidence  : bounded, unversioned observations; snapshotComparable=no; active clients not chain-derived");
@@ -549,7 +554,7 @@ async function cmdServices(deps: ToolDeps, flags: CliFlags): Promise<number> {
   if (flags.minExplorerScore !== undefined) filters.minScore = flags.minExplorerScore;
 
   // Discover via stem-matching (the explorer `search=` misses "Scrapper").
-  const discovery = await deps.explorer.findAgentsWithCoverage(search, {
+  const discovery = await deps.source.findAgentsWithCoverage(search, {
     filters,
     pages: CANDIDATE_PAGES,
     match: "any",
@@ -569,7 +574,7 @@ async function cmdServices(deps: ToolDeps, flags: CliFlags): Promise<number> {
     head,
     cliFanoutConcurrency(deps),
     ({ a }) =>
-      deps.explorer
+      deps.source
         .getAgent(a.id)
         .then((r) => r.data)
         .catch((error: unknown) => {
@@ -709,25 +714,43 @@ async function cmdDoctor(deps: ToolDeps, flags: CliFlags): Promise<number> {
     detail: keyless ? "keyless (no signer, no writes)" : "STELLAR_PRIVATE_KEY present but IGNORED (keyless)",
   });
 
-  // 3. explorer health
-  try {
-    const health = buildRegistryHealthView(
-      (await deps.explorer.health()).data,
-      cfg.network,
-    );
-    const indexerDetail = (["identity", "reputation", "validation"] as const)
-      .map((name) => {
-        const state = health.indexer[name];
-        return `${name}=${state.lastLedger}/${state.stale ? "STALE" : "fresh"}`;
-      })
-      .join(" ");
-    checks.push({
-      name: "explorer",
-      ok: health.status === "healthy" && !health.anyStale,
-      detail: `${cfg.explorerBaseUrl}  status=${health.status}  ${indexerDetail}`,
-    });
-  } catch (e) {
-    checks.push({ name: "explorer", ok: false, detail: `${cfg.explorerBaseUrl}  ${classifyError(e).error}` });
+  // 3. data source: explorer health, or in registry mode a read of the allowlist
+  if (deps.source.kind === "registry") {
+    const ids = cfg.registryAgentIds ?? [];
+    try {
+      const { coverage } = await deps.source.findAgentsWithCoverage("");
+      const unreadable = coverage.unreadableAgentIds ?? [];
+      checks.push({
+        name: "registry",
+        ok: unreadable.length === 0,
+        detail:
+          `registry mode: ${coverage.recordsScanned}/${ids.length} allowlisted agent(s) read from the Identity contract` +
+          (unreadable.length > 0 ? `; unreadable: ${unreadable.join(", ")}` : "") +
+          "; no explorer, so feedback, stats, health and owner lookups are unavailable",
+      });
+    } catch (e) {
+      checks.push({ name: "registry", ok: false, detail: `registry mode: ${classifyError(e).error}` });
+    }
+  } else {
+    try {
+      const health = buildRegistryHealthView(
+        (await deps.source.health()).data,
+        cfg.network,
+      );
+      const indexerDetail = (["identity", "reputation", "validation"] as const)
+        .map((name) => {
+          const state = health.indexer[name];
+          return `${name}=${state.lastLedger}/${state.stale ? "STALE" : "fresh"}`;
+        })
+        .join(" ");
+      checks.push({
+        name: "explorer",
+        ok: health.status === "healthy" && !health.anyStale,
+        detail: `${cfg.explorerBaseUrl}  status=${health.status}  ${indexerDetail}`,
+      });
+    } catch (e) {
+      checks.push({ name: "explorer", ok: false, detail: `${cfg.explorerBaseUrl}  ${classifyError(e).error}` });
+    }
   }
 
   // 4. soroban RPC reachability (getHealth)
@@ -743,18 +766,20 @@ async function cmdDoctor(deps: ToolDeps, flags: CliFlags): Promise<number> {
     checks.push({ name: "soroban", ok: false, detail: `${cfg.rpcUrl}  ${(e as Error).message}` });
   }
 
-  // 5. exact Reputation-contract read-path health (agent #10 exists on mainnet)
+  // 5. exact Reputation-contract read-path health (agent #10 exists on mainnet;
+  // registry mode samples its first allowlisted agent instead)
   if (cfg.verifyOnchain) {
+    const sampleId = cfg.registryAgentIds?.[0] ?? 10;
     try {
       // Reachability is not comparability. The current contract exposes no
       // authoritative client-count/cursor, so doctor checks the real simulation
       // path without turning a successful bounded read into a verification claim.
-      const probe = await deps.verifier.probeReachability(10);
+      const probe = await deps.verifier.probeReachability(sampleId);
       if (probe.ok) {
         checks.push({
           name: "contract",
           ok: true,
-          detail: `read path OK (sample #10 returned ${probe.observedClients} address(es) from bounded indices ${probe.start}..${probe.start + probe.limit - 1}; not an exhaustive client count; verification unavailable)`,
+          detail: `read path OK (sample #${sampleId} returned ${probe.observedClients} address(es) from bounded indices ${probe.start}..${probe.start + probe.limit - 1}; not an exhaustive client count; verification unavailable)`,
         });
       } else {
         checks.push({
@@ -855,6 +880,8 @@ COMMANDS
 FLAGS
   --network <mainnet|testnet>   Network (env STELLAR_NETWORK; default mainnet)
   --explorer-url <url>          Explorer API base (env EXPLORER_BASE_URL)
+  --registry-agent-ids <ids>    Registry mode: read these agents from the Identity contract, no
+                                explorer (env REGISTRY_AGENT_IDS; e.g. 12,40)
   --rpc-url <url>               Soroban RPC (env STELLAR_RPC_URL)
   --verify                      Attempt bounded on-chain evidence reads for find results (off by default)
   --no-verify                   Skip on-chain reputation evidence reads (env VERIFY_ONCHAIN=false)
@@ -919,6 +946,7 @@ export async function runCli(
         json: flags.json,
         network: flags.network,
         explorerUrl: flags.explorerUrl,
+        registryAgentIds: flags.registryAgentIds,
         rpcUrl: flags.rpcUrl,
         noVerify: flags.noVerify,
         version,
@@ -928,6 +956,13 @@ export async function runCli(
     }
 
     const deps = depsOverride ?? createToolDeps(buildConfig(flags));
+    if (deps.source.kind === "registry" && !flags.json && flags.command !== "doctor") {
+      // stderr, so piped stdout stays the command's own output.
+      err(
+        `${INFO} registry mode: ${deps.source.describe().allowlistSize} allowlisted agent(s) read from the ` +
+          `Identity contract; reputation is not indexed, so scores and feedback counts are not measured.`,
+      );
+    }
     switch (flags.command) {
       case "find":
         return await cmdFind(deps, flags);

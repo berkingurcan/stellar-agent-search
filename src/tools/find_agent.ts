@@ -17,6 +17,8 @@ import {
   handler,
   MAX_QUERY_LENGTH,
   rankAndVerify,
+  sourceFields,
+  sourceText,
   summarizeRanked,
   toolResult,
   zLimit,
@@ -28,7 +30,7 @@ import {
   VERIFY_TOP_K,
   type ToolDeps,
 } from "./shared.js";
-import { zDiscoveryCoverage, zInterpretedQuery, zRankedAgent } from "./schemas.js";
+import { zDiscoveryCoverage, zInterpretedQuery, zRankedAgent, zSourceNote } from "./schemas.js";
 
 const CANDIDATE_PAGE_SIZE = 50;
 // 4 pages of headroom for the client-side stem match (the explorer has no
@@ -72,6 +74,7 @@ const outputShape = {
   count: z.number(),
   agents: z.array(zRankedAgent),
   coverage: zDiscoveryCoverage,
+  source: zSourceNote.optional(),
 };
 
 export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
@@ -121,7 +124,7 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
       }
 
       const searchText = parsed.keywords.join(" ");
-      const discovery = await deps.explorer.findAgentsWithCoverage(searchText, {
+      const discovery = await deps.source.findAgentsWithCoverage(searchText, {
         filters,
         pages: CANDIDATE_PAGES,
         match: "any",
@@ -138,7 +141,7 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
       const filterRecord: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(effective)) if (v !== undefined) filterRecord[k] = v;
 
-      return toolResult(summarizeRanked(rows), {
+      return toolResult(summarizeRanked(rows) + sourceText(deps), {
         interpretedQuery: {
           keywords: parsed.keywords,
           filters: filterRecord,
@@ -148,6 +151,7 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
         count: rows.length,
         agents: rows,
         coverage: discovery.coverage,
+        ...sourceFields(deps),
       });
     }),
   );

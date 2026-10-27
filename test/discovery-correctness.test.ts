@@ -107,7 +107,7 @@ function depsWith(mock: MockFetch): ToolDeps {
   const cfg = config();
   return {
     config: cfg,
-    explorer: new ExplorerService(cfg, { fetch: mock.fn }),
+    source: new ExplorerService(cfg, { fetch: mock.fn }),
     verifier: new ReputationVerifier(cfg),
   };
 }

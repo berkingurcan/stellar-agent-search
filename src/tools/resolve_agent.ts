@@ -10,6 +10,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { ValidationError } from "@trionlabs/stellar8004";
 import { MAX_AGENT_ID, parseAgentRef } from "../lib/identifier.js";
 import { V1_UNVERSIONED_PAGINATION_LIMITATION } from "../lib/explorer.js";
+import { requireIndexer } from "../lib/source.js";
 import {
   agentIds,
   handler,
@@ -72,7 +73,10 @@ export function registerResolveAgent(server: McpServer, deps: ToolDeps): void {
       }
 
       if (parsed.kind === "owner") {
-        const response = await deps.explorer.getAgentsByOwner(parsed.address);
+        const response = await requireIndexer(
+          deps.source,
+          "Resolving an owner address",
+        ).getAgentsByOwner(parsed.address);
         const agents = response.data ?? [];
         const resolved = agents.map((a) => ({ id: a.id, ...agentIds(deps.config, a.id) }));
         const hasMore = response.meta?.pagination?.hasMore;

@@ -25,6 +25,8 @@ import {
   V1_UNVERSIONED_PAGINATION_LIMITATION,
   type ExplorerServiceOptions,
 } from "../lib/explorer.js";
+import { RegistryService, type RegistryServiceOptions } from "../lib/registry-source.js";
+import { requireIndexer, type AgentSource, type RegistrySourceNote } from "../lib/source.js";
 import { ReputationVerifier, type ReputationVerifierOptions } from "../lib/reputation.js";
 import {
   rankAgents,
@@ -71,7 +73,8 @@ import { mapErrorToToolResult } from "../lib/errors.js";
 /** Everything a tool handler needs. Constructed once per server. */
 export interface ToolDeps {
   config: Config;
-  explorer: ExplorerService;
+  /** The explorer (indexer) or, in registry mode, direct Identity contract reads. */
+  source: AgentSource;
   verifier: ReputationVerifier;
   /** Optional runtime-specific public-surface caps (the local stdio defaults stay broader). */
   policy?: ToolRuntimePolicy;
@@ -88,30 +91,10 @@ export interface ToolRuntimePolicy {
   maxExplorerConcurrency?: number;
 }
 
-/** Small dependency-free pMap used for bounded Explorer fan-out. */
-export async function mapWithConcurrency<T, R>(
-  items: readonly T[],
-  limit: number,
-  mapper: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const output = new Array<R>(items.length);
-  let cursor = 0;
-  const workers = Array.from(
-    { length: Math.max(1, Math.min(items.length || 1, Math.floor(limit) || 1)) },
-    async () => {
-      while (cursor < items.length) {
-        const index = cursor++;
-        output[index] = await mapper(items[index]!, index);
-      }
-    },
-  );
-  await Promise.all(workers);
-  return output;
-}
-
 /** Construction options for runtime-specific fetch/cache and test seams. */
 export interface CreateToolDepsOptions {
   explorer?: ExplorerServiceOptions;
+  registry?: RegistryServiceOptions;
   verifier?: ReputationVerifierOptions;
 }
 
@@ -119,9 +102,29 @@ export interface CreateToolDepsOptions {
 export function createToolDeps(config: Config, opts: CreateToolDepsOptions = {}): ToolDeps {
   return {
     config,
-    explorer: new ExplorerService(config, opts.explorer),
+    source: config.registryAgentIds
+      ? new RegistryService(config, opts.registry)
+      : new ExplorerService(config, opts.explorer),
     verifier: new ReputationVerifier(config, opts.verifier),
   };
+}
+
+export { mapWithConcurrency } from "../lib/concurrency.js";
+
+// ---------------------------------------------------------------------------
+// Registry-mode disclosure (explorer results are left exactly as they were)
+// ---------------------------------------------------------------------------
+
+/** `{ source }` for a registry-mode result; nothing in explorer mode. */
+export function sourceFields(deps: ToolDeps): { source?: RegistrySourceNote } {
+  return deps.source.kind === "registry" ? { source: deps.source.describe() } : {};
+}
+
+/** A summary-text suffix saying what registry mode cannot measure; "" in explorer mode. */
+export function sourceText(deps: ToolDeps): string {
+  if (deps.source.kind !== "registry") return "";
+  const { allowlistSize } = deps.source.describe();
+  return serverText` Registry mode: ${allowlistSize} allowlisted agent(s) read from the Identity contract; reputation is not indexed, so scores and feedback counts are not measured.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -363,7 +366,7 @@ export async function buildAgentProfile(
   caps: AgentCapabilities;
   declared: DeclaredReputation;
 }> {
-  const detail = opts.detail ?? (await deps.explorer.getAgent(id)).data;
+  const detail = opts.detail ?? (await deps.source.getAgent(id)).data;
   const declared = declaredReputation(detail);
   const verification = await deps.verifier.verifyAgainst(id, declared, {
     skip: !opts.verify,
@@ -576,6 +579,7 @@ export async function collectFeedbackWindow(
     includeRevoked: boolean;
   },
 ): Promise<FeedbackWindow> {
+  const indexer = requireIndexer(deps.source, "Feedback history");
   const offset = (options.page - 1) * options.limit;
   const maxPages = Math.max(1, Math.min(deps.policy?.maxFeedbackScanPages ?? 20, 20));
   const rows: FeedbackResponse[] = [];
@@ -587,7 +591,7 @@ export async function collectFeedbackWindow(
   let paginationContradiction = false;
 
   for (let upstreamPage = 1; upstreamPage <= maxPages; upstreamPage++) {
-    const res = await deps.explorer.getFeedback(
+    const res = await indexer.getFeedback(
       agentId,
       options.tag ? { page: upstreamPage, tag: options.tag } : { page: upstreamPage },
     );

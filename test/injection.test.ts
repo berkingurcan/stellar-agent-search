@@ -80,7 +80,7 @@ function makeDeps(): ToolDeps {
   const config = loadConfig({ STELLAR_NETWORK: "mainnet", VERIFY_ONCHAIN: "false" } as NodeJS.ProcessEnv);
   return {
     config,
-    explorer: stubExplorer(config),
+    source: stubExplorer(config),
     verifier: new ReputationVerifier(config), // disabled ⇒ verifyAgainst returns "skipped"
   };
 }

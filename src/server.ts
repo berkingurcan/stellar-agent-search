@@ -7,8 +7,9 @@
  * layers. Both entrypoints (the Node stdio bin and Cloudflare HTTP Worker)
  * share this factory so there is one source of truth for what the server exposes.
  *
- * READ-ONLY: `createToolDeps` builds only ExplorerService + ReputationVerifier —
- * no signer, no keys, no write clients. The `instructions` string below is what
+ * READ-ONLY: `createToolDeps` builds only a read source (ExplorerService, or
+ * RegistryService in registry mode) + ReputationVerifier — no signer, no keys,
+ * no write clients. The `instructions` string below is what
  * a tool-search client reads to decide *when* to reach for this server before it
  * even loads the individual tool schemas (research/B §5.5), so keep it crisp.
  */
@@ -52,6 +53,13 @@ export const SERVER_INSTRUCTIONS =
   "reputation fields: attempted checks are unavailable, verifiedFields is empty, and rankings remain " +
   "Explorer-declared. Reserved verification statuses never add a ranking bonus.";
 
+/** Appended in registry mode (REGISTRY_AGENT_IDS), where there is no explorer. */
+export const REGISTRY_MODE_INSTRUCTIONS =
+  " REGISTRY MODE: this server has no explorer. It reads an operator allowlist of agents straight from the " +
+  "Identity contract and their registration files, so searches cover only that allowlist and reputation is not " +
+  "indexed (scores and feedback counts are not measured). leaderboard, registry stats/health, owner lookups, " +
+  "feedback history and minExplorerScore filters return INDEXER_REQUIRED.";
+
 export interface BuildServerOptions {
   /** Version reported in the MCP initialize handshake (defaults from package.json). */
   version?: string;
@@ -80,12 +88,14 @@ export function buildServer(config: Config, opts: BuildServerOptions = {}): McpS
         resources: { listChanged: false },
         prompts: { listChanged: false },
       },
-      instructions: SERVER_INSTRUCTIONS,
+      instructions: config.registryAgentIds
+        ? SERVER_INSTRUCTIONS + REGISTRY_MODE_INSTRUCTIONS
+        : SERVER_INSTRUCTIONS,
     },
   );
 
   registerTools(server, deps);
-  // ResourceDeps and ToolDeps are structurally identical (config/explorer/verifier).
+  // ResourceDeps and ToolDeps are structurally identical (config/source/verifier).
   registerResources(server, deps);
   registerPrompts(server, { config });
 

@@ -160,8 +160,9 @@ All configuration is via environment variables (canonical for MCP mode); CLI fla
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `STELLAR_NETWORK` | `mainnet` | `mainnet` or `testnet` — `testnet` also requires `EXPLORER_BASE_URL`, see below |
+| `STELLAR_NETWORK` | `mainnet` | `mainnet` or `testnet` — `testnet` also requires `EXPLORER_BASE_URL` or `REGISTRY_AGENT_IDS`, see below |
 | `EXPLORER_BASE_URL` | `https://stellar8004.com` | Explorer HTTP API base. **Indexes mainnet only** |
+| `REGISTRY_AGENT_IDS` | — | Registry mode: comma-separated agent ids (at most 50) read straight from the Identity contract, no explorer. Not combinable with `EXPLORER_BASE_URL` |
 | `STELLAR_RPC_URL` | `https://mainnet.sorobanrpc.com` | Soroban RPC for the bounded Reputation-contract reachability probe |
 | `VERIFY_ONCHAIN` | `true` | Set `false` to skip the probe; reputation remains declared-only either way |
 | `RANK_SCORE_MAX` | `100` | Fixed v1 compatibility assertion; any value other than `100` is rejected |
@@ -174,12 +175,40 @@ published score semantics.
 `STELLAR_PRIVATE_KEY` is **intentionally ignored** if present (and warned about on stderr) — this server is
 keyless by construction.
 
-> **`testnet` needs its own explorer, and refuses to start without one.** The default explorer indexes
+> **`testnet` needs a testnet data source, and refuses to start without one.** The default explorer indexes
 > **mainnet only**, while `STELLAR_NETWORK` also selects the Soroban contracts and RPC. That pairing would give
 > you mainnet registry rows alongside testnet on-chain reads — two chains described as one — so
-> `STELLAR_NETWORK=testnet` **fails at startup** unless `EXPLORER_BASE_URL` is set explicitly. No public testnet
-> indexer exists today, so in practice testnet is for someone running their own; the dry-run gate for the x402
-> demo is `DRY_RUN=1` on mainnet, which spends nothing.
+> `STELLAR_NETWORK=testnet` **fails at startup** unless you set one of:
+>
+> - `EXPLORER_BASE_URL`, pointing at a testnet indexer you run, or
+> - `REGISTRY_AGENT_IDS`, which turns on **registry mode** (below).
+>
+> The dry-run gate for the x402 demo is `DRY_RUN=1` on mainnet, which spends nothing.
+
+### Registry mode (no indexer)
+
+No public testnet indexer exists, so the server can instead read a list of agents you name straight from the
+Identity contract. Registry mode is unreleased (not in `0.1.0`), so run it from a checkout for now:
+
+```bash
+npm ci && npm run build
+STELLAR_NETWORK=testnet REGISTRY_AGENT_IDS=12,40 node dist/index.js find "inference"
+```
+
+For each agent it reads the URI, wallet and owner from the Identity contract (keyless simulations), then
+decodes the registration file the URI points at (`data:` or `https:`) into the same profile the explorer path
+builds. It reads only the agents you list, and it fetches registration files only for those agents.
+
+| Works over the allowlist (filters applied locally) | Needs an indexer — returns `INDEXER_REQUIRED` |
+|---|---|
+| `find_agent`, `list_services`, `list_agents`, `rank_agent`, `get_agent_profile`, `get_agent_card`, `verify_reputation` | `leaderboard`, `get_registry_stats`, `get_registry_health`, `get_agents_by_owner`, `get_agent_feedback`, `resolve_agent` for an owner address, any `minExplorerScore` filter |
+
+What registry mode cannot know, it says. The contract cannot be enumerated, so coverage carries
+`registry-allowlist-only` and lists any agent it could not read in `unreadableAgentIds`. There is no indexed
+reputation, so results carry `source: { kind: "registry", reputationIndexed: false }`: scores, feedback counts and
+`unrated` reflect missing data, not an agent without feedback. Agents registered with
+`provider-kit register` show their manifest URL in `list_services` as an unverified
+`stellar-agent-services` service entry.
 
 ---
 

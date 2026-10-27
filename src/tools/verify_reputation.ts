@@ -16,11 +16,13 @@ import {
   agentIds,
   declaredReputation,
   handler,
+  sourceFields,
+  sourceText,
   toolResult,
   READ_ANNOTATIONS,
   type ToolDeps,
 } from "./shared.js";
-import { zVerification } from "./schemas.js";
+import { zSourceNote, zVerification } from "./schemas.js";
 
 const inputShape = {
   agent: z
@@ -39,6 +41,7 @@ const outputShape = {
   stellarId: z.string(),
   verified: z.boolean(),
   verification: zVerification,
+  source: zSourceNote.optional(),
 };
 
 export function registerVerifyReputation(server: McpServer, deps: ToolDeps): void {
@@ -64,7 +67,7 @@ export function registerVerifyReputation(server: McpServer, deps: ToolDeps): voi
         throw new ValidationError(`Could not resolve agent reference '${String(args.agent)}'.`);
       }
 
-      const detail = (await deps.explorer.getAgent(id)).data;
+      const detail = (await deps.source.getAgent(id)).data;
       const declared = declaredReputation(detail);
       const verification = await deps.verifier.verifyAgainst(id, declared, {
         skip: false,
@@ -73,19 +76,29 @@ export function registerVerifyReputation(server: McpServer, deps: ToolDeps): voi
 
       const ids = agentIds(deps.config, id);
       const declaredAvg = verification.declared.average;
-      const text = serverText`Agent ${id} reputation ${safe(verification.status)} on ${safe(
-        deps.config.network,
-      )}: Explorer-declared avg ${declaredAvg == null ? safe("n/a") : declaredAvg}, feedbacks ${
-        declared.feedbackCount
-      }, unique clients ${declared.uniqueClients}; reason=${safe(
-        verification.reason ?? "none",
-      )}; verifiedFields=${verification.verifiedFields?.length ?? 0}; snapshotComparable=false.`;
+      // Registry mode has no Explorer-declared side to report.
+      const declaredText =
+        deps.source.kind === "registry"
+          ? safe("no Explorer-declared reputation (not indexed)")
+          : safe(
+              serverText`Explorer-declared avg ${declaredAvg == null ? safe("n/a") : declaredAvg}, feedbacks ${
+                declared.feedbackCount
+              }, unique clients ${declared.uniqueClients}`,
+            );
+      const text =
+        serverText`Agent ${id} reputation ${safe(verification.status)} on ${safe(
+          deps.config.network,
+        )}: ${declaredText}; reason=${safe(
+          verification.reason ?? "none",
+        )}; verifiedFields=${verification.verifiedFields?.length ?? 0}; snapshotComparable=false.` +
+        sourceText(deps);
 
       return toolResult(text, {
         agentId: id,
         stellarId: ids.stellarId,
         verified: verification.status === "verified",
         verification,
+        ...sourceFields(deps),
       });
     }),
   );

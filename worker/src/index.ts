@@ -766,8 +766,11 @@ function rebuiltRequest(request: Request, bytes: Uint8Array): Request {
   });
 }
 
-function isCanonicalRemoteConfig(config: Config): boolean {
+/** The hosted Worker serves only the canonical mainnet explorer (never registry mode). */
+function isCanonicalRemoteConfig(config: Config): config is Config & { explorerBaseUrl: string } {
   if (
+    config.explorerBaseUrl === null ||
+    config.registryAgentIds !== null ||
     config.network !== "mainnet" ||
     config.verifyOnchain !== true ||
     config.scoreMax !== RANK_SCORE_MAX ||

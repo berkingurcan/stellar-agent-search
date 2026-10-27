@@ -96,12 +96,15 @@ DRY_RUN=1 npx tsx examples/x402-demo.ts
 
 It must reach discovery cleanly and report the preflight balances you expect. Only then record.
 
-> **Why there is no testnet rehearsal.** There is no public testnet indexer, so `STELLAR_NETWORK=testnet`
-> without an explicit `EXPLORER_BASE_URL` now **fails at startup** rather than serving mainnet registry rows
-> next to testnet on-chain reads. Nothing is lost: `DRY_RUN=1` spends nothing, so the mainnet dry run *is* the
-> rehearsal, and it exercises the one path the take actually uses. (The demo would have refused to pay across
-> the old seam anyway — it compares the 402 challenge's network against the configured CAIP-2 id and aborts on
-> `network mismatch`.)
+> **Why there is no testnet rehearsal.** `STELLAR_NETWORK=testnet` starts only with a testnet data source — an
+> explicit `EXPLORER_BASE_URL` for a testnet indexer, or `REGISTRY_AGENT_IDS` (registry mode, which reads the
+> listed agents straight from the testnet Identity contract) — and **fails at startup** with neither, rather than
+> serving mainnet registry rows next to testnet on-chain reads. There is no public testnet indexer, and the demo is
+> pinned to mainnet agent 10, refuses a funded run off mainnet, and forwards only `EXPLORER_BASE_URL` to its MCP
+> subprocess, so registry mode does not give it a testnet path either. Nothing is lost: `DRY_RUN=1` spends
+> nothing, so the mainnet dry run *is* the rehearsal, and it exercises the one path the take actually uses. (The
+> demo would have refused to pay across the old seam anyway — it compares the 402 challenge's network against the
+> configured CAIP-2 id and aborts on `network mismatch`.)
 
 ### Shot list
 

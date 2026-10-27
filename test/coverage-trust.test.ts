@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AgentResponse, FeedbackResponse } from "@trionlabs/stellar8004";
 import { loadConfig } from "../src/config.js";
+import { ExplorerService } from "../src/lib/explorer.js";
 import {
   buildFeedbackJson,
   feedbackValueOrNull,
@@ -50,10 +51,16 @@ function capture(
   return { definition, handler };
 }
 
+/** A real ExplorerService (scope checks, row validation, list coverage) over one stubbed SDK page. */
+function explorerWithAgentsPage(page: unknown): ExplorerService {
+  const config = loadConfig({ STELLAR_NETWORK: "mainnet", VERIFY_ONCHAIN: "false" });
+  return new ExplorerService(config, { client: { getAgents: async () => page } as never });
+}
+
 function baseDeps(explorer: unknown): ToolDeps {
   return {
     config: loadConfig({ STELLAR_NETWORK: "mainnet", VERIFY_ONCHAIN: "false" }),
-    explorer,
+    source: explorer,
     verifier: { verifyAgainst: async () => ({ status: "skipped" }) },
   } as unknown as ToolDeps;
 }
@@ -109,16 +116,14 @@ describe("feedback resource precision and coverage", () => {
 
 describe("discovery output honesty", () => {
   it("list_agents exposes upstream pagination and incomplete single-page coverage", async () => {
-    const explorer = {
-      getAgents: async () => ({
-        data: [agent(1)],
-        meta: {
-          chain: "stellar",
-          network: "mainnet",
-          pagination: { page: 1, limit: 20, total: 100, hasMore: true },
-        },
-      }),
-    };
+    const explorer = explorerWithAgentsPage({
+      data: [agent(1)],
+      meta: {
+        chain: "stellar",
+        network: "mainnet",
+        pagination: { page: 1, limit: 20, total: 100, hasMore: true },
+      },
+    });
     const { handler } = capture(registerListAgents, "list_agents", baseDeps(explorer));
     const result = await handler({
       limit: 20,
@@ -146,16 +151,14 @@ describe("discovery output honesty", () => {
   });
 
   it("never calls a final offset page globally complete when prior pages were not scanned", async () => {
-    const explorer = {
-      getAgents: async () => ({
-        data: [agent(21)],
-        meta: {
-          chain: "stellar",
-          network: "mainnet",
-          pagination: { page: 2, limit: 20, total: 21, hasMore: false },
-        },
-      }),
-    };
+    const explorer = explorerWithAgentsPage({
+      data: [agent(21)],
+      meta: {
+        chain: "stellar",
+        network: "mainnet",
+        pagination: { page: 2, limit: 20, total: 21, hasMore: false },
+      },
+    });
     const { handler } = capture(registerListAgents, "list_agents", baseDeps(explorer));
     const result = await handler({
       limit: 20,

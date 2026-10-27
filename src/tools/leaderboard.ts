@@ -10,6 +10,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { ValidationError } from "@trionlabs/stellar8004";
 import type { GetAgentsParams } from "../lib/explorer.js";
+import { requireIndexer } from "../lib/source.js";
 import {
   canonicalTrust,
   handler,
@@ -70,6 +71,9 @@ export function registerLeaderboard(server: McpServer, deps: ToolDeps): void {
       annotations: { title: "Leaderboard", ...READ_ANNOTATIONS },
     },
     handler<Args>(async (args) => {
+      // Over an allowlist with no indexed reputation, a "top agents" list would
+      // rank unmeasured rows and look like a registry-wide answer.
+      const indexer = requireIndexer(deps.source, "The leaderboard");
       if (args.minScore !== undefined) {
         throw new ValidationError(
           "minScore is ambiguous and no longer supported; use minExplorerScore for the upstream v1 Explorer total_score filter.",
@@ -84,7 +88,7 @@ export function registerLeaderboard(server: McpServer, deps: ToolDeps): void {
       if (args.trust !== undefined) filters.trust = canonicalTrust(args.trust);
       if (args.minExplorerScore !== undefined) filters.minScore = args.minExplorerScore;
 
-      const discovery = await deps.explorer.findAgentsWithCoverage("", {
+      const discovery = await indexer.findAgentsWithCoverage("", {
         filters,
         pages: POOL_PAGES,
       });

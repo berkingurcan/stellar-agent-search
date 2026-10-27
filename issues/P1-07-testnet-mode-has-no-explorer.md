@@ -1,6 +1,7 @@
 # P1-07 — `STELLAR_NETWORK=testnet` has no explorer and cannot work
 
-**Owner:** Code · **Status:** resolved — testnet now refuses to start without an explicit explorer
+**Owner:** Code · **Status:** resolved — testnet now refuses to start without a testnet data source (an explicit
+explorer, or registry mode)
 
 ## Problem
 
@@ -51,6 +52,17 @@ aborts with `network mismatch`.
 Pinned by `test/fixes.test.ts` — the refusal, the blank-value case, and the two combinations that must still
 start (mainnet, and testnet with an explicit explorer).
 
+## Follow-up: registry mode
+
+The other honest option — a testnet data source — no longer needs an indexer. `REGISTRY_AGENT_IDS` turns on
+registry mode, which reads the listed agents straight from the testnet Identity contract (see
+`src/lib/registry-source.ts` and the README). The startup rule is now: testnet starts with `EXPLORER_BASE_URL` **or**
+`REGISTRY_AGENT_IDS`, refuses with neither (blank still counts as absent), and refuses both at once, since two
+sources would answer the same question differently. In registry mode `explorerBaseUrl` is `null`, so nothing can
+fall back to the mainnet default. `test/fixes.test.ts` pins the new combinations; `test/registry-mode.test.ts`
+pins what each tool does in that mode, including the indexer-only tools that return `INDEXER_REQUIRED`.
+
 ## Acceptance
 
-- [x] Either testnet mode returns testnet data, or it refuses to run without an explicit explorer. — refuses.
+- [x] Either testnet mode returns testnet data, or it refuses to run without an explicit explorer. — refuses, and
+  with `REGISTRY_AGENT_IDS` it now returns testnet data read directly from the Identity contract.

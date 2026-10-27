@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Registry mode** (`REGISTRY_AGENT_IDS`, CLI `--registry-agent-ids`, `setup --registry-agent-ids`): discovery
+  that reads an operator allowlist of agents straight from the Identity contract (`agent_uri`,
+  `get_agent_wallet`, `find_owner`, keyless simulations on the fetch-only transport) and decodes each
+  `data:`/`https:` registration file into the same `AgentProfile` the explorer path builds. It gives testnet a
+  data source on its own chain without an indexer. `find_agent`, `list_services`, `list_agents`, `rank_agent`,
+  `get_agent_profile`, `get_agent_card` and `verify_reputation` work over the allowlist and attach a `source`
+  note saying reputation is not indexed. `leaderboard`, `get_registry_stats`, `get_registry_health`,
+  `get_agents_by_owner`, `get_agent_feedback`, owner-address `resolve_agent`, and `minExplorerScore` filters
+  return the new `INDEXER_REQUIRED` error code instead of partial data.
+- `AgentSource` (`src/lib/source.ts`): the interface tools, resources and the CLI read through. Indexer-only
+  reads are reachable only via `requireIndexer`. `ToolDeps.explorer` is now `ToolDeps.source`.
+
 - `CONTRIBUTING.md` — contribution notes, project layout, and the four enforced invariants.
 - This changelog.
 - CI / npm / license badges in the README.

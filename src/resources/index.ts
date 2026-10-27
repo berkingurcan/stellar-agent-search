@@ -4,7 +4,7 @@
  * Resources turn the server from a one-shot query API into a durable CONTEXT
  * PROVIDER: a client can pin `stellar8004://agent/10` so an agent card stays in
  * context across turns, and browse the registry in a resource picker. This layer
- * REUSES the same {@link ExplorerService} + {@link ReputationVerifier} the tools
+ * REUSES the same {@link AgentSource} + {@link ReputationVerifier} the tools
  * use and emits the SAME canonical {@link AgentProfile} join (no divergence).
  *
  * Static resources:
@@ -40,10 +40,10 @@ import type {
   DeclaredReputation,
 } from "../types.js";
 import {
-  ExplorerService,
   V1_UNVERSIONED_PAGINATION_LIMITATION,
   type DiscoveryCoverage,
 } from "../lib/explorer.js";
+import { requireIndexer, type AgentSource } from "../lib/source.js";
 import { ReputationVerifier } from "../lib/reputation.js";
 import { toAgentCard } from "../lib/agentcard.js";
 import { scoreAgent, roundRankResult } from "../lib/ranking.js";
@@ -79,7 +79,7 @@ import {
 
 export interface ResourceDeps {
   config: Config;
-  explorer: ExplorerService;
+  source: AgentSource;
   verifier: ReputationVerifier;
 }
 
@@ -103,22 +103,35 @@ const I128_MIN = -(1n << 127n);
 const I128_MAX = (1n << 127n) - 1n;
 
 // ---------------------------------------------------------------------------
-// Data helpers (reuse ExplorerService / ReputationVerifier — no re-fetch logic)
+// Data helpers (reuse AgentSource / ReputationVerifier — no re-fetch logic)
 // ---------------------------------------------------------------------------
 
 /** Fetch up to `maxPages` pages of agents and concatenate (de-duped by id). */
 async function fetchAgentsPaged(
-  explorer: ExplorerService,
+  source: AgentSource,
   maxPages = MAX_LIST_PAGES,
 ): Promise<AgentResponse[]> {
   const byId = new Map<number, AgentResponse>();
   for (let page = 1; page <= maxPages; page++) {
-    const res = await explorer.getAgents({ page, limit: LIST_PAGE_LIMIT });
-    const batch = res.data ?? [];
+    const res = await source.listAgents({ page, limit: LIST_PAGE_LIMIT });
+    const batch = res.agents;
     for (const a of batch) if (!byId.has(a.id)) byId.set(a.id, a);
-    if (!res.meta?.pagination?.hasMore || batch.length === 0) break;
+    if (!res.pagination.hasMore || batch.length === 0) break;
   }
   return [...byId.values()];
+}
+
+/** Registry mode: a line saying the reputation figures were not measured; "" otherwise. */
+function registryModeMarkdown(deps: ResourceDeps): string {
+  return deps.source.kind === "registry"
+    ? "\n\n> Registry mode: read from the Identity contract for an operator allowlist. Reputation is not " +
+        "indexed, so the scores and feedback counts above were not measured.\n"
+    : "";
+}
+
+/** Registry mode: `{ source }` for a resource's JSON; nothing otherwise. */
+function registryModeJson(deps: ResourceDeps): Record<string, unknown> {
+  return deps.source.kind === "registry" ? { source: deps.source.describe() } : {};
 }
 
 /** Typed capability flags — delegates to the shared adapter (reduced shape). */
@@ -138,14 +151,14 @@ function scoresFrom(agent: AgentResponse, _declared: DeclaredReputation): AgentS
 }
 
 /**
- * Build the canonical {@link AgentProfile} join for one agent id: explorer
+ * Build the canonical {@link AgentProfile} join for one agent id: source
  * detail (identity + declared reputation) + on-chain reachability evidence +
  * 3-axis rank. Degrades closed to declared-only when RPC verification is off or
  * unavailable (see ReputationVerifier).
  */
 async function buildProfile(deps: ResourceDeps, id: number): Promise<AgentProfile> {
-  const { config, explorer, verifier } = deps;
-  const res = await explorer.getAgent(id);
+  const { config, source, verifier } = deps;
+  const res = await source.getAgent(id);
   const agent = res.data;
 
   const identity = config.stellar.contracts.identity;
@@ -297,10 +310,12 @@ function renderProfileMarkdown(p: AgentProfile): string {
 
 /**
  * Register all `stellar8004://` resources (3 static + 5 templates) on the given
- * server. Reuses `deps.explorer` / `deps.verifier`. Read-only.
+ * server. Reuses `deps.source` / `deps.verifier`. Read-only. Resources backed
+ * by indexer reads (registry, leaderboard, health, feedback, owner) refuse in
+ * registry mode.
  */
 export function registerResources(server: McpServer, deps: ResourceDeps): void {
-  const { config, explorer } = deps;
+  const { config, source } = deps;
 
   // --- static: registry overview -------------------------------------------
   server.registerResource(
@@ -314,10 +329,8 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
       annotations: { audience: ["user", "assistant"], priority: 1 },
     },
     async () => {
-      const [statsRes, healthRes] = await Promise.all([
-        explorer.getStats(),
-        explorer.health(),
-      ]);
+      const indexer = requireIndexer(source, "The registry overview");
+      const [statsRes, healthRes] = await Promise.all([indexer.getStats(), indexer.health()]);
       const stats = buildRegistryStatsView(statsRes.data, config.network);
       const health = buildRegistryHealthView(healthRes.data, config.network);
       const contracts = config.stellar.contracts;
@@ -373,6 +386,7 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
       annotations: { audience: ["user", "assistant"], priority: 0.8 },
     },
     async () => {
+      requireIndexer(source, "The leaderboard");
       const { rows, coverage } = await computeLeaderboard(deps);
       const json = {
         network: config.network,
@@ -404,7 +418,7 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
       annotations: { audience: ["user", "assistant"], priority: 0.4 },
     },
     async () => {
-      const res = await explorer.health();
+      const res = await requireIndexer(source, "Indexer health").health();
       const h = buildRegistryHealthView(res.data, config.network);
       const json = h;
       const md = [
@@ -434,7 +448,11 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
     async (uri, variables) => {
       const id = parseIdVar(variables["id"]);
       const profile = await buildProfile(deps, id);
-      return dual(uri.href, profile, renderProfileMarkdown(profile));
+      return dual(
+        uri.href,
+        { ...profile, ...registryModeJson(deps) },
+        renderProfileMarkdown(profile) + registryModeMarkdown(deps),
+      );
     },
   );
 
@@ -488,7 +506,7 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
           ),
         ]),
       ].join("\n");
-      return dual(uri.href, card, md + "\n");
+      return dual(uri.href, { ...card, ...registryModeJson(deps) }, md + "\n" + registryModeMarkdown(deps));
     },
   );
 
@@ -508,7 +526,7 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
     },
     async (uri, variables) => {
       const id = parseIdVar(variables["id"]);
-      const res = await explorer.getFeedback(id, { page: 1 });
+      const res = await requireIndexer(source, "Feedback history").getFeedback(id, { page: 1 });
       const items = res.data ?? [];
       const pagination = res.meta?.pagination;
       const hasMore =
@@ -567,6 +585,7 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
         verifiedFields: v.verifiedFields ?? [],
         unverifiedFields: v.unverifiedFields ?? [],
         checkedAt: v.checkedAt,
+        ...registryModeJson(deps),
       };
       const md = [
         serverText`## Reputation — Agent #${id} (${safe(v.status)})`,
@@ -578,7 +597,7 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
         serverText`- limitations: ${safe((v.limitations ?? []).join(" | ") || "none reported")}`,
         serverText`- checkedAt: ${safe(v.checkedAt)}`,
       ].join("\n");
-      return dual(uri.href, json, md + "\n");
+      return dual(uri.href, json, md + "\n" + registryModeMarkdown(deps));
     },
   );
 
@@ -596,7 +615,7 @@ export function registerResources(server: McpServer, deps: ResourceDeps): void {
     },
     async (uri, variables) => {
       const address = parseAddressVar(variables["address"]);
-      const res = await explorer.getAgentsByOwner(address);
+      const res = await requireIndexer(source, "Owner lookup").getAgentsByOwner(address);
       const agents = res.data ?? [];
       const identity = config.stellar.contracts.identity;
 
@@ -677,9 +696,9 @@ interface LeaderboardResult {
 
 /** Declared-only 3-axis ranking over fetched pages (bounded, cheap). */
 async function computeLeaderboard(deps: ResourceDeps): Promise<LeaderboardResult> {
-  const { config, explorer } = deps;
+  const { config, source } = deps;
   const identity = config.stellar.contracts.identity;
-  const discovery = await explorer.findAgentsWithCoverage("", {
+  const discovery = await source.findAgentsWithCoverage("", {
     filters: { limit: LIST_PAGE_LIMIT },
     pages: MAX_LIST_PAGES,
   });
@@ -730,6 +749,17 @@ async function computeLeaderboard(deps: ResourceDeps): Promise<LeaderboardResult
 /** Top-N agents surfaced as concrete `stellar8004://agent/{id}` resources. */
 async function listTopAgentResources(deps: ResourceDeps) {
   try {
+    if (deps.source.kind === "registry") {
+      // No reputation to rank by or quote: list the allowlist as it is.
+      const { agents } = await deps.source.findAgentsWithCoverage("");
+      return agents.slice(0, LEADERBOARD_N).map((a) => ({
+        uri: `${SCHEME}agent/${a.id}`,
+        name: `agent-${a.id}`,
+        title: `Agent #${a.id}`,
+        description: `allowlisted (registry mode) · x402=${a.x402Enabled === true}`,
+        mimeType: JSON_MIME,
+      }));
+    }
     const { rows } = await computeLeaderboard(deps);
     return rows.map((row) => ({
       uri: `${SCHEME}agent/${row.id}`,
@@ -747,7 +777,7 @@ async function listTopAgentResources(deps: ResourceDeps) {
 function makeIdCompleter(deps: ResourceDeps) {
   return async (value: string): Promise<string[]> => {
     try {
-      const agents = await fetchAgentsPaged(deps.explorer);
+      const agents = await fetchAgentsPaged(deps.source);
       const prefix = (value ?? "").trim();
       return agents
         .map((a) => String(a.id))

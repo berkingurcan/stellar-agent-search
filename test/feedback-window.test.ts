@@ -23,7 +23,7 @@ function depsWithPages(
 ): ToolDeps {
   return {
     policy: { maxFeedbackScanPages: 3 },
-    explorer: {
+    source: {
       getFeedback: vi.fn(async (_agentId: number, params?: { page?: number }) => {
         const page = params?.page ?? 1;
         const result = pages[page] ?? { data: [], hasMore: false };

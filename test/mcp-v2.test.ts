@@ -58,7 +58,7 @@ describe("MCP v2 server contract", () => {
     });
     const server = buildServer(config, {
       version: "test",
-      deps: { config, explorer, verifier: new ReputationVerifier(config) },
+      deps: { config, source: explorer, verifier: new ReputationVerifier(config) },
     });
     const client = new Client(
       { name: "mcp-v2-test", version: "test" },
