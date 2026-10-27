@@ -1,0 +1,54 @@
+name: MCP surface
+
+# Compares the PR's MCP surface snapshot (test/__surface__/mcp-surface.json) with the base
+# branch's and fails on a change that would break a client written against the base: a
+# removed tool, a newly required input, a removed output field, and so on
+# (scripts/ci/surface-compat.mjs). CI's test job already fails when the snapshot is stale,
+# so the snapshot this job reads is the real surface. To make a breaking change on purpose,
+# label the PR `breaking-change`: the job still reports it, but passes.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: surface-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compat:
+    name: MCP surface compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      # The checker has no dependencies, so there is no install step.
+      - name: Compare the snapshot with the base branch
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          ALLOW_BREAKING: ${{ contains(github.event.pull_request.labels.*.name, 'breaking-change') }}
+        shell: bash
+        run: |
+          snapshot=test/__surface__/mcp-surface.json
+          base="$RUNNER_TEMP/base-surface.json"
+          git fetch --no-tags --depth=1 origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          if ! git show "origin/${BASE_REF}:${snapshot}" > "$base" 2>/dev/null; then
+            echo "::notice::${BASE_REF} has no ${snapshot} yet, so there is nothing to compare against."
+            exit 0
+          fi
+          args=("$base" "$snapshot")
+          if [[ "$ALLOW_BREAKING" == "true" ]]; then
+            args+=(--allow-breaking)
+          fi
+          node scripts/ci/surface-compat.mjs "${args[@]}"

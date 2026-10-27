@@ -90,6 +90,9 @@ indexer's declared number as if it were verified. Same for an unrated agent: abs
    `skills/mcp/SKILL.md` (both places that spell the tool count out loud). You do not have to remember this:
    `test/skill-sync.test.ts` fails if the skill and `src/` disagree, and names what is missing.
 6. Add tests. If the tool emits summary text, add an injection case.
+7. Regenerate the surface snapshot: `npx vitest run test/mcp-surface.test.ts -u`. If the tool refuses in registry
+   mode, `test/registry-mode.test.ts` asks you to add it to `CALLS` and `PHRASES` and to the docs that list
+   those tools.
 
 Consider whether the same data should also be a `stellar8004://` resource — tools are for actions, resources are
 for pinnable context, and the two surfaces should not disagree.
@@ -111,6 +114,17 @@ fixing a bug, add the failing case first — `test/fixes.test.ts` collects regre
 - Before pushing: `npm run typecheck && npm test && npm run build`.
 - CI runs the matrix Node 22/24 × ubuntu/macOS plus a `npm pack --dry-run`; the Worker gets a separate
   Node 22 typecheck/test/bundle audit. Green CI is required to merge.
+- **The MCP surface is pinned.** `test/__surface__/mcp-surface.json` holds what a client sees before calling
+  anything: the instructions (explorer and registry mode), every tool's input and output schema, the prompts and
+  the resources. A change you make to any of them fails `test/mcp-surface.test.ts` until you regenerate the
+  snapshot with `npx vitest run test/mcp-surface.test.ts -u`, so reviewers see the change in the diff. The
+  `MCP surface` workflow then compares it with `main`'s snapshot and fails on a change that would break an
+  existing client: a removed tool, a newly required input, a removed or now-optional output field, a narrower
+  enum. If the break is deliberate, label the PR `breaking-change` and say so in `CHANGELOG.md`.
+- Two workflows hit live networks and are not merge gates. `Testnet smoke` runs nightly and on demand against
+  the testnet in registry mode; after a testnet reset, update the `TESTNET_AGENT_IDS` and `TESTNET_SMOKE_QUERY`
+  repository variables. `Mainnet parity` is manual: run it before a release to show that a build answers every
+  mainnet tool call and resource read the way `main` (or another ref you choose) does.
 - User-visible changes get a `CHANGELOG.md` entry under `## Unreleased`.
 
 ## Releasing
