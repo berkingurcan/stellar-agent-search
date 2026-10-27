@@ -23,8 +23,12 @@ import type { Config } from "../config.js";
 import {
   ExplorerService,
   V1_UNVERSIONED_PAGINATION_LIMITATION,
+  type DiscoveryCoverage,
   type ExplorerServiceOptions,
 } from "../lib/explorer.js";
+import type { ParsedQuery } from "../lib/nlparse.js";
+import { RegistryService, type RegistryServiceOptions } from "../lib/registry-source.js";
+import { requireIndexer, type AgentSource, type RegistrySourceNote } from "../lib/source.js";
 import { ReputationVerifier, type ReputationVerifierOptions } from "../lib/reputation.js";
 import {
   rankAgents,
@@ -71,7 +75,8 @@ import { mapErrorToToolResult } from "../lib/errors.js";
 /** Everything a tool handler needs. Constructed once per server. */
 export interface ToolDeps {
   config: Config;
-  explorer: ExplorerService;
+  /** The explorer (indexer) or, in registry mode, direct Identity contract reads. */
+  source: AgentSource;
   verifier: ReputationVerifier;
   /** Optional runtime-specific public-surface caps (the local stdio defaults stay broader). */
   policy?: ToolRuntimePolicy;
@@ -88,30 +93,10 @@ export interface ToolRuntimePolicy {
   maxExplorerConcurrency?: number;
 }
 
-/** Small dependency-free pMap used for bounded Explorer fan-out. */
-export async function mapWithConcurrency<T, R>(
-  items: readonly T[],
-  limit: number,
-  mapper: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const output = new Array<R>(items.length);
-  let cursor = 0;
-  const workers = Array.from(
-    { length: Math.max(1, Math.min(items.length || 1, Math.floor(limit) || 1)) },
-    async () => {
-      while (cursor < items.length) {
-        const index = cursor++;
-        output[index] = await mapper(items[index]!, index);
-      }
-    },
-  );
-  await Promise.all(workers);
-  return output;
-}
-
 /** Construction options for runtime-specific fetch/cache and test seams. */
 export interface CreateToolDepsOptions {
   explorer?: ExplorerServiceOptions;
+  registry?: RegistryServiceOptions;
   verifier?: ReputationVerifierOptions;
 }
 
@@ -119,9 +104,64 @@ export interface CreateToolDepsOptions {
 export function createToolDeps(config: Config, opts: CreateToolDepsOptions = {}): ToolDeps {
   return {
     config,
-    explorer: new ExplorerService(config, opts.explorer),
+    source: config.registryAgentIds
+      ? new RegistryService(config, opts.registry)
+      : new ExplorerService(config, opts.explorer),
     verifier: new ReputationVerifier(config, opts.verifier),
   };
+}
+
+export { mapWithConcurrency } from "../lib/concurrency.js";
+
+// ---------------------------------------------------------------------------
+// Registry-mode disclosure (explorer results are left exactly as they were)
+// ---------------------------------------------------------------------------
+
+/** `{ source }` for a registry-mode result; nothing in explorer mode. */
+export function sourceFields(deps: ToolDeps): { source?: RegistrySourceNote } {
+  return deps.source.kind === "registry" ? { source: deps.source.describe() } : {};
+}
+
+/**
+ * A summary-text suffix saying what registry mode cannot measure; "" in explorer
+ * mode. Pass the search coverage so a dropped implied score threshold is named too.
+ */
+export function sourceText(deps: ToolDeps, coverage?: DiscoveryCoverage): string {
+  if (deps.source.kind !== "registry") return "";
+  const { allowlistSize } = deps.source.describe();
+  const dropped = coverage?.limitations?.includes(IMPLIED_SCORE_NOT_APPLIED)
+    ? serverText` A quality word in the query (such as "best" or "trusted") implies a minimum score, which registry mode cannot apply; results are not filtered by score.`
+    : "";
+  return serverText` Registry mode: ${allowlistSize} allowlisted agent(s) read from the Identity contract; reputation is not indexed, so scores and feedback counts are not measured.` + dropped;
+}
+
+/** Coverage limitation: a score threshold implied by a quality word was not applied (registry mode). */
+export const IMPLIED_SCORE_NOT_APPLIED = "implied-score-filter-not-applied";
+
+/**
+ * The minExplorerScore a natural-language search applies. An explicit argument
+ * or a stated number in the query ("score above 70") always applies, and
+ * registry mode refuses it. A threshold the parser inferred from a quality word
+ * ("best", "trusted") is a ranking preference, not a stated filter: registry
+ * mode has no scores to apply it to, so it is dropped and `dropped` tells the
+ * caller to disclose that (withImpliedScoreDropped), rather than the whole
+ * search failing on a common phrasing.
+ */
+export function queryMinScore(
+  source: AgentSource,
+  parsed: ParsedQuery,
+  explicit?: number,
+): { minExplorerScore: number | undefined; dropped: boolean } {
+  if (explicit !== undefined) return { minExplorerScore: explicit, dropped: false };
+  if (source.kind === "registry" && parsed.scoreFrom === "phrase") {
+    return { minExplorerScore: undefined, dropped: true };
+  }
+  return { minExplorerScore: parsed.filters.minExplorerScore, dropped: false };
+}
+
+/** Coverage that records a dropped implied score threshold. */
+export function withImpliedScoreDropped(coverage: DiscoveryCoverage): DiscoveryCoverage {
+  return { ...coverage, limitations: [...(coverage.limitations ?? []), IMPLIED_SCORE_NOT_APPLIED] };
 }
 
 // ---------------------------------------------------------------------------
@@ -363,7 +403,7 @@ export async function buildAgentProfile(
   caps: AgentCapabilities;
   declared: DeclaredReputation;
 }> {
-  const detail = opts.detail ?? (await deps.explorer.getAgent(id)).data;
+  const detail = opts.detail ?? (await deps.source.getAgent(id)).data;
   const declared = declaredReputation(detail);
   const verification = await deps.verifier.verifyAgainst(id, declared, {
     skip: !opts.verify,
@@ -576,6 +616,7 @@ export async function collectFeedbackWindow(
     includeRevoked: boolean;
   },
 ): Promise<FeedbackWindow> {
+  const indexer = requireIndexer(deps.source, "Feedback history");
   const offset = (options.page - 1) * options.limit;
   const maxPages = Math.max(1, Math.min(deps.policy?.maxFeedbackScanPages ?? 20, 20));
   const rows: FeedbackResponse[] = [];
@@ -587,7 +628,7 @@ export async function collectFeedbackWindow(
   let paginationContradiction = false;
 
   for (let upstreamPage = 1; upstreamPage <= maxPages; upstreamPage++) {
-    const res = await deps.explorer.getFeedback(
+    const res = await indexer.getFeedback(
       agentId,
       options.tag ? { page: upstreamPage, tag: options.tag } : { page: upstreamPage },
     );

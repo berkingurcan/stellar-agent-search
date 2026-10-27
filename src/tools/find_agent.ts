@@ -16,7 +16,10 @@ import {
   canonicalTrust,
   handler,
   MAX_QUERY_LENGTH,
+  queryMinScore,
   rankAndVerify,
+  sourceFields,
+  sourceText,
   summarizeRanked,
   toolResult,
   zLimit,
@@ -26,9 +29,10 @@ import {
   zTrust,
   READ_ANNOTATIONS,
   VERIFY_TOP_K,
+  withImpliedScoreDropped,
   type ToolDeps,
 } from "./shared.js";
-import { zDiscoveryCoverage, zInterpretedQuery, zRankedAgent } from "./schemas.js";
+import { zDiscoveryCoverage, zInterpretedQuery, zRankedAgent, zSourceNote } from "./schemas.js";
 
 const CANDIDATE_PAGE_SIZE = 50;
 // 4 pages of headroom for the client-side stem match (the explorer has no
@@ -72,6 +76,7 @@ const outputShape = {
   count: z.number(),
   agents: z.array(zRankedAgent),
   coverage: zDiscoveryCoverage,
+  source: zSourceNote.optional(),
 };
 
 export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
@@ -101,12 +106,13 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
         );
       }
 
+      const score = queryMinScore(deps.source, parsed, args.minExplorerScore);
       const effective = {
         x402: args.x402 ?? parsed.filters.x402,
         mpp: args.mpp ?? parsed.filters.mpp,
         hasServices: args.hasServices ?? parsed.filters.hasServices,
         trust: args.trust ? canonicalTrust(args.trust) : parsed.filters.trust,
-        minExplorerScore: args.minExplorerScore ?? parsed.filters.minExplorerScore,
+        minExplorerScore: score.minExplorerScore,
       };
 
       const filters: Omit<NonNullable<GetAgentsParams>, "search" | "page"> = {
@@ -121,11 +127,14 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
       }
 
       const searchText = parsed.keywords.join(" ");
-      const discovery = await deps.explorer.findAgentsWithCoverage(searchText, {
+      const discovery = await deps.source.findAgentsWithCoverage(searchText, {
         filters,
         pages: CANDIDATE_PAGES,
         match: "any",
       });
+      const coverage = score.dropped
+        ? withImpliedScoreDropped(discovery.coverage)
+        : discovery.coverage;
 
       const rows = await rankAndVerify(deps, discovery.agents, {
         sortBy: args.sortBy,
@@ -138,7 +147,7 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
       const filterRecord: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(effective)) if (v !== undefined) filterRecord[k] = v;
 
-      return toolResult(summarizeRanked(rows), {
+      return toolResult(summarizeRanked(rows) + sourceText(deps, coverage), {
         interpretedQuery: {
           keywords: parsed.keywords,
           filters: filterRecord,
@@ -147,7 +156,8 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
         },
         count: rows.length,
         agents: rows,
-        coverage: discovery.coverage,
+        coverage,
+        ...sourceFields(deps),
       });
     }),
   );

@@ -1,22 +1,22 @@
 /**
  * list_agents — paginated, filterable agent listing, ranked client-side.
  *
- * A straight browse primitive: fetch one page from the explorer with the given
+ * A straight browse primitive: fetch one page from the source with the given
  * filters, then rank the page with the deterministic engine (declared-only by
  * default; the optional on-chain probe is bounded and verifies no current fields).
+ * The source reports its own pagination and coverage.
  */
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { ValidationError } from "@trionlabs/stellar8004";
-import {
-  V1_UNVERSIONED_PAGINATION_LIMITATION,
-  type GetAgentsParams,
-} from "../lib/explorer.js";
+import type { ListAgentsParams } from "../lib/source.js";
 import {
   canonicalTrust,
   handler,
   rankAndVerify,
+  sourceFields,
+  sourceText,
   summarizeRanked,
   toolResult,
   zLimit,
@@ -28,7 +28,7 @@ import {
   VERIFY_TOP_K,
   type ToolDeps,
 } from "./shared.js";
-import { zDiscoveryCoverage, zRankedAgent } from "./schemas.js";
+import { zDiscoveryCoverage, zRankedAgent, zSourceNote } from "./schemas.js";
 
 const inputShape = {
   x402: z.literal(true).optional(),
@@ -63,6 +63,7 @@ const outputShape = {
   }),
   coverage: zDiscoveryCoverage,
   agents: z.array(zRankedAgent),
+  source: zSourceNote.optional(),
 };
 
 export function registerListAgents(server: McpServer, deps: ToolDeps): void {
@@ -84,19 +85,16 @@ export function registerListAgents(server: McpServer, deps: ToolDeps): void {
           "minScore is ambiguous and no longer supported; use minExplorerScore for the upstream v1 Explorer total_score filter.",
         );
       }
-      const params: GetAgentsParams = { page: args.page, limit: args.limit };
+      const params: ListAgentsParams = { page: args.page, limit: args.limit };
       if (args.x402 !== undefined) params.x402 = args.x402;
       if (args.mpp !== undefined) params.mpp = args.mpp;
       if (args.hasServices !== undefined) params.hasServices = args.hasServices;
       if (args.trust !== undefined) params.trust = canonicalTrust(args.trust);
       if (args.minExplorerScore !== undefined) params.minScore = args.minExplorerScore;
 
-      const response = await deps.explorer.getAgents(params);
-      const agents = response.data ?? [];
-      const pagination = response.meta?.pagination;
-      const hasMore = typeof pagination?.hasMore === "boolean" ? pagination.hasMore : undefined;
+      const page = await deps.source.listAgents(params);
 
-      const rows = await rankAndVerify(deps, agents, {
+      const rows = await rankAndVerify(deps, page.agents, {
         sortBy: args.sortBy,
         verify: args.verify,
         verifyTopK: VERIFY_TOP_K,
@@ -104,29 +102,13 @@ export function registerListAgents(server: McpServer, deps: ToolDeps): void {
         includeBreakdown: false,
       });
 
-      return toolResult(summarizeRanked(rows), {
+      return toolResult(summarizeRanked(rows) + sourceText(deps), {
         count: rows.length,
         page: args.page,
-        pagination: {
-          page: pagination?.page ?? args.page,
-          limit: pagination?.limit ?? args.limit,
-          total: Number.isSafeInteger(pagination?.total) ? pagination!.total : null,
-          hasMore: hasMore ?? null,
-        },
-        coverage: {
-          coverageComplete: false,
-          paginationExhausted: hasMore === false,
-          snapshotConsistent: false,
-          pagesScanned: 1,
-          recordsScanned: agents.length,
-          ...(hasMore !== undefined ? { hasMore } : {}),
-          limitations: [
-            V1_UNVERSIONED_PAGINATION_LIMITATION,
-            ...(args.page > 1 ? ["prior-pages-not-scanned"] : []),
-            ...(hasMore === undefined ? ["pagination-metadata-unavailable"] : []),
-          ],
-        },
+        pagination: page.pagination,
+        coverage: page.coverage,
         agents: rows,
+        ...sourceFields(deps),
       });
     }),
   );

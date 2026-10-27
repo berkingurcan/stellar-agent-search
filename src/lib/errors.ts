@@ -11,6 +11,8 @@
  *   NotFoundError   → NOT_FOUND
  *   ValidationError → BAD_REQUEST
  *   ApiError        → UPSTREAM_ERROR (+status detail)
+ *   RegistryReadError    → UPSTREAM_ERROR (direct Identity contract read)
+ *   IndexerRequiredError → INDEXER_REQUIRED (not available in registry mode)
  *   other Error     → INTERNAL
  */
 
@@ -38,6 +40,30 @@ export class UpstreamDataError extends Error {
   }
 }
 
+/** A direct Identity contract read or registration-file fetch failed (registry mode). */
+export class RegistryReadError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "RegistryReadError";
+  }
+}
+
+/**
+ * The request needs an indexer, and this server reads the registry directly.
+ * Registry mode has no feedback history, stats, health, owner index or indexed
+ * reputation, so it refuses rather than answer from a partial view.
+ */
+export class IndexerRequiredError extends Error {
+  constructor(feature: string) {
+    super(
+      `${feature} needs an indexer, and this server is in registry mode: it reads the Identity contract ` +
+        `directly for the agents in REGISTRY_AGENT_IDS. To use it, set EXPLORER_BASE_URL to an indexer ` +
+        `for this network instead.`,
+    );
+    this.name = "IndexerRequiredError";
+  }
+}
+
 /** True when `err` is one of the SDK's typed API errors. */
 export function isSdkError(err: unknown): err is ApiError {
   return err instanceof ApiError;
@@ -50,6 +76,12 @@ export function classifyError(err: unknown): ToolErrorBody {
   }
   if (err instanceof ExplorerScopeError) {
     return { error: err.message, code: "UPSTREAM_ERROR", detail: "chain/network scope mismatch" };
+  }
+  if (err instanceof IndexerRequiredError) {
+    return { error: err.message, code: "INDEXER_REQUIRED", detail: "registry mode" };
+  }
+  if (err instanceof RegistryReadError) {
+    return { error: err.message, code: "UPSTREAM_ERROR", detail: "registry read failed" };
   }
   if (err instanceof RateLimitError) {
     return {

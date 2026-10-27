@@ -20,12 +20,14 @@ import {
   buildAgentProfile,
   collectFeedbackWindow,
   handler,
+  sourceFields,
+  sourceText,
   toolResult,
   toSafeFeedback,
   READ_ANNOTATIONS,
   type ToolDeps,
 } from "./shared.js";
-import { zAgentProfile, zSelfDeclaredSlot, zVerification } from "./schemas.js";
+import { zAgentProfile, zSelfDeclaredSlot, zSourceNote, zVerification } from "./schemas.js";
 
 const inputShape = {
   agent: z
@@ -60,6 +62,7 @@ const outputShape = {
     })
     .passthrough(),
   verification: zVerification,
+  source: zSourceNote.optional(),
 };
 
 export function registerGetAgentProfile(server: McpServer, deps: ToolDeps): void {
@@ -89,9 +92,17 @@ export function registerGetAgentProfile(server: McpServer, deps: ToolDeps): void
       // Fetch detail and feedback concurrently: feedback depends only on `id`, so
       // firing it up front overlaps it with the slow multi-RPC on-chain verify
       // (which buildAgentProfile runs) instead of serializing behind it.
-      const detailPromise = deps.explorer.getAgent(id);
+      const detailPromise = deps.source.getAgent(id);
+      // Registry mode has no feedback history. The profile still answers, with
+      // an empty window that says it is incomplete and why.
+      const feedbackSkipped =
+        args.feedbackLimit === 0
+          ? "feedback-not-requested"
+          : deps.source.kind === "registry"
+            ? "feedback-requires-indexer"
+            : null;
       const feedbackPromise =
-        args.feedbackLimit > 0
+        feedbackSkipped === null
           ? collectFeedbackWindow(deps, id, {
               page: 1,
               limit: args.feedbackLimit,
@@ -101,11 +112,11 @@ export function registerGetAgentProfile(server: McpServer, deps: ToolDeps): void
               rows: [],
               revokedHidden: 0,
               coverage: {
-                windowComplete: true,
+                windowComplete: feedbackSkipped === "feedback-not-requested",
                 paginationExhausted: false,
                 snapshotConsistent: false,
                 pagesScanned: 0,
-                limitations: ["feedback-not-requested"],
+                limitations: [feedbackSkipped],
               },
             });
       const detailRes = await detailPromise;
@@ -124,13 +135,21 @@ export function registerGetAgentProfile(server: McpServer, deps: ToolDeps): void
       const card = toAgentCard(profile);
 
       const avg = declared.average;
-      const text = serverText`Agent ${id} on ${safe(deps.config.network)}: reputation ${safe(
-        verification.status,
-      )}, declared avg ${avg == null ? safe("n/a") : avg} over ${declared.feedbackCount} feedback(s), ${
-        declared.uniqueClients
-      } unique client(s). Score ${rank.score100}/100, evidenceStrength ${safe(
-        rank.evidenceStrength.toFixed(3),
-      )} (index, not probability), rankVersion=${safe(rank.rankVersion)}. snapshotComparable=${verification.snapshotComparable ?? false}. x402=${caps.x402}, mpp=${caps.mpp}, services=${profile.selfDeclared.services.length}.`;
+      // Registry mode has no declared reputation to report, so the text does not
+      // print the zero counts as if they had been measured.
+      const text =
+        deps.source.kind === "registry"
+          ? serverText`Agent ${id} on ${safe(deps.config.network)}: reputation ${safe(
+              verification.status,
+            )}. x402=${caps.x402}, mpp=${caps.mpp}, services=${profile.selfDeclared.services.length}.` +
+            sourceText(deps)
+          : serverText`Agent ${id} on ${safe(deps.config.network)}: reputation ${safe(
+              verification.status,
+            )}, declared avg ${avg == null ? safe("n/a") : avg} over ${declared.feedbackCount} feedback(s), ${
+              declared.uniqueClients
+            } unique client(s). Score ${rank.score100}/100, evidenceStrength ${safe(
+              rank.evidenceStrength.toFixed(3),
+            )} (index, not probability), rankVersion=${safe(rank.rankVersion)}. snapshotComparable=${verification.snapshotComparable ?? false}. x402=${caps.x402}, mpp=${caps.mpp}, services=${profile.selfDeclared.services.length}.`;
 
       return toolResult(text, {
         profile,
@@ -138,6 +157,7 @@ export function registerGetAgentProfile(server: McpServer, deps: ToolDeps): void
         recentFeedback: selfDeclared(recent),
         feedbackCoverage: feedbackWindow.coverage,
         verification,
+        ...sourceFields(deps),
       });
     }),
   );

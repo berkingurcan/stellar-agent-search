@@ -11,6 +11,7 @@
 
 import { getConfig } from "@trionlabs/stellar8004";
 import type { Network, StellarConfig } from "./types.js";
+import { MAX_AGENT_ID } from "./lib/identifier.js";
 import { log } from "./lib/logger.js";
 
 /** Local display normalization policy; the protocol itself allows signed i128 + decimals. */
@@ -18,6 +19,12 @@ export const RANK_SCORE_MAX = 100;
 
 /** Default explorer HTTP API base. */
 export const DEFAULT_EXPLORER_BASE = "https://stellar8004.com";
+
+/**
+ * Most agents registry mode reads. Each one costs three contract simulations and
+ * possibly a registration-file fetch, and every list or search reads them all.
+ */
+export const MAX_REGISTRY_AGENT_IDS = 50;
 
 /**
  * A launch refused because the environment is misconfigured — not a bug, and not
@@ -37,8 +44,13 @@ export interface Config {
   stellar: StellarConfig;
   /** Effective Soroban RPC URL (env override or stellar.rpcUrl). */
   rpcUrl: string;
-  /** Explorer HTTP API base (env override or default). */
-  explorerBaseUrl: string;
+  /** Explorer HTTP API base (env override or default); null in registry mode. */
+  explorerBaseUrl: string | null;
+  /**
+   * Registry mode: the agents read straight from the Identity contract
+   * (REGISTRY_AGENT_IDS). Null when the explorer is the data source.
+   */
+  registryAgentIds: readonly number[] | null;
   /** Whether to attempt the bounded Reputation-contract probe. */
   verifyOnchain: boolean;
   /** Feedback score scale (RANK_SCORE_MAX). */
@@ -68,6 +80,27 @@ function parseBool(raw: string | undefined, def: boolean, name: string): boolean
   throw new ConfigError(`${name} must be a boolean (true/false, 1/0, yes/no, on/off), got '${raw}'`);
 }
 
+/** REGISTRY_AGENT_IDS: comma- or space-separated agent ids. Blank counts as absent. */
+export function parseRegistryAgentIds(raw: string | undefined): number[] | null {
+  const text = raw?.trim();
+  if (!text) return null;
+  const ids = new Set<number>();
+  for (const token of text.split(/[\s,]+/).filter(Boolean)) {
+    if (!/^\d+$/.test(token) || Number(token) > MAX_AGENT_ID) {
+      throw new ConfigError(
+        `REGISTRY_AGENT_IDS must be a comma-separated list of agent ids (0..${MAX_AGENT_ID}), got '${token}'`,
+      );
+    }
+    ids.add(Number(token));
+  }
+  if (ids.size > MAX_REGISTRY_AGENT_IDS) {
+    throw new ConfigError(
+      `REGISTRY_AGENT_IDS lists ${ids.size} agents; registry mode reads at most ${MAX_REGISTRY_AGENT_IDS}.`,
+    );
+  }
+  return [...ids];
+}
+
 /**
  * Load config from an environment map (defaults to process.env in Node and an
  * empty map in runtimes without `process`). Worker entrypoints must pass their
@@ -84,21 +117,32 @@ export function loadConfig(env: EnvironmentMap = defaultEnvironment()): Config {
   const stellar = getConfig(network); // mainnet ⇒ MAINNET_CONFIG
 
   const explorerOverride = env.EXPLORER_BASE_URL?.trim();
-  if (network === "testnet" && !explorerOverride) {
+  const registryAgentIds = parseRegistryAgentIds(env.REGISTRY_AGENT_IDS);
+  if (explorerOverride && registryAgentIds) {
+    // Two sources would answer the same question differently (the indexer
+    // enumerates the registry; registry mode reads an allowlist), and nothing
+    // here could say which one a given row came from.
+    throw new ConfigError(
+      `Set EXPLORER_BASE_URL or REGISTRY_AGENT_IDS, not both. EXPLORER_BASE_URL reads an indexer; ` +
+        `REGISTRY_AGENT_IDS reads those agents straight from the Identity contract (registry mode).`,
+    );
+  }
+  if (network === "testnet" && !explorerOverride && !registryAgentIds) {
     // The default explorer indexes MAINNET only (its own responses report
     // network=mainnet). Soroban reads follow the testnet contracts while the
     // registry rows come from mainnet, so discovery and verification would
-    // describe two different chains as one. There is no testnet indexer to
-    // fall back to, so refuse the launch instead of serving the mix — degrade
-    // closed, never fake, applied to startup rather than to a single read.
+    // describe two different chains as one. Refuse the launch instead of
+    // serving the mix — degrade closed, never fake, applied to startup rather
+    // than to a single read. Either source below keeps both sides on testnet.
     throw new ConfigError(
-      `STELLAR_NETWORK=testnet requires an explicit EXPLORER_BASE_URL. The default explorer ` +
-        `(${DEFAULT_EXPLORER_BASE}) indexes mainnet only, so testnet would serve MAINNET registry rows ` +
-        `alongside testnet on-chain reads — two chains described as one. ` +
-        `Point EXPLORER_BASE_URL at a testnet indexer, or use STELLAR_NETWORK=mainnet.`,
+      `STELLAR_NETWORK=testnet requires an explicit EXPLORER_BASE_URL or REGISTRY_AGENT_IDS. The default ` +
+        `explorer (${DEFAULT_EXPLORER_BASE}) indexes mainnet only, so testnet would serve MAINNET registry rows ` +
+        `alongside testnet on-chain reads — two chains described as one. Point EXPLORER_BASE_URL at a testnet ` +
+        `indexer, set REGISTRY_AGENT_IDS to read those agents straight from the testnet Identity contract, ` +
+        `or use STELLAR_NETWORK=mainnet.`,
     );
   }
-  const explorerBaseUrl = explorerOverride || DEFAULT_EXPLORER_BASE;
+  const explorerBaseUrl = registryAgentIds ? null : explorerOverride || DEFAULT_EXPLORER_BASE;
 
   const legacyRankingWeight = ["RANK_W_QUALITY", "RANK_W_VOLUME", "RANK_W_BREADTH"].find(
     (name) => env[name]?.trim(),
@@ -129,6 +173,7 @@ export function loadConfig(env: EnvironmentMap = defaultEnvironment()): Config {
     stellar,
     rpcUrl: env.STELLAR_RPC_URL?.trim() || stellar.rpcUrl,
     explorerBaseUrl,
+    registryAgentIds,
     verifyOnchain: parseBool(env.VERIFY_ONCHAIN, true, "VERIFY_ONCHAIN"),
     scoreMax,
     ...(env.RANK_SIM_SOURCE?.trim() ? { simSource: env.RANK_SIM_SOURCE.trim() } : {}),

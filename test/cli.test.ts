@@ -38,7 +38,7 @@ function fakeDeps(overrides: {
   const agents = overrides.agents ?? [agent(1)];
   return {
     config: loadConfig({ STELLAR_NETWORK: "mainnet", VERIFY_ONCHAIN: "true" }),
-    explorer: {
+    source: {
       findAgentsWithCoverage: vi.fn(async () => ({
         agents,
         coverage: { ...coverage, recordsScanned: agents.length },
@@ -58,7 +58,7 @@ function fakeDeps(overrides: {
             },
           })),
       ),
-    } as unknown as ToolDeps["explorer"],
+    } as unknown as ToolDeps["source"],
     verifier: {
       verifyAgainst: vi.fn(
         overrides.verifyAgainst ??

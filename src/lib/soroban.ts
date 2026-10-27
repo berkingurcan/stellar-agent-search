@@ -29,6 +29,7 @@
  * argument encoding and result decoding, different transport:
  *
  *     new ReputationClient(...)  ->  .spec  ->  new FetchContractClient(spec, opts)
+ *     new IdentityClient(...)    ->  .spec  ->  new FetchContractClient(spec, opts)
  *
  * The donor is constructed but never used for I/O; building it costs no network
  * call, and the spec it carries is the same XDR the contract was compiled from.
@@ -40,7 +41,7 @@
  * NULL_ACCOUNT and skips the `getAccount()` lookup public RPCs reject.
  */
 
-import { ReputationClient, type SummaryResult } from "@trionlabs/stellar8004";
+import { IdentityClient, ReputationClient, type SummaryResult } from "@trionlabs/stellar8004";
 import { Client as FetchContractClient } from "@stellar/stellar-sdk/contract";
 import type { Config } from "../config.js";
 
@@ -64,7 +65,20 @@ export interface ReputationReadClient {
   }): Promise<{ result: string[] | undefined }>;
 }
 
-export interface ReputationReadClientOptions {
+/**
+ * The three Identity reads `RegistryService` performs, structural for the same
+ * reason. Only view methods are named here: the generated client also carries
+ * the contract's owner-only methods, and nothing in this server may reach them.
+ */
+export interface IdentityReadClient {
+  /** `Err` when the agent does not exist; an empty string when it has no URI. */
+  agent_uri(args: { agent_id: number }): Promise<{ result: { isOk(): boolean; unwrap(): string } }>;
+  get_agent_wallet(args: { agent_id: number }): Promise<{ result: string | undefined }>;
+  /** The non-panicking owner lookup: `undefined` when the agent does not exist. */
+  find_owner(args: { agent_id: number }): Promise<{ result: string | undefined }>;
+}
+
+export interface SorobanReadClientOptions {
   /**
    * Source account for simulation. Omit (the default) so the SDK uses its
    * fabricated NULL_ACCOUNT — no funded account, no `getAccount()` round-trip.
@@ -73,19 +87,32 @@ export interface ReputationReadClientOptions {
   simSource?: string;
 }
 
+interface ReadClientOptions {
+  contractId: string;
+  networkPassphrase: string;
+  rpcUrl: string;
+  allowHttp: boolean;
+  publicKey?: string;
+}
+
+/** A generated binding, used only for the `spec` it carries. */
+type SpecDonor = new (options: ReadClientOptions) => { readonly spec: unknown };
+
 /**
- * Build the Reputation contract reader on the fetch-based SDK build.
+ * Build a fetch-transport reader for one contract from a generated binding's spec.
  *
  * Throws only if the bindings or the SDK are unusable, which is a packaging
  * fault rather than a runtime condition — callers treat a construction failure
- * the same as a disabled verifier.
+ * the same as a disabled reader.
  */
-export function createReputationReadClient(
+function createFetchReadClient<T>(
+  Donor: SpecDonor,
+  contractId: string,
   cfg: Config,
-  opts: ReputationReadClientOptions = {},
-): ReputationReadClient {
-  const clientOptions = () => ({
-    contractId: cfg.stellar.contracts.reputation,
+  opts: SorobanReadClientOptions,
+): T {
+  const clientOptions = (): ReadClientOptions => ({
+    contractId,
     networkPassphrase: cfg.stellar.networkPassphrase,
     rpcUrl: cfg.rpcUrl,
     allowHttp: cfg.rpcUrl.startsWith("http://"),
@@ -96,7 +123,7 @@ export function createReputationReadClient(
   // here, but the constructor mutates its options object by installing a
   // transport server. Keep the donor and reader options separate so generated
   // binding construction cannot smuggle transport state into the read client.
-  const spec = new ReputationClient(clientOptions()).spec;
+  const spec = new Donor(clientOptions()).spec;
 
   const common = clientOptions();
 
@@ -107,8 +134,34 @@ export function createReputationReadClient(
   // parsed XDR entries and no transport state.
   const ContractClient = FetchContractClient as unknown as new (
     spec: unknown,
-    options: typeof common,
-  ) => ReputationReadClient;
+    options: ReadClientOptions,
+  ) => T;
 
   return new ContractClient(spec, common);
+}
+
+/** Build the Reputation contract reader on the fetch-based SDK build. */
+export function createReputationReadClient(
+  cfg: Config,
+  opts: SorobanReadClientOptions = {},
+): ReputationReadClient {
+  return createFetchReadClient<ReputationReadClient>(
+    ReputationClient,
+    cfg.stellar.contracts.reputation,
+    cfg,
+    opts,
+  );
+}
+
+/** Build the Identity contract reader on the fetch-based SDK build. */
+export function createIdentityReadClient(
+  cfg: Config,
+  opts: SorobanReadClientOptions = {},
+): IdentityReadClient {
+  return createFetchReadClient<IdentityReadClient>(
+    IdentityClient,
+    cfg.stellar.contracts.identity,
+    cfg,
+    opts,
+  );
 }

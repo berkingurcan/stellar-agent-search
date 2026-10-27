@@ -86,7 +86,33 @@ describe("setup flag parsing", () => {
     ).rejects.toThrow("without embedded credentials");
     await expect(
       executeSetup({ client: "cursor", network: "testnet", version: "0.1.0" }, runtime()),
-    ).rejects.toThrow("requires --explorer-url");
+    ).rejects.toThrow("requires --explorer-url for a testnet indexer, or --registry-agent-ids");
+    await expect(
+      executeSetup(
+        {
+          client: "cursor",
+          network: "testnet",
+          explorerUrl: "https://testnet.example.test",
+          registryAgentIds: "12",
+          version: "0.1.0",
+        },
+        runtime(),
+      ),
+    ).rejects.toThrow("not both");
+    await expect(
+      executeSetup(
+        { client: "cursor", network: "testnet", registryAgentIds: "12,abc", version: "0.1.0" },
+        runtime(),
+      ),
+    ).rejects.toThrow("REGISTRY_AGENT_IDS must be");
+  });
+
+  it("configures testnet registry mode from an allowlist, normalized", async () => {
+    const result = await executeSetup(
+      { client: "cursor", network: "testnet", registryAgentIds: "12 40,12", dryRun: true, version: "0.1.0" },
+      runtime(),
+    );
+    expect(result.report.launch.env).toEqual({ STELLAR_NETWORK: "testnet", REGISTRY_AGENT_IDS: "12,40" });
   });
 
   it("requires an exact immutable package version for persistent launchers", async () => {

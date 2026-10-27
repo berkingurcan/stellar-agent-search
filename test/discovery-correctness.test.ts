@@ -107,7 +107,7 @@ function depsWith(mock: MockFetch): ToolDeps {
   const cfg = config();
   return {
     config: cfg,
-    explorer: new ExplorerService(cfg, { fetch: mock.fn }),
+    source: new ExplorerService(cfg, { fetch: mock.fn }),
     verifier: new ReputationVerifier(cfg),
   };
 }
@@ -287,6 +287,19 @@ describe("tool discovery contracts", () => {
 
     expect(result.isError).toBeFalsy();
     expect(mock.calls[0]?.searchParams.get("minScore")).toBe("250");
+  });
+
+  it("still applies a score implied by 'best' in explorer mode", async () => {
+    const mock = new MockFetch(() =>
+      jsonResponse(pageBody([agent(10)], { total: 1, hasMore: false })),
+    );
+    const find = captureHandler(registerFindAgent, "find_agent", depsWith(mock));
+
+    const result = await find({ query: "best scraper", limit: 10, sortBy: "relevance", verify: false });
+
+    expect(result.isError).toBeFalsy();
+    expect(mock.calls[0]?.searchParams.get("minScore")).toBe("80");
+    expect(result.structuredContent.coverage.limitations).not.toContain("implied-score-filter-not-applied");
   });
 
   it("rejects retired per-call ranking weights before any Explorer request", async () => {

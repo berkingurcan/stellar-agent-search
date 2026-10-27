@@ -18,10 +18,13 @@ import { safe, serverText } from "../lib/sanitize.js";
 import {
   buildAgentProfile,
   handler,
+  sourceFields,
+  sourceText,
   toolResult,
   READ_ANNOTATIONS,
   type ToolDeps,
 } from "./shared.js";
+import { zSourceNote } from "./schemas.js";
 
 const inputShape = {
   agent: z
@@ -53,6 +56,7 @@ const outputShape = {
   card: z.record(z.string(), z.any()),
   conformance: z.literal("unverified-derived"),
   note: z.string(),
+  source: zSourceNote.optional(),
 };
 
 export function registerGetAgentCard(server: McpServer, deps: ToolDeps): void {
@@ -88,9 +92,15 @@ export function registerGetAgentCard(server: McpServer, deps: ToolDeps): void {
         declared.x402
       }, declaredMpp=${declared.mpp}, reputationVerified=${ext.verified} (${safe(
         ext.verificationStatus,
-      )}). Service candidates remain self-declared and are not invokable A2A endpoints.`;
+      )}). Service candidates remain self-declared and are not invokable A2A endpoints.` +
+        sourceText(deps);
 
-      return toolResult(text, { card, conformance: card.conformance, note: NOTE });
+      return toolResult(text, {
+        card,
+        conformance: card.conformance,
+        note: NOTE,
+        ...sourceFields(deps),
+      });
     }),
   );
 }

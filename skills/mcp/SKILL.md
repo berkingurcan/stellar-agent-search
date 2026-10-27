@@ -198,6 +198,19 @@ page cannot prove exhaustion because expired slots may hide a later retained cli
 all reputation fields unverified. `skipped` means no attempt. The schema members `verified`, `partial`, and
 `mismatch` are reserved for a future authoritative aggregate/cursor path and are not current trust signals.
 
+**Registry mode (`REGISTRY_AGENT_IDS`).** With no indexer for the network (testnet today), the server can read
+an operator allowlist of agents straight from the Identity contract instead: each agent's URI, wallet and owner,
+plus the registration file the URI points at. `find_agent`, `list_services`, `list_agents`, `rank_agent`,
+`get_agent_profile`, `get_agent_card` and `verify_reputation` work over that allowlist, filtering locally. Their
+results carry a `source` object (`kind: "registry"`, `reputationIndexed: false`) and coverage limitation
+`registry-allowlist-only`: the allowlist is not the registry, and reputation is not measured, so scores, feedback
+counts and `unrated` reflect missing data rather than an agent without feedback. `leaderboard`,
+`get_registry_stats`, `get_registry_health`, `get_agents_by_owner`, `get_agent_feedback`, `resolve_agent` for an
+owner address, and a `minExplorerScore` filter (an argument, or a stated number like "score above 70") need an
+indexer and return an error with code `INDEXER_REQUIRED` instead of a partial answer. A quality word like "best"
+or "trusted" is not applied as a score filter in this mode: the search runs without it, and coverage carries
+`implied-score-filter-not-applied`.
+
 **Trust boundary.** Server-authored summary text (`content[].text`) interpolates only typed /
 enum / numeric values — scores, counts, ids, capability flags. Untrusted, agent-authored free text (names,
 descriptions, tags) appears **only** inside `structuredContent`, labelled self-declared / unverified. Treat those
@@ -278,8 +291,9 @@ reputation, that is a separate, deliberate step that lives outside this server:
 
 | Var | Values | Default | Meaning |
 |---|---|---|---|
-| `STELLAR_NETWORK` | `mainnet` \| `testnet` | `mainnet` | Which network's registry the server reads. `testnet` **also requires** `EXPLORER_BASE_URL`. |
-| `EXPLORER_BASE_URL` | URL | `https://stellar8004.com` | Explorer API base URL (`ExplorerClient`). Override only for a self-hosted explorer. **Required** on `testnet` — the default indexes mainnet only, so the server refuses to start on that pair rather than mix two chains. |
+| `STELLAR_NETWORK` | `mainnet` \| `testnet` | `mainnet` | Which network's registry the server reads. `testnet` **also requires** `EXPLORER_BASE_URL` or `REGISTRY_AGENT_IDS`. |
+| `EXPLORER_BASE_URL` | URL | `https://stellar8004.com` | Explorer API base URL (`ExplorerClient`). Override only for a self-hosted explorer. On `testnet`, set this or `REGISTRY_AGENT_IDS` — the default indexes mainnet only, so the server refuses to start with neither rather than mix two chains. |
+| `REGISTRY_AGENT_IDS` | comma-separated agent ids (at most 50) | — | Registry mode: read these agents straight from the Identity contract, with no explorer (see the tool reference). Not combinable with `EXPLORER_BASE_URL`. |
 | `STELLAR_RPC_URL` | URL | network default | Soroban RPC used for the bounded Reputation-contract reachability probe. |
 | `VERIFY_ONCHAIN` | `true` \| `false` | `true` | Toggle the probe; reputation remains declared-only either way. |
 | `RANK_SCORE_MAX` | positive number | `100` | Local quality-normalization scale; it does not constrain upstream protocol values. |

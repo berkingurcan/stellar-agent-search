@@ -253,6 +253,8 @@ export type ToolErrorCode =
   | "NOT_FOUND"
   | "BAD_REQUEST"
   | "UPSTREAM_ERROR"
+  /** The tool needs an indexer and the server is reading the registry directly. */
+  | "INDEXER_REQUIRED"
   | "INTERNAL";
 
 export interface ToolErrorBody {

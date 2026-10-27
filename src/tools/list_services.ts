@@ -23,6 +23,8 @@ import {
   handler,
   mapWithConcurrency,
   MAX_QUERY_LENGTH,
+  sourceFields,
+  sourceText,
   toolResult,
   toRankInput,
   zLimit,
@@ -32,7 +34,7 @@ import {
   READ_ANNOTATIONS,
   type ToolDeps,
 } from "./shared.js";
-import { zDiscoveryCoverage, zSelfDeclaredSlot } from "./schemas.js";
+import { zDiscoveryCoverage, zSelfDeclaredSlot, zSourceNote } from "./schemas.js";
 
 const CANDIDATE_PAGE_SIZE = 50;
 
@@ -79,6 +81,7 @@ const outputShape = {
   page: z.number(),
   services: z.array(zServiceRow),
   coverage: zDiscoveryCoverage,
+  source: zSourceNote.optional(),
 };
 
 export function registerListServices(server: McpServer, deps: ToolDeps): void {
@@ -125,7 +128,7 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
         10,
         Math.ceil((args.page * args.limit) / CANDIDATE_PAGE_SIZE) + 1,
       );
-      const discovery = await deps.explorer.findAgentsWithCoverage(args.search ?? "", {
+      const discovery = await deps.source.findAgentsWithCoverage(args.search ?? "", {
         filters,
         pages: neededPages,
         match: "any",
@@ -155,7 +158,7 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
         head,
         deps.policy?.maxExplorerConcurrency ?? 6,
         ({ a }) =>
-          deps.explorer
+          deps.source
             .getAgent(a.id)
             .then((r) => r.data)
             .catch((error: unknown) => {
@@ -212,7 +215,8 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
 
       const text = serverText`${rows.length} self-declared service candidate(s) across ${agentsWithServices} agent(s) on ${safe(
         deps.config.network,
-      )} (page ${args.page}). Liveness, ownership, protocol conformance, and payment behavior were not verified.`;
+      )} (page ${args.page}). Liveness, ownership, protocol conformance, and payment behavior were not verified.` +
+        sourceText(deps);
 
       // The list response and each detail hydration are independent v1 reads
       // with no shared revision/cursor. Even a one-page list cannot make the
@@ -239,6 +243,7 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
           detailsHydrated: head.length,
           ...(limitations.length > 0 ? { limitations: [...new Set(limitations)] } : {}),
         },
+        ...sourceFields(deps),
       });
     }),
   );

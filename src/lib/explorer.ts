@@ -35,6 +35,7 @@ import { classifyError, ExplorerScopeError, UpstreamDataError } from "./errors.j
 import { MAX_AGENT_ID, validWalletOrNull } from "./identifier.js";
 import { log, type Logger } from "./logger.js";
 import { normalizeSearchText, unicodeTokens } from "./nlparse.js";
+import type { AgentListPage, IndexerSource, ListAgentsParams } from "./source.js";
 
 // ---------------------------------------------------------------------------
 // TTL cache + single-flight (shared with reputation.ts)
@@ -143,6 +144,16 @@ export type GetAgentsParams = SdkGetAgentsParams & { mpp?: boolean };
 export type GetFeedbackParams = Parameters<ExplorerClient["getFeedback"]>[1];
 /** search() parameters. */
 export type SearchParams = Parameters<ExplorerClient["search"]>[1];
+
+/** findAgentsWithCoverage() options (shared by every AgentSource). */
+export interface FindAgentsOptions {
+  /** Capability filters (x402/mpp/hasServices/trust/minScore) plus the page size. */
+  filters?: Omit<GetAgentsParams, "search" | "page">;
+  /** "all" (default) requires every query token; "any" requires one. */
+  match?: "all" | "any";
+  /** How many pages to fetch and concatenate (default 1; sources may ignore it). */
+  pages?: number;
+}
 
 /**
  * The live explorer already returns `agentsWithMpp`, while the pinned 0.0.11
@@ -361,7 +372,8 @@ export interface ExplorerServiceOptions {
   maxCacheEntries?: number;
 }
 
-export class ExplorerService {
+export class ExplorerService implements IndexerSource {
+  readonly kind = "explorer" as const;
   private readonly client: ExplorerClient;
   private readonly cache: TtlCache;
   private readonly logger: Logger;
@@ -378,9 +390,12 @@ export class ExplorerService {
       });
     this.expectedNetwork = cfg.network;
     this.expectedIdentity = cfg.stellar.contracts.identity;
+    if (!opts.client && cfg.explorerBaseUrl === null) {
+      throw new Error("ExplorerService needs an explorer base URL; this config is in registry mode");
+    }
     this.client =
       opts.client ??
-      new ExplorerClient(cfg.explorerBaseUrl, {
+      new ExplorerClient(cfg.explorerBaseUrl!, {
         timeout: opts.timeout ?? 10_000,
         retries: opts.retries ?? 3,
         ...(opts.fetch ? { fetch: opts.fetch } : {}),
@@ -523,6 +538,39 @@ export class ExplorerService {
     );
   }
 
+  /**
+   * One explorer page in the explorer's order. v1 has no revision token, so the
+   * page is never a snapshot, and an earlier page is not re-read.
+   */
+  async listAgents(params: ListAgentsParams): Promise<AgentListPage> {
+    const response = await this.getAgents(params);
+    const agents = response.data ?? [];
+    const pagination = response.meta?.pagination;
+    const hasMore = typeof pagination?.hasMore === "boolean" ? pagination.hasMore : undefined;
+    return {
+      agents,
+      pagination: {
+        page: pagination?.page ?? params.page,
+        limit: pagination?.limit ?? params.limit,
+        total: Number.isSafeInteger(pagination?.total) ? pagination!.total : null,
+        hasMore: hasMore ?? null,
+      },
+      coverage: {
+        coverageComplete: false,
+        paginationExhausted: hasMore === false,
+        snapshotConsistent: false,
+        pagesScanned: 1,
+        recordsScanned: agents.length,
+        ...(hasMore !== undefined ? { hasMore } : {}),
+        limitations: [
+          V1_UNVERSIONED_PAGINATION_LIMITATION,
+          ...(params.page > 1 ? ["prior-pages-not-scanned"] : []),
+          ...(hasMore === undefined ? ["pagination-metadata-unavailable"] : []),
+        ],
+      },
+    };
+  }
+
   // --- discovery primitive ---------------------------------------------------
 
   /**
@@ -540,11 +588,7 @@ export class ExplorerService {
    */
   async findAgentsWithCoverage(
     query: string,
-    opts: {
-      filters?: Omit<NonNullable<GetAgentsParams>, "search" | "page">;
-      match?: "all" | "any";
-      pages?: number;
-    } = {},
+    opts: FindAgentsOptions = {},
   ): Promise<FindAgentsResult> {
     const filters = opts.filters ?? {};
     const pages = Math.max(1, Math.min(opts.pages ?? 1, 10));
@@ -611,10 +655,8 @@ export class ExplorerService {
     for (const a of collected) if (!byId.has(a.id)) byId.set(a.id, a);
     const agents = [...byId.values()];
 
-    if (!q) return { agents, coverage };
-
-    const tokens = tokenize(q);
-    if (tokens.length === 0) {
+    const matched = matchAgentsByQuery(agents, q, opts.match ?? "all");
+    if (matched === null) {
       return {
         agents: [],
         coverage: {
@@ -624,45 +666,11 @@ export class ExplorerService {
         },
       };
     }
-    const mode = opts.match ?? "all";
-    // Keep 2-char stems (ai/ml/os/db/3d/io): dropping them made match:"all" stop
-    // REQUIRING those tokens, so "ai agent" wrongly matched "Payment Agent".
-    // tokenize() already floors at length 2, and stem() leaves short tokens as-is.
-    const stems = tokens.map(stem).filter((s) => s.length >= 2);
-    const qLower = normalizeSearchText(q);
-
-    const matchesAgent = (a: AgentResponse, requireAll: boolean): boolean => {
-      const svcText = (a.services ?? [])
-        .map((s) => `${s?.name ?? ""} ${s?.endpoint ?? ""}`)
-        .join(" ");
-      const haystack = normalizeSearchText(
-        `${a.name ?? ""} ${a.description ?? ""} ${svcText}`,
-      );
-      // Whole-query substring is always a match.
-      if (haystack.includes(qLower)) return true;
-      if (stems.length === 0) return false;
-      // Stem-aware token match so "scraper"/"scraping"/"scrapes" (stem "scrap")
-      // all hit the "Scrapper"/"Scrapes" agent, not just the literal spelling.
-      const hit = (s: string) => haystack.includes(s);
-      return requireAll ? stems.every(hit) : stems.some(hit);
-    };
-
-    // Strict (all tokens) first; if that empties the set, relax to any-token so a
-    // multi-word query still surfaces the closest agents rather than nothing.
-    const strict = agents.filter((a) => matchesAgent(a, mode === "all"));
-    if (strict.length > 0 || mode === "any") return { agents: strict, coverage };
-    return { agents: agents.filter((a) => matchesAgent(a, false)), coverage };
+    return { agents: matched, coverage };
   }
 
   /** Backward-compatible discovery helper for callers that only need rows. */
-  async findAgents(
-    query: string,
-    opts: {
-      filters?: Omit<NonNullable<GetAgentsParams>, "search" | "page">;
-      match?: "all" | "any";
-      pages?: number;
-    } = {},
-  ): Promise<AgentResponse[]> {
+  async findAgents(query: string, opts: FindAgentsOptions = {}): Promise<AgentResponse[]> {
     return (await this.findAgentsWithCoverage(query, opts)).agents;
   }
 }
@@ -680,11 +688,57 @@ export interface DiscoveryCoverage {
   hasMore?: boolean;
   /** Known upstream conditions that prevent a completeness claim. */
   limitations?: string[];
+  /** Registry mode: allowlisted agents that could not be read, so were not searched. */
+  unreadableAgentIds?: number[];
 }
 
 export interface FindAgentsResult {
   agents: AgentResponse[];
   coverage: DiscoveryCoverage;
+}
+
+/**
+ * Client-side text match over name, description and service name/endpoint.
+ * An empty query keeps every row. Returns null when the query has text but no
+ * search tokens, so the caller can say so instead of returning everything.
+ */
+export function matchAgentsByQuery(
+  agents: AgentResponse[],
+  query: string,
+  mode: "all" | "any",
+): AgentResponse[] | null {
+  const q = query.trim();
+  if (!q) return agents;
+
+  const tokens = tokenize(q);
+  if (tokens.length === 0) return null;
+  // Keep 2-char stems (ai/ml/os/db/3d/io): dropping them made match:"all" stop
+  // REQUIRING those tokens, so "ai agent" wrongly matched "Payment Agent".
+  // tokenize() already floors at length 2, and stem() leaves short tokens as-is.
+  const stems = tokens.map(stem).filter((s) => s.length >= 2);
+  const qLower = normalizeSearchText(q);
+
+  const matchesAgent = (a: AgentResponse, requireAll: boolean): boolean => {
+    const svcText = (a.services ?? [])
+      .map((s) => `${s?.name ?? ""} ${s?.endpoint ?? ""}`)
+      .join(" ");
+    const haystack = normalizeSearchText(
+      `${a.name ?? ""} ${a.description ?? ""} ${svcText}`,
+    );
+    // Whole-query substring is always a match.
+    if (haystack.includes(qLower)) return true;
+    if (stems.length === 0) return false;
+    // Stem-aware token match so "scraper"/"scraping"/"scrapes" (stem "scrap")
+    // all hit the "Scrapper"/"Scrapes" agent, not just the literal spelling.
+    const hit = (s: string) => haystack.includes(s);
+    return requireAll ? stems.every(hit) : stems.some(hit);
+  };
+
+  // Strict (all tokens) first; if that empties the set, relax to any-token so a
+  // multi-word query still surfaces the closest agents rather than nothing.
+  const strict = agents.filter((a) => matchesAgent(a, mode === "all"));
+  if (strict.length > 0 || mode === "any") return strict;
+  return agents.filter((a) => matchesAgent(a, false));
 }
 
 /** Lowercase word tokens (length ≥ 2) for client-side substring filtering. */

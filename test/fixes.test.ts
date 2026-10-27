@@ -16,7 +16,7 @@ import { MAX_AGENT_ID, validWalletOrNull, resolveAgentId } from "../src/lib/iden
 import { deriveCapabilities } from "../src/tools/shared.js";
 import { toAgentCard } from "../src/lib/agentcard.js";
 import type { AgentProfile } from "../src/types.js";
-import { loadConfig } from "../src/config.js";
+import { ConfigError, loadConfig } from "../src/config.js";
 import { log } from "../src/lib/logger.js";
 
 // A real mainnet-shaped G-address (owner of the Scrapper agent, CONTEXT §7).
@@ -234,19 +234,25 @@ describe("server capabilities: declare only what we exercise", () => {
 describe("testnet + mainnet-only explorer is refused, not silently mixed (config)", () => {
   // The default explorer indexes mainnet only. Pairing it with STELLAR_NETWORK=testnet
   // would serve mainnet registry rows alongside testnet on-chain reads — two chains
-  // described as one. There is no testnet indexer to fall back to, so the launch is
-  // refused rather than warned about: degrade closed, never fake.
-  it("refuses to start on testnet without an explicit EXPLORER_BASE_URL", () => {
+  // described as one. Testnet therefore needs a source on its own chain: an explicit
+  // explorer, or registry mode (REGISTRY_AGENT_IDS: the testnet Identity contract
+  // read directly). With neither, the launch is refused: degrade closed, never fake.
+  it("refuses to start on testnet with neither EXPLORER_BASE_URL nor REGISTRY_AGENT_IDS", () => {
     expect(() => loadConfig({ STELLAR_NETWORK: "testnet" } as NodeJS.ProcessEnv)).toThrow(
-      /testnet requires an explicit EXPLORER_BASE_URL/i,
+      /testnet requires an explicit EXPLORER_BASE_URL or REGISTRY_AGENT_IDS/i,
     );
   });
 
-  it("treats a blank or whitespace EXPLORER_BASE_URL as absent", () => {
+  it("treats a blank or whitespace EXPLORER_BASE_URL or REGISTRY_AGENT_IDS as absent", () => {
     for (const blank of ["", "   "]) {
-      expect(() =>
-        loadConfig({ STELLAR_NETWORK: "testnet", EXPLORER_BASE_URL: blank } as NodeJS.ProcessEnv),
-      ).toThrow(/testnet requires an explicit EXPLORER_BASE_URL/i);
+      for (const env of [
+        { STELLAR_NETWORK: "testnet", EXPLORER_BASE_URL: blank },
+        { STELLAR_NETWORK: "testnet", REGISTRY_AGENT_IDS: blank },
+      ]) {
+        expect(() => loadConfig(env as NodeJS.ProcessEnv), JSON.stringify(env)).toThrow(
+          /testnet requires an explicit EXPLORER_BASE_URL or REGISTRY_AGENT_IDS/i,
+        );
+      }
     }
   });
 
@@ -267,7 +273,37 @@ describe("testnet + mainnet-only explorer is refused, not silently mixed (config
       expect(cfg.explorerBaseUrl, JSON.stringify(env)).toBe(
         env.EXPLORER_BASE_URL ?? "https://stellar8004.com",
       );
+      expect(cfg.registryAgentIds, JSON.stringify(env)).toBeNull();
     }
+  });
+
+  it("starts testnet in registry mode from an allowlist, with no explorer at all", () => {
+    const cfg = loadConfig({ STELLAR_NETWORK: "testnet", REGISTRY_AGENT_IDS: " 12, 40 12\t7 " });
+    expect(cfg.network).toBe("testnet");
+    expect(cfg.registryAgentIds).toEqual([12, 40, 7]);
+    // Not the mainnet default: nothing in registry mode can reach an explorer.
+    expect(cfg.explorerBaseUrl).toBeNull();
+    // The same switch works on mainnet.
+    expect(loadConfig({ STELLAR_NETWORK: "mainnet", REGISTRY_AGENT_IDS: "3" }).explorerBaseUrl).toBeNull();
+  });
+
+  it("refuses both sources at once, and malformed or oversized allowlists", () => {
+    expect(() =>
+      loadConfig({
+        STELLAR_NETWORK: "testnet",
+        EXPLORER_BASE_URL: "https://testnet.example.com",
+        REGISTRY_AGENT_IDS: "12",
+      }),
+    ).toThrow(/EXPLORER_BASE_URL or REGISTRY_AGENT_IDS, not both/);
+    for (const bad of ["12,abc", "-1", "1.5", "4294967296"]) {
+      expect(() => loadConfig({ STELLAR_NETWORK: "testnet", REGISTRY_AGENT_IDS: bad }), bad).toThrow(
+        ConfigError,
+      );
+    }
+    const tooMany = Array.from({ length: 51 }, (_, i) => i).join(",");
+    expect(() => loadConfig({ STELLAR_NETWORK: "testnet", REGISTRY_AGENT_IDS: tooMany })).toThrow(
+      /at most 50/,
+    );
   });
 
   it("carries the optional simulation source through the explicit environment map", () => {

@@ -21,7 +21,10 @@ MCP client (Claude Code / Cursor / Windsurf / Cline / VS Code)   +   human termi
         │
         └─ buildServer(config) → Tools · Resources (stellar8004://…) · Prompts
                  │
-                 ├─ ExplorerService ──HTTPS──► stellar8004 public API [PRIMARY DATA]
+                 ├─ AgentSource (one of)
+                 │    ├─ ExplorerService ──HTTPS──► stellar8004 public API [PRIMARY DATA]
+                 │    └─ RegistryService ──► Soroban RPC ──► Identity contract   [registry mode]
+                 │                       └─HTTPS──► registration files (allowlisted agents only)
                  └─ ReputationVerifier ──► Soroban RPC ──► Reputation contract
 
 REMOTE — implemented, not deployed
@@ -52,7 +55,7 @@ can report reachability but does not promote any reputation field. Missing or in
 | `find` / `rank` / `profile` / `services` / `doctor` | human CLI subcommand |
 | `--help` / `--version` | help / version |
 
-Both modes go through the **same** service layer (`ExplorerService` + `ReputationVerifier` + the ranking
+Both modes go through the **same** service layer (the `AgentSource` + `ReputationVerifier` + the ranking
 engine), so the CLI is a thin formatter over the exact logic the tools call — no duplicated discovery or
 ranking. `serve` remains an alias for the local stdio server; it does not open an HTTP listener. Streamable
 HTTP lives in `worker/` as a separately built and deployed Cloudflare adapter.
@@ -168,6 +171,33 @@ manufacturing a partial/mismatch verdict.
   A server-side revision-bound cursor discovery API remains the production-scale fix.
 - The service layer uses a TTL cache + single-flight and the SDK's 429/backoff handling.
 
+## Registry mode (`lib/registry-source.ts`)
+
+Tools read through the `AgentSource` interface (`lib/source.ts`), not a concrete class. `ExplorerService` is one
+implementation. `RegistryService` is the other: with `REGISTRY_AGENT_IDS` set (and no `EXPLORER_BASE_URL`), it
+reads `agent_uri`, `get_agent_wallet` and `find_owner` for each allowlisted agent, on the same fetch-only
+simulation transport the Reputation reader uses (`lib/soroban.ts`). It then decodes the registration file into
+the explorer's row shape, so every adapter and the `AgentProfile` join run unchanged.
+
+- Feedback, stats, health and owner lookups live on `IndexerReads`, which only the explorer branch of the
+  union carries. Tools reach them through `requireIndexer`, which throws `IndexerRequiredError`
+  (`INDEXER_REQUIRED`) in registry mode. The type system stops a tool from calling one without that check.
+- The contract cannot be enumerated, so lists and searches cover the allowlist only (`registry-allowlist-only`),
+  and agents that fail to read are named in `unreadableAgentIds`. If nothing could be read because of an outage,
+  the request fails rather than returning an empty list.
+- There is no indexed reputation. Registry-mode results attach `source: { kind: "registry",
+  reputationIndexed: false }`, and summary text does not print the zero counts as if they had been measured.
+- A `minExplorerScore` given as an argument or as a number in the query is refused. One the parser inferred
+  from a quality word ("best", "trusted") is a ranking preference, not a stated filter, so `queryMinScore`
+  (`tools/shared.ts`) drops it and the result carries `implied-score-filter-not-applied`. Refusing it would fail
+  the whole search on the most common phrasings.
+- Registration files that predate `services` and list `endpoints: [{ type, url }]` are read the way the SDK's
+  edit path converts them.
+- Registration files are fetched only for allowlisted agents (never for an id a caller supplies), with no
+  redirects, a 10 s timeout and a 64 KiB cap. Schemes other than `data:` and `https:` fail closed.
+- The Worker never enters registry mode: it forwards a closed set of variables, and `REGISTRY_AGENT_IDS` is not
+  one of them.
+
 The scale fix belongs upstream, not in another database here. The proposed cursor-based discovery contract,
 freshness metadata, stable ordering, and ownership boundary are in
 **[stellar8004-integration.md](stellar8004-integration.md)** and
@@ -279,6 +309,8 @@ contract. Zod input-validation errors are handled by the MCP SDK before the hand
 | `NotFoundError` | `NOT_FOUND` | — |
 | `ValidationError` | `BAD_REQUEST` | — |
 | `ApiError` | `UPSTREAM_ERROR` | `detail: status=…` |
+| `RegistryReadError` (registry mode) | `UPSTREAM_ERROR` | `detail: registry read failed` |
+| `IndexerRequiredError` (registry mode) | `INDEXER_REQUIRED` | `detail: registry mode` |
 | other `Error` | `INTERNAL` | — |
 
 ## Trust model (summary)
@@ -303,7 +335,8 @@ solution.
 ## Multi-chain readiness
 
 Identifiers carry a CAIP-2 namespace and the data layer is reached only through a service abstraction
-(`ExplorerService` today), so an EVM-8004 adapter would be **additive, not a rewrite**. v0.1 ships
+(`AgentSource`, implemented by `ExplorerService` and the registry-mode `RegistryService`), so an EVM-8004
+adapter would be **additive, not a rewrite**. v0.1 ships
 **Stellar-only**; the tool schemas are kept chain-aware so a future adapter is non-breaking.
 
 ## Delivery & spec stance

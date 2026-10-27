@@ -12,10 +12,13 @@ startCommand:
         type: string
         enum: ["mainnet", "testnet"]
         default: "mainnet"
-        description: "Stellar network to target. 'testnet' also requires EXPLORER_BASE_URL."
+        description: "Stellar network to target. 'testnet' also requires EXPLORER_BASE_URL or REGISTRY_AGENT_IDS."
       EXPLORER_BASE_URL:
         type: string
-        description: "Override the stellar-8004 explorer API base URL. Required when STELLAR_NETWORK is 'testnet' — the default explorer indexes mainnet only, and the server refuses to start on the mismatched pair."
+        description: "Override the stellar-8004 explorer API base URL. On 'testnet', set this or REGISTRY_AGENT_IDS — the default explorer indexes mainnet only, and the server refuses to start with neither."
+      REGISTRY_AGENT_IDS:
+        type: string
+        description: "Registry mode: comma-separated agent ids read straight from the Identity contract, with no explorer. Not combinable with EXPLORER_BASE_URL."
       STELLAR_RPC_URL:
         type: string
         description: "Override the Soroban RPC URL used for the bounded Reputation-contract probe."
@@ -32,6 +35,7 @@ startCommand:
       env: {
         STELLAR_NETWORK: config.STELLAR_NETWORK || "mainnet",
         ...(config.EXPLORER_BASE_URL ? { EXPLORER_BASE_URL: config.EXPLORER_BASE_URL } : {}),
+        ...(config.REGISTRY_AGENT_IDS ? { REGISTRY_AGENT_IDS: config.REGISTRY_AGENT_IDS } : {}),
         ...(config.STELLAR_RPC_URL ? { STELLAR_RPC_URL: config.STELLAR_RPC_URL } : {}),
         ...(config.VERIFY_ONCHAIN ? { VERIFY_ONCHAIN: config.VERIFY_ONCHAIN } : {})
       }

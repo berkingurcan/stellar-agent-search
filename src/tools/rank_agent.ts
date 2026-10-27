@@ -22,15 +22,19 @@ import {
   handler,
   mapWithConcurrency,
   MAX_QUERY_LENGTH,
+  queryMinScore,
   rankAndVerify,
+  sourceFields,
+  sourceText,
   summarizeRanked,
   toolResult,
   zLimit,
   zSort,
   READ_ANNOTATIONS,
+  withImpliedScoreDropped,
   type ToolDeps,
 } from "./shared.js";
-import { zDiscoveryCoverage, zRankedAgent } from "./schemas.js";
+import { zDiscoveryCoverage, zRankedAgent, zSourceNote } from "./schemas.js";
 import { MAX_AGENT_ID } from "../lib/identifier.js";
 
 const CANDIDATE_PAGE_SIZE = 50;
@@ -80,6 +84,7 @@ const outputShape = {
   // Only query-based ranking scans explorer pages. Explicit-id ranking has no
   // meaningful registry-wide coverage claim, so this field is absent there.
   coverage: zDiscoveryCoverage.optional(),
+  source: zSourceNote.optional(),
 };
 
 async function gatherByIds(deps: ToolDeps, ids: number[]): Promise<AgentResponse[]> {
@@ -88,7 +93,7 @@ async function gatherByIds(deps: ToolDeps, ids: number[]): Promise<AgentResponse
     deps.policy?.maxExplorerConcurrency ?? 6,
     async (id) => {
       try {
-        return (await deps.explorer.getAgent(id)).data;
+        return (await deps.source.getAgent(id)).data;
       } catch (err) {
         if (err instanceof NotFoundError) return null;
         throw err;
@@ -116,15 +121,17 @@ async function gatherByQuery(deps: ToolDeps, query: string): Promise<FindAgentsR
   if (parsed.filters.mpp !== undefined) filters.mpp = parsed.filters.mpp;
   if (parsed.filters.hasServices !== undefined) filters.hasServices = parsed.filters.hasServices;
   if (parsed.filters.trust !== undefined) filters.trust = parsed.filters.trust;
-  if (parsed.filters.minExplorerScore !== undefined) {
-    filters.minScore = parsed.filters.minExplorerScore;
-  }
+  const score = queryMinScore(deps.source, parsed);
+  if (score.minExplorerScore !== undefined) filters.minScore = score.minExplorerScore;
 
-  return deps.explorer.findAgentsWithCoverage(parsed.keywords.join(" "), {
+  const discovery = await deps.source.findAgentsWithCoverage(parsed.keywords.join(" "), {
     filters,
     pages: 2,
     match: "any",
   });
+  return score.dropped
+    ? { ...discovery, coverage: withImpliedScoreDropped(discovery.coverage) }
+    : discovery;
 }
 
 export function registerRankAgent(server: McpServer, deps: ToolDeps): void {
@@ -187,7 +194,7 @@ export function registerRankAgent(server: McpServer, deps: ToolDeps): void {
         includeBreakdown: true,
       });
 
-      return toolResult(summarizeRanked(rows), {
+      return toolResult(summarizeRanked(rows) + sourceText(deps, coverage), {
         rankVersion: RANKING.VERSION,
         evidenceWeights: {
           volume: RANKING.EVIDENCE_VOLUME_WEIGHT,
@@ -196,6 +203,7 @@ export function registerRankAgent(server: McpServer, deps: ToolDeps): void {
         count: rows.length,
         agents: rows,
         ...(coverage ? { coverage } : {}),
+        ...sourceFields(deps),
       });
     }),
   );

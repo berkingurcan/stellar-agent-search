@@ -11,6 +11,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { safe, serverText } from "../lib/sanitize.js";
 import { buildRegistryHealthView, buildRegistryStatsView } from "../lib/registry-stats.js";
+import { requireIndexer } from "../lib/source.js";
 import { handler, toolResult, READ_ANNOTATIONS, type ToolDeps } from "./shared.js";
 
 // ---------------------------------------------------------------------------
@@ -66,7 +67,7 @@ export function registerGetRegistryStats(server: McpServer, deps: ToolDeps): voi
       annotations: { title: "Get Registry Stats", ...READ_ANNOTATIONS },
     },
     handler<Record<string, never>>(async () => {
-      const s = (await deps.explorer.getStats()).data;
+      const s = (await requireIndexer(deps.source, "Registry stats").getStats()).data;
       const structured = buildRegistryStatsView(s, deps.config.network);
       const mppSummary =
         structured.agentsWithMpp === null ? safe("not returned") : structured.agentsWithMpp;
@@ -111,7 +112,7 @@ export function registerGetRegistryHealth(server: McpServer, deps: ToolDeps): vo
       annotations: { title: "Get Registry Health", ...READ_ANNOTATIONS },
     },
     handler<Record<string, never>>(async () => {
-      const h = (await deps.explorer.health()).data;
+      const h = (await requireIndexer(deps.source, "Indexer health").health()).data;
       const structured = buildRegistryHealthView(h, deps.config.network);
       const text = serverText`Registry indexers on ${safe(structured.network)}: identity ledger ${
         structured.indexer.identity.lastLedger

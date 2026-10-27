@@ -123,6 +123,16 @@ export const zInterpretedQuery = z
   })
   .passthrough();
 
+/** Registry-mode disclosure (lib/source.ts RegistrySourceNote); absent in explorer mode. */
+export const zSourceNote = z
+  .object({
+    kind: z.literal("registry"),
+    allowlistSize: z.number().int().nonnegative(),
+    reputationIndexed: z.literal(false),
+    note: z.string(),
+  })
+  .passthrough();
+
 /** Bounded-discovery coverage; `hasMore` is omitted when the API cannot derive it. */
 export const zDiscoveryCoverage = z
   .object({

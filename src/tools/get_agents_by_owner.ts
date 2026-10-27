@@ -9,6 +9,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { ValidationError } from "@trionlabs/stellar8004";
 import { isValidOwnerAddress } from "../lib/identifier.js";
 import { V1_UNVERSIONED_PAGINATION_LIMITATION } from "../lib/explorer.js";
+import { requireIndexer } from "../lib/source.js";
 import {
   handler,
   rankAndVerify,
@@ -68,7 +69,7 @@ export function registerGetAgentsByOwner(server: McpServer, deps: ToolDeps): voi
         throw new ValidationError("`owner` must be a checksum-valid Stellar G-address.");
       }
 
-      const response = await deps.explorer.getAgentsByOwner(owner);
+      const response = await requireIndexer(deps.source, "Owner lookup").getAgentsByOwner(owner);
       const agents = response.data ?? [];
       const rows = await rankAndVerify(deps, agents, {
         sortBy: "score",

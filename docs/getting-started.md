@@ -157,8 +157,9 @@ also raise `MCP_TIMEOUT` for the client.
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `STELLAR_NETWORK` | `mainnet` | `mainnet` or `testnet` (`testnet` also requires `EXPLORER_BASE_URL`) |
+| `STELLAR_NETWORK` | `mainnet` | `mainnet` or `testnet` (`testnet` also requires `EXPLORER_BASE_URL` or `REGISTRY_AGENT_IDS`) |
 | `EXPLORER_BASE_URL` | `https://stellar8004.com` | Explorer HTTP API base — **indexes mainnet only** |
+| `REGISTRY_AGENT_IDS` | — | Registry mode: comma-separated agent ids read straight from the Identity contract, no explorer (see the README). Not combinable with `EXPLORER_BASE_URL` |
 | `STELLAR_RPC_URL` | `https://mainnet.sorobanrpc.com` | Soroban RPC for the bounded Reputation-contract reachability probe |
 | `VERIFY_ONCHAIN` | `true` | `false` = skip the probe; reputation remains declared-only either way |
 | `RANK_SCORE_MAX` | `100` | Fixed v1 compatibility assertion; any other value fails startup |
