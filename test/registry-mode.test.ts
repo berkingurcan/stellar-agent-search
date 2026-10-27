@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { StrKey } from "@stellar/stellar-sdk";
 import { buildMetadataJson, NotFoundError, toDataUri } from "@trionlabs/stellar8004";
+import { parseFlags, runCli } from "../src/cli/index.js";
 import { loadConfig, type Config } from "../src/config.js";
 import { classifyError, IndexerRequiredError, RegistryReadError } from "../src/lib/errors.js";
 import { ExplorerService } from "../src/lib/explorer.js";
@@ -129,6 +130,33 @@ describe("RegistryService reads the Identity contract and decodes the registrati
     expect(data.scores).toBeUndefined();
     expect(data.feedbackCount).toBeUndefined();
     expect(data.createdAt).toBeUndefined();
+  });
+
+  it("reads services from an older registration's endpoints list, as the SDK's edit path does", async () => {
+    const legacy = {
+      name: "Legacy",
+      endpoints: [
+        { type: "a2a", url: "https://legacy.example/a2a", version: "0.3" },
+        { name: "mcp", endpoint: "https://legacy.example/mcp" },
+        { url: "https://legacy.example/bare" },
+        { type: "broken" },
+        "not an entry",
+      ],
+    };
+    const uri = `data:application/json,${encodeURIComponent(JSON.stringify(legacy))}`;
+    const { data } = await registry({ agents: { 7: { uri, owner: OWNER } }, ids: "7" }).getAgent(7);
+    expect(data.services).toEqual([
+      { name: "a2a", endpoint: "https://legacy.example/a2a", version: "0.3" },
+      { name: "mcp", endpoint: "https://legacy.example/mcp" },
+      { name: "unknown", endpoint: "https://legacy.example/bare" },
+    ]);
+    expect(data.hasServices).toBe(true);
+
+    // `services` wins when both are present.
+    const both = { ...legacy, services: [{ name: "web", endpoint: "https://legacy.example" }] };
+    const bothUri = `data:application/json,${encodeURIComponent(JSON.stringify(both))}`;
+    const read = await registry({ agents: { 7: { uri: bothUri, owner: OWNER } }, ids: "7" }).getAgent(7);
+    expect(read.data.services).toEqual([{ name: "web", endpoint: "https://legacy.example" }]);
   });
 
   it("reads a percent-encoded data: URI", async () => {
@@ -380,11 +408,42 @@ describe("tools in registry mode", () => {
     expect(client.getInstructions()).toMatch(/REGISTRY MODE: this server has no explorer/);
   });
 
-  it("refuses a reputation requirement it cannot evaluate", async () => {
+  it("searches without a score implied by a word like 'best' or 'trusted', and says so", async () => {
     const client = await connect();
-    const result = await call(client, "find_agent", { query: "a scraper with a good reputation" });
-    expect(result.isError).toBe(true);
-    expect(JSON.parse(textOf(result))).toMatchObject({ code: "INDEXER_REQUIRED" });
+    for (const query of ["best scraper", "a trusted scraper", "a scraper with a good reputation"]) {
+      const result = await call(client, "find_agent", { query });
+      expect(result.isError, query).toBeFalsy();
+      expect(result.structuredContent.agents.map((a: any) => a.id)).toEqual([8]);
+      expect(result.structuredContent.interpretedQuery.filters.minExplorerScore).toBeUndefined();
+      expect(result.structuredContent.coverage.limitations).toContain("implied-score-filter-not-applied");
+      expect(textOf(result)).toMatch(/implies a minimum score, which registry mode cannot apply/);
+    }
+
+    const ranked = await call(client, "rank_agent", { query: "best scraper", verify: false });
+    expect(ranked.isError).toBeFalsy();
+    expect(ranked.structuredContent.agents.map((a: any) => a.id)).toEqual([8]);
+    expect(ranked.structuredContent.coverage.limitations).toContain("implied-score-filter-not-applied");
+    expect(textOf(ranked)).toMatch(/implies a minimum score/);
+
+    // A query with no quality word carries no such note.
+    const plain = await call(client, "find_agent", { query: "a scraper" });
+    expect(plain.structuredContent.coverage.limitations).not.toContain("implied-score-filter-not-applied");
+    expect(textOf(plain)).not.toMatch(/implies a minimum score/);
+  });
+
+  it("still refuses a score threshold the caller stated", async () => {
+    const client = await connect();
+    for (const args of [
+      { query: "a scraper", minExplorerScore: 70 },
+      { query: "best scraper", minExplorerScore: 70 },
+      { query: "a scraper with score above 70" },
+    ]) {
+      const result = await call(client, "find_agent", args);
+      expect(result.isError, JSON.stringify(args)).toBe(true);
+      expect(JSON.parse(textOf(result))).toMatchObject({ code: "INDEXER_REQUIRED" });
+    }
+    const ranked = await call(client, "rank_agent", { query: "scrapers rated 80", verify: false });
+    expect(JSON.parse(textOf(ranked))).toMatchObject({ code: "INDEXER_REQUIRED" });
   });
 
   it("get_agent_profile does not print unmeasured counts and marks feedback as needing an indexer", async () => {
@@ -463,6 +522,63 @@ describe("tools in registry mode", () => {
 });
 
 /** Keep the fixture honest: agent 7's registration is what provider-kit writes. */
+describe.sequential("CLI in registry mode", () => {
+  function captureStdout(): () => string {
+    let stdout = "";
+    vi.spyOn(process.stdout, "write").mockImplementation(((chunk: unknown) => {
+      stdout += String(chunk);
+      return true;
+    }) as typeof process.stdout.write);
+    vi.spyOn(process.stderr, "write").mockImplementation((() => true) as typeof process.stderr.write);
+    return () => stdout;
+  }
+
+  function cliDeps(): ToolDeps {
+    const config = registryConfig();
+    return { config, source: registry(), verifier: new ReputationVerifier(config) };
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("find drops a score implied by 'best' and says so", async () => {
+    const stdout = captureStdout();
+    const code = await runCli(parseFlags(["find", "best", "scraper"]), "test", cliDeps());
+    expect(code).toBe(0);
+    expect(stdout()).toMatch(/1 agent\(s\) for "best scraper"/);
+    expect(stdout()).toMatch(/implies a minimum score, which registry mode cannot apply/);
+  });
+
+  it("find still refuses an explicit --min-explorer-score", async () => {
+    captureStdout();
+    const code = await runCli(
+      parseFlags(["find", "scraper", "--min-explorer-score", "70"]),
+      "test",
+      cliDeps(),
+    );
+    expect(code).not.toBe(0);
+  });
+
+  it("doctor does not list leaderboard as available", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { status: "healthy" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    const stdout = captureStdout();
+    await runCli(parseFlags(["doctor", "--json"]), "test", cliDeps());
+    const tools = JSON.parse(stdout()).checks.find((check: { name: string }) => check.name === "tools");
+    expect(tools.detail).toMatch(/leaderboard, registry stats, owner lookups and feedback history need an indexer/);
+    expect(tools.detail).not.toMatch(/\+ list_agents, leaderboard/);
+  });
+});
+
 describe("fixture", () => {
   it("is the ERC-8004 registration-v1 shape with the manifest service entry", () => {
     expect(PILOT_REGISTRATION).toMatchObject({

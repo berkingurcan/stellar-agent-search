@@ -23,8 +23,10 @@ import type { Config } from "../config.js";
 import {
   ExplorerService,
   V1_UNVERSIONED_PAGINATION_LIMITATION,
+  type DiscoveryCoverage,
   type ExplorerServiceOptions,
 } from "../lib/explorer.js";
+import type { ParsedQuery } from "../lib/nlparse.js";
 import { RegistryService, type RegistryServiceOptions } from "../lib/registry-source.js";
 import { requireIndexer, type AgentSource, type RegistrySourceNote } from "../lib/source.js";
 import { ReputationVerifier, type ReputationVerifierOptions } from "../lib/reputation.js";
@@ -120,11 +122,46 @@ export function sourceFields(deps: ToolDeps): { source?: RegistrySourceNote } {
   return deps.source.kind === "registry" ? { source: deps.source.describe() } : {};
 }
 
-/** A summary-text suffix saying what registry mode cannot measure; "" in explorer mode. */
-export function sourceText(deps: ToolDeps): string {
+/**
+ * A summary-text suffix saying what registry mode cannot measure; "" in explorer
+ * mode. Pass the search coverage so a dropped implied score threshold is named too.
+ */
+export function sourceText(deps: ToolDeps, coverage?: DiscoveryCoverage): string {
   if (deps.source.kind !== "registry") return "";
   const { allowlistSize } = deps.source.describe();
-  return serverText` Registry mode: ${allowlistSize} allowlisted agent(s) read from the Identity contract; reputation is not indexed, so scores and feedback counts are not measured.`;
+  const dropped = coverage?.limitations?.includes(IMPLIED_SCORE_NOT_APPLIED)
+    ? serverText` A quality word in the query (such as "best" or "trusted") implies a minimum score, which registry mode cannot apply; results are not filtered by score.`
+    : "";
+  return serverText` Registry mode: ${allowlistSize} allowlisted agent(s) read from the Identity contract; reputation is not indexed, so scores and feedback counts are not measured.` + dropped;
+}
+
+/** Coverage limitation: a score threshold implied by a quality word was not applied (registry mode). */
+export const IMPLIED_SCORE_NOT_APPLIED = "implied-score-filter-not-applied";
+
+/**
+ * The minExplorerScore a natural-language search applies. An explicit argument
+ * or a stated number in the query ("score above 70") always applies, and
+ * registry mode refuses it. A threshold the parser inferred from a quality word
+ * ("best", "trusted") is a ranking preference, not a stated filter: registry
+ * mode has no scores to apply it to, so it is dropped and `dropped` tells the
+ * caller to disclose that (withImpliedScoreDropped), rather than the whole
+ * search failing on a common phrasing.
+ */
+export function queryMinScore(
+  source: AgentSource,
+  parsed: ParsedQuery,
+  explicit?: number,
+): { minExplorerScore: number | undefined; dropped: boolean } {
+  if (explicit !== undefined) return { minExplorerScore: explicit, dropped: false };
+  if (source.kind === "registry" && parsed.scoreFrom === "phrase") {
+    return { minExplorerScore: undefined, dropped: true };
+  }
+  return { minExplorerScore: parsed.filters.minExplorerScore, dropped: false };
+}
+
+/** Coverage that records a dropped implied score threshold. */
+export function withImpliedScoreDropped(coverage: DiscoveryCoverage): DiscoveryCoverage {
+  return { ...coverage, limitations: [...(coverage.limitations ?? []), IMPLIED_SCORE_NOT_APPLIED] };
 }
 
 // ---------------------------------------------------------------------------

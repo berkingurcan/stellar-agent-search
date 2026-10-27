@@ -17,6 +17,8 @@
  *     `source` note that says scores and feedback counts are not measured.
  *   - Feedback, stats, health and owner lookups are not on this class at all
  *     (see source.ts), and a minScore filter is refused rather than ignored.
+ *     (Tools drop a threshold implied by a word like "best" before it gets
+ *     here, and say so: see queryMinScore in tools/shared.ts.)
  *
  * Registration files are fetched only for allowlisted agents, never for an id
  * a caller supplies, with no redirects, a timeout and a size cap.
@@ -249,7 +251,7 @@ function assertNoScoreFilter(minScore: number | undefined): void {
   // would present unfiltered rows as if they had passed it.
   if (typeof minScore === "number" && minScore > 0) {
     throw new IndexerRequiredError(
-      "Filtering by minExplorerScore (including one implied by a phrase like 'good reputation')",
+      "Filtering by minExplorerScore (an explicit argument, or a stated threshold like 'score above 70')",
     );
   }
 }
@@ -274,7 +276,8 @@ function toAgentRow(
   uri: string,
   registration: UnknownRecord,
 ): AgentResponse {
-  const services = registrationServices(registration.services);
+  let services = registrationServices(registration.services);
+  if (services.length === 0) services = legacyEndpoints(registration.endpoints);
   return {
     id,
     owner,
@@ -313,6 +316,28 @@ function registrationServices(value: unknown): ServiceEntry[] {
       ...(typeof entry.version === "string" ? { version: entry.version } : {}),
       ...(typeof entry.description === "string" ? { description: entry.description } : {}),
       ...(typeof entry.inputExample === "string" ? { inputExample: entry.inputExample } : {}),
+    });
+  }
+  return services;
+}
+
+/**
+ * Older registration files list `endpoints: [{ type, url }]` instead of
+ * `services`. Read them the way the SDK's edit path converts them
+ * (endpointsToServices): `url` or `endpoint`, `type` or `name`, else "unknown".
+ */
+function legacyEndpoints(value: unknown): ServiceEntry[] {
+  if (!Array.isArray(value)) return [];
+  const services: ServiceEntry[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) continue;
+    const endpoint = typeof entry.url === "string" ? entry.url : typeof entry.endpoint === "string" ? entry.endpoint : "";
+    if (!endpoint.trim()) continue;
+    const name = typeof entry.type === "string" ? entry.type : typeof entry.name === "string" ? entry.name : "";
+    services.push({
+      name: name.trim() ? name : "unknown",
+      endpoint,
+      ...(typeof entry.version === "string" ? { version: entry.version } : {}),
     });
   }
   return services;

@@ -324,7 +324,7 @@ with a **stable** `code`:
 | `NOT_FOUND` | Agent / resource does not exist | — |
 | `BAD_REQUEST` | Invalid argument that passed zod but failed a domain check | — |
 | `UPSTREAM_ERROR` | Explorer/RPC error, scope mismatch, malformed HTTP-success payload, or (registry mode) a failed Identity read or unreadable registration file | status/scope/payload detail, or `registry read failed` |
-| `INDEXER_REQUIRED` | Registry mode (`REGISTRY_AGENT_IDS`) and the request needs an indexer: `leaderboard`, `get_registry_stats`, `get_registry_health`, `get_agents_by_owner`, `get_agent_feedback`, `resolve_agent` for an owner, or a `minExplorerScore` filter | `detail: registry mode` |
+| `INDEXER_REQUIRED` | Registry mode (`REGISTRY_AGENT_IDS`) and the request needs an indexer: `leaderboard`, `get_registry_stats`, `get_registry_health`, `get_agents_by_owner`, `get_agent_feedback`, `resolve_agent` for an owner, or a `minExplorerScore` filter given as an argument or a stated number ("score above 70"). A threshold implied by a word like "best" is dropped instead, with coverage limitation `implied-score-filter-not-applied` | `detail: registry mode` |
 | `INTERNAL` | Anything else | — |
 
 Zod input-validation errors are handled by the MCP SDK **before** the handler runs and are not mapped here.

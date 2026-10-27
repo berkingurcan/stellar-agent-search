@@ -17,7 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `get_agent_profile`, `get_agent_card` and `verify_reputation` work over the allowlist and attach a `source`
   note saying reputation is not indexed. `leaderboard`, `get_registry_stats`, `get_registry_health`,
   `get_agents_by_owner`, `get_agent_feedback`, owner-address `resolve_agent`, and `minExplorerScore` filters
-  return the new `INDEXER_REQUIRED` error code instead of partial data.
+  (an argument or a stated number) return the new `INDEXER_REQUIRED` error code instead of partial data. A
+  score implied by a word like "best" or "trusted" is not applied in this mode, and coverage carries
+  `implied-score-filter-not-applied`, so those common phrasings still search.
 - `AgentSource` (`src/lib/source.ts`): the interface tools, resources and the CLI read through. Indexer-only
   reads are reachable only via `requireIndexer`. `ToolDeps.explorer` is now `ToolDeps.source`.
 

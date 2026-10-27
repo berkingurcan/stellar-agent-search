@@ -34,6 +34,12 @@ export interface ParsedQuery {
   matched: string[];
   /** Semantics the v1 positive-only filter surface cannot represent safely. */
   unsupported: string[];
+  /**
+   * Where `filters.minExplorerScore` came from: a stated number ("score above 70")
+   * or a quality word ("best", "trusted"). Registry mode, which has no scores,
+   * refuses the first and drops the second.
+   */
+  scoreFrom?: "number" | "phrase";
 }
 
 // ---------------------------------------------------------------------------
@@ -178,22 +184,26 @@ export function parseQuery(raw: string): ParsedQuery {
   }
 
   // 3. minExplorerScore — explicit number wins, then qualitative phrases.
+  let scoreFrom: ParsedQuery["scoreFrom"];
   const numMatch = text.match(RE_SCORE_NUM) ?? text.match(RE_SCORE_ABOVE);
   if (!negatedScore && numMatch && numMatch[1] !== undefined) {
     filters.minExplorerScore = normalizeExplorerThreshold(Number(numMatch[1]));
     matched.push(`minExplorerScore:${filters.minExplorerScore}`);
+    scoreFrom = "number";
   } else if (!negatedScore && RE_SCORE_TOP.test(text)) {
     filters.minExplorerScore = 80;
     matched.push("minExplorerScore:80");
+    scoreFrom = "phrase";
   } else if (!negatedScore && RE_SCORE_HIGH.test(text)) {
     filters.minExplorerScore = 70;
     matched.push("minExplorerScore:70");
+    scoreFrom = "phrase";
   }
 
   // 4. Residual keywords → explorer full-text search.
   const keywords = residualKeywords(text);
 
-  return { keywords, filters, matched, unsupported };
+  return { keywords, filters, matched, unsupported, ...(scoreFrom ? { scoreFrom } : {}) };
 }
 
 /** Normalize a natural-language upstream threshold without implying a 0..100 range. */

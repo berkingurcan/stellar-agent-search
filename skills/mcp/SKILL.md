@@ -206,8 +206,10 @@ results carry a `source` object (`kind: "registry"`, `reputationIndexed: false`)
 `registry-allowlist-only`: the allowlist is not the registry, and reputation is not measured, so scores, feedback
 counts and `unrated` reflect missing data rather than an agent without feedback. `leaderboard`,
 `get_registry_stats`, `get_registry_health`, `get_agents_by_owner`, `get_agent_feedback`, `resolve_agent` for an
-owner address, and any `minExplorerScore` filter (including one implied by "good reputation") need an indexer and
-return an error with code `INDEXER_REQUIRED` instead of a partial answer.
+owner address, and a `minExplorerScore` filter (an argument, or a stated number like "score above 70") need an
+indexer and return an error with code `INDEXER_REQUIRED` instead of a partial answer. A quality word like "best"
+or "trusted" is not applied as a score filter in this mode: the search runs without it, and coverage carries
+`implied-score-filter-not-applied`.
 
 **Trust boundary.** Server-authored summary text (`content[].text`) interpolates only typed /
 enum / numeric values — scores, counts, ids, capability flags. Untrusted, agent-authored free text (names,

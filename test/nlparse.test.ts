@@ -134,6 +134,15 @@ describe("score / reputation thresholds", () => {
     expect(parseQuery("top-rated agent rated 95").filters.minExplorerScore).toBe(95);
   });
 
+  it("records whether the threshold was a stated number or a quality word", () => {
+    expect(parseQuery("best seller agent").scoreFrom).toBe("phrase");
+    expect(parseQuery("trusted seller").scoreFrom).toBe("phrase");
+    expect(parseQuery("an agent with score above 90").scoreFrom).toBe("number");
+    expect(parseQuery("top-rated agent rated 95").scoreFrom).toBe("number");
+    expect(parseQuery("seller").scoreFrom).toBeUndefined();
+    expect(parseQuery("not highly rated scraper").scoreFrom).toBeUndefined();
+  });
+
   it.each([
     "score below 50 scraper",
     "score is no higher than 50 scraper",

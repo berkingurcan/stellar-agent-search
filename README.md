@@ -201,12 +201,14 @@ builds. It reads only the agents you list, and it fetches registration files onl
 
 | Works over the allowlist (filters applied locally) | Needs an indexer — returns `INDEXER_REQUIRED` |
 |---|---|
-| `find_agent`, `list_services`, `list_agents`, `rank_agent`, `get_agent_profile`, `get_agent_card`, `verify_reputation` | `leaderboard`, `get_registry_stats`, `get_registry_health`, `get_agents_by_owner`, `get_agent_feedback`, `resolve_agent` for an owner address, any `minExplorerScore` filter |
+| `find_agent`, `list_services`, `list_agents`, `rank_agent`, `get_agent_profile`, `get_agent_card`, `verify_reputation` | `leaderboard`, `get_registry_stats`, `get_registry_health`, `get_agents_by_owner`, `get_agent_feedback`, `resolve_agent` for an owner address, a `minExplorerScore` filter (an argument, or a stated number like "score above 70") |
 
 What registry mode cannot know, it says. The contract cannot be enumerated, so coverage carries
 `registry-allowlist-only` and lists any agent it could not read in `unreadableAgentIds`. There is no indexed
 reputation, so results carry `source: { kind: "registry", reputationIndexed: false }`: scores, feedback counts and
-`unrated` reflect missing data, not an agent without feedback. Agents registered with
+`unrated` reflect missing data, not an agent without feedback. A query word like "best" or "trusted", which
+implies a minimum score on mainnet, is not applied as a filter here; coverage carries
+`implied-score-filter-not-applied` and the summary says so. Agents registered with
 `provider-kit register` show their manifest URL in `list_services` as an unverified
 `stellar-agent-services` service entry.
 

@@ -22,6 +22,7 @@ import {
   handler,
   mapWithConcurrency,
   MAX_QUERY_LENGTH,
+  queryMinScore,
   rankAndVerify,
   sourceFields,
   sourceText,
@@ -30,6 +31,7 @@ import {
   zLimit,
   zSort,
   READ_ANNOTATIONS,
+  withImpliedScoreDropped,
   type ToolDeps,
 } from "./shared.js";
 import { zDiscoveryCoverage, zRankedAgent, zSourceNote } from "./schemas.js";
@@ -119,15 +121,17 @@ async function gatherByQuery(deps: ToolDeps, query: string): Promise<FindAgentsR
   if (parsed.filters.mpp !== undefined) filters.mpp = parsed.filters.mpp;
   if (parsed.filters.hasServices !== undefined) filters.hasServices = parsed.filters.hasServices;
   if (parsed.filters.trust !== undefined) filters.trust = parsed.filters.trust;
-  if (parsed.filters.minExplorerScore !== undefined) {
-    filters.minScore = parsed.filters.minExplorerScore;
-  }
+  const score = queryMinScore(deps.source, parsed);
+  if (score.minExplorerScore !== undefined) filters.minScore = score.minExplorerScore;
 
-  return deps.source.findAgentsWithCoverage(parsed.keywords.join(" "), {
+  const discovery = await deps.source.findAgentsWithCoverage(parsed.keywords.join(" "), {
     filters,
     pages: 2,
     match: "any",
   });
+  return score.dropped
+    ? { ...discovery, coverage: withImpliedScoreDropped(discovery.coverage) }
+    : discovery;
 }
 
 export function registerRankAgent(server: McpServer, deps: ToolDeps): void {
@@ -190,7 +194,7 @@ export function registerRankAgent(server: McpServer, deps: ToolDeps): void {
         includeBreakdown: true,
       });
 
-      return toolResult(summarizeRanked(rows) + sourceText(deps), {
+      return toolResult(summarizeRanked(rows) + sourceText(deps, coverage), {
         rankVersion: RANKING.VERSION,
         evidenceWeights: {
           volume: RANKING.EVIDENCE_VOLUME_WEIGHT,

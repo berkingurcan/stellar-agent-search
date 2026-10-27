@@ -187,6 +187,12 @@ the explorer's row shape, so every adapter and the `AgentProfile` join run uncha
   the request fails rather than returning an empty list.
 - There is no indexed reputation. Registry-mode results attach `source: { kind: "registry",
   reputationIndexed: false }`, and summary text does not print the zero counts as if they had been measured.
+- A `minExplorerScore` given as an argument or as a number in the query is refused. One the parser inferred
+  from a quality word ("best", "trusted") is a ranking preference, not a stated filter, so `queryMinScore`
+  (`tools/shared.ts`) drops it and the result carries `implied-score-filter-not-applied`. Refusing it would fail
+  the whole search on the most common phrasings.
+- Registration files that predate `services` and list `endpoints: [{ type, url }]` are read the way the SDK's
+  edit path converts them.
 - Registration files are fetched only for allowlisted agents (never for an id a caller supplies), with no
   redirects, a 10 s timeout and a 64 KiB cap. Schemes other than `data:` and `https:` fail closed.
 - The Worker never enters registry mode: it forwards a closed set of variables, and `REGISTRY_AGENT_IDS` is not

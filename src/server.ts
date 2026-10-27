@@ -58,7 +58,9 @@ export const REGISTRY_MODE_INSTRUCTIONS =
   " REGISTRY MODE: this server has no explorer. It reads an operator allowlist of agents straight from the " +
   "Identity contract and their registration files, so searches cover only that allowlist and reputation is not " +
   "indexed (scores and feedback counts are not measured). leaderboard, registry stats/health, owner lookups, " +
-  "feedback history and minExplorerScore filters return INDEXER_REQUIRED.";
+  "feedback history and a minExplorerScore filter (an argument or a stated number) return INDEXER_REQUIRED. A " +
+  "score implied by a word like \"best\" or \"trusted\" is not applied, and coverage says so " +
+  "(implied-score-filter-not-applied).";
 
 export interface BuildServerOptions {
   /** Version reported in the MCP initialize handshake (defaults from package.json). */

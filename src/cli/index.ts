@@ -20,10 +20,13 @@ import {
   agentScores,
   declaredReputation,
   deriveCapabilities,
+  IMPLIED_SCORE_NOT_APPLIED,
   mapWithConcurrency,
+  queryMinScore,
   rankAndVerify,
   toRankInput,
   VERIFY_TOP_K,
+  withImpliedScoreDropped,
   type RankedRow,
 } from "../tools/shared.js";
 import { RANKING, scoreAgent } from "../lib/ranking.js";
@@ -309,25 +312,32 @@ async function gatherByQuery(deps: ToolDeps, query: string, flags: CliFlags): Pr
   const x402 = flags.x402 || parsed.filters.x402;
   const hasServices = flags.hasServices || parsed.filters.hasServices;
   const trust = parsed.filters.trust;
-  const minExplorerScore = flags.minExplorerScore ?? parsed.filters.minExplorerScore;
+  const score = queryMinScore(deps.source, parsed, flags.minExplorerScore);
   if (x402 !== undefined && x402) filters.x402 = true;
   if (flags.mpp || parsed.filters.mpp) filters.mpp = true;
   if (hasServices !== undefined && hasServices) filters.hasServices = true;
   if (trust !== undefined) filters.trust = trust;
-  if (minExplorerScore !== undefined) filters.minScore = minExplorerScore;
+  if (score.minExplorerScore !== undefined) filters.minScore = score.minExplorerScore;
 
-  return deps.source.findAgentsWithCoverage(parsed.keywords.join(" "), {
+  const discovery = await deps.source.findAgentsWithCoverage(parsed.keywords.join(" "), {
     filters,
     pages: CANDIDATE_PAGES,
     match: "any",
   });
+  return score.dropped
+    ? { ...discovery, coverage: withImpliedScoreDropped(discovery.coverage) }
+    : discovery;
 }
 
 function coverageNotice(coverage: DiscoveryCoverage): string | null {
   if (coverage.coverageComplete) return null;
   const more = coverage.hasMore === true ? "; additional explorer pages exist" : "";
+  const dropped = coverage.limitations?.includes(IMPLIED_SCORE_NOT_APPLIED)
+    ? `\n${INFO} a quality word in the query (such as "best" or "trusted") implies a minimum score, ` +
+      `which registry mode cannot apply; results are not filtered by score.`
+    : "";
   return `${INFO} bounded discovery scanned ${coverage.recordsScanned} record(s) across ` +
-    `${coverage.pagesScanned} page(s)${more}; results are not registry-global.`;
+    `${coverage.pagesScanned} page(s)${more}; results are not registry-global.${dropped}`;
 }
 
 async function gatherByIds(deps: ToolDeps, ids: number[]): Promise<AgentResponse[]> {
@@ -795,11 +805,14 @@ async function cmdDoctor(deps: ToolDeps, flags: CliFlags): Promise<number> {
     checks.push({ name: "contract", ok: true, detail: "disabled (VERIFY_ONCHAIN=false / --no-verify)" });
   }
 
-  // 6. tools registered
+  // 6. tools registered (all are; in registry mode the indexer-only ones refuse)
   checks.push({
     name: "tools",
     ok: true,
-    detail: "find_agent, rank_agent, get_agent_profile, list_services (+ list_agents, leaderboard)",
+    detail: deps.source.kind === "registry"
+      ? "find_agent, rank_agent, get_agent_profile, list_services (+ list_agents); leaderboard, registry stats, " +
+        "owner lookups and feedback history need an indexer (INDEXER_REQUIRED)"
+      : "find_agent, rank_agent, get_agent_profile, list_services (+ list_agents, leaderboard)",
   });
 
   if (flags.json) {

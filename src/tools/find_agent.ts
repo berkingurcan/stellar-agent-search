@@ -16,6 +16,7 @@ import {
   canonicalTrust,
   handler,
   MAX_QUERY_LENGTH,
+  queryMinScore,
   rankAndVerify,
   sourceFields,
   sourceText,
@@ -28,6 +29,7 @@ import {
   zTrust,
   READ_ANNOTATIONS,
   VERIFY_TOP_K,
+  withImpliedScoreDropped,
   type ToolDeps,
 } from "./shared.js";
 import { zDiscoveryCoverage, zInterpretedQuery, zRankedAgent, zSourceNote } from "./schemas.js";
@@ -104,12 +106,13 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
         );
       }
 
+      const score = queryMinScore(deps.source, parsed, args.minExplorerScore);
       const effective = {
         x402: args.x402 ?? parsed.filters.x402,
         mpp: args.mpp ?? parsed.filters.mpp,
         hasServices: args.hasServices ?? parsed.filters.hasServices,
         trust: args.trust ? canonicalTrust(args.trust) : parsed.filters.trust,
-        minExplorerScore: args.minExplorerScore ?? parsed.filters.minExplorerScore,
+        minExplorerScore: score.minExplorerScore,
       };
 
       const filters: Omit<NonNullable<GetAgentsParams>, "search" | "page"> = {
@@ -129,6 +132,9 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
         pages: CANDIDATE_PAGES,
         match: "any",
       });
+      const coverage = score.dropped
+        ? withImpliedScoreDropped(discovery.coverage)
+        : discovery.coverage;
 
       const rows = await rankAndVerify(deps, discovery.agents, {
         sortBy: args.sortBy,
@@ -141,7 +147,7 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
       const filterRecord: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(effective)) if (v !== undefined) filterRecord[k] = v;
 
-      return toolResult(summarizeRanked(rows) + sourceText(deps), {
+      return toolResult(summarizeRanked(rows) + sourceText(deps, coverage), {
         interpretedQuery: {
           keywords: parsed.keywords,
           filters: filterRecord,
@@ -150,7 +156,7 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
         },
         count: rows.length,
         agents: rows,
-        coverage: discovery.coverage,
+        coverage,
         ...sourceFields(deps),
       });
     }),
