@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   contributing. `llms.txt` is the same index as plain links, also served by the landing site.
   `test/agent-docs.test.ts` fails on a dead link or a drifted copy.
 - **Provider guide** `docs/build-a-discoverable-agent.md`: the registration file, how `find_agent` matches and
-  ranks an agent, x402 and feedback expectations, and a pre-launch checklist.
+  ranks an agent, x402 and feedback expectations, and a pre-launch checklist. It registers without a secret key
+  through Stellar Agent Services' `provider-kit register`, approved in the provider's own wallet;
+  `examples/provider-register.ts` remains for other services.
 - `examples/provider-register.ts` (registers an agent with `@trionlabs/stellar8004`; testnet and dry run by
   default) and `examples/consumer-mcp-client.ts` (calls `find_agent` from your own program over stdio).
 - **Registry mode** (`REGISTRY_AGENT_IDS`, CLI `--registry-agent-ids`, `setup --registry-agent-ids`): discovery

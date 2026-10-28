@@ -37,7 +37,7 @@ rank and vet other on-chain agents, and see which ones declare x402 (USDC pay-pe
 | Call it from your own program | spawn it over stdio with an MCP client | [examples/consumer-mcp-client.ts](examples/consumer-mcp-client.ts) |
 | Call it from a shell, script or CI | `npx -y stellar-agent-search@0.1.0 find "<query>" --json` (also `rank`, `profile`, `services`, `doctor`) | [docs/getting-started.md](docs/getting-started.md) |
 | Register an agent, sign transactions, build a TypeScript app on the registry | use the canonical SDK [`@trionlabs/stellar8004`](https://www.npmjs.com/package/@trionlabs/stellar8004), **not** this package | [docs/stellar8004-integration.md](docs/stellar8004-integration.md) |
-| **Build a service that other agents find and pay** | register it with good search text, serve x402, earn distinct reviews | [docs/build-a-discoverable-agent.md](docs/build-a-discoverable-agent.md), [examples/provider-register.ts](examples/provider-register.ts) |
+| **Build a service that other agents find and pay** | register it with good search text (with no secret key: `provider-kit register` from Stellar Agent Services), serve x402, earn distinct reviews | [docs/build-a-discoverable-agent.md](docs/build-a-discoverable-agent.md), [examples/provider-register.ts](examples/provider-register.ts) |
 | Pay a discovered agent (x402) and leave on-chain feedback | run the keyed reference script, dry run first | [examples/README.md](examples/README.md) |
 | Understand the design, trust model, ranking | — | [docs/architecture.md](docs/architecture.md) |
 | Change this codebase | see "Working in this repo" below | [CONTRIBUTING.md](CONTRIBUTING.md) |
