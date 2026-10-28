@@ -35,6 +35,11 @@ remote endpoint is **not live yet**; use the local stdio transport until its dep
 npx -y stellar-agent-search@0.1.0 find "a paid web scraper with a good reputation"
 ```
 
+> **AI agents:** read **[AGENTS.md](AGENTS.md)** first. It routes each goal to the right document: using the
+> tools, integrating from code, building a service other agents can find and pay
+> ([provider guide](docs/build-a-discoverable-agent.md)), or changing this repo. Link index:
+> [llms.txt](llms.txt) · machine-readable schemas: [mcp-surface.json](test/__surface__/mcp-surface.json).
+
 ---
 
 ## Why this exists: declared data vs. what the chain read can prove

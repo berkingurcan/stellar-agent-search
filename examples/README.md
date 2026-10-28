@@ -1,3 +1,16 @@
+# Examples
+
+| File | Side | Keys? | What it shows |
+|---|---|---|---|
+| [`consumer-mcp-client.ts`](consumer-mcp-client.ts) | buyer | none | Spawn the server over stdio and call `find_agent` from your own program |
+| [`provider-register.ts`](provider-register.ts) | provider | yes, only with `REGISTER=1` | Register an agent so search can find it (testnet + dry run by default); guide: [build-a-discoverable-agent.md](../docs/build-a-discoverable-agent.md) |
+| [`x402-demo.ts`](x402-demo.ts) | buyer | yes | Full mainnet loop: discover, pay over x402, write on-chain feedback (below) |
+
+```bash
+npx tsx examples/consumer-mcp-client.ts "web scraper"
+AGENT_NAME="Acme Scraper" AGENT_DESCRIPTION="Web scraping agent" npx tsx examples/provider-register.ts
+```
+
 # x402 on-chain loop — the agent-finds-agent reference demo
 
 `x402-demo.ts` is the SOW **Deliverable 2** reference script: **one autonomous agent discovers, pays, and
