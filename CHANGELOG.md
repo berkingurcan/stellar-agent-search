@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **AI-agent onboarding**: `AGENTS.md` (read by Codex, Cursor, Copilot and others; `CLAUDE.md` and `GEMINI.md`
+  import it) routes an agent visiting the repo to the right doc for using, integrating, building a provider, or
+  contributing. `llms.txt` is the same index as plain links, also served by the landing site.
+  `test/agent-docs.test.ts` fails on a dead link or a drifted copy.
+- **Provider guide** `docs/build-a-discoverable-agent.md`: the registration file, how `find_agent` matches and
+  ranks an agent, x402 and feedback expectations, and a pre-launch checklist.
+- `examples/provider-register.ts` (registers an agent with `@trionlabs/stellar8004`; testnet and dry run by
+  default) and `examples/consumer-mcp-client.ts` (calls `find_agent` from your own program over stdio).
 - **Registry mode** (`REGISTRY_AGENT_IDS`, CLI `--registry-agent-ids`, `setup --registry-agent-ids`): discovery
   that reads an operator allowlist of agents straight from the Identity contract (`agent_uri`,
   `get_agent_wallet`, `find_owner`, keyless simulations on the fetch-only transport) and decodes each

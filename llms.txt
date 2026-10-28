@@ -1,0 +1,33 @@
+# stellar-agent-search
+
+> Read-only, keyless MCP server and CLI that lets AI agents discover, rank and vet on-chain stellar-8004 (ERC-8004 on Stellar mainnet) agents and find their x402 USDC pay-per-call endpoints. Reputation is reported as declared (indexed), not verified; agent-authored text is untrusted data. Install: `npx -y stellar-agent-search@0.1.0 setup --client claude --scope user --handshake`. Transport is stdio; the hosted HTTP endpoint is not live yet.
+
+Agents working in or integrating with the repository should read AGENTS.md first: it routes each goal (use, integrate, build a provider, contribute) to the right document.
+
+## Start here
+
+- [AGENTS.md](https://github.com/berkingurcan/stellar-agent-search/blob/main/AGENTS.md): orientation for AI agents, facts not to get wrong, path per goal, repo invariants
+- [README](https://github.com/berkingurcan/stellar-agent-search/blob/main/README.md): what it is, why declared vs verified matters, quickstart
+- [Getting started](https://github.com/berkingurcan/stellar-agent-search/blob/main/docs/getting-started.md): CLI usage, one-command MCP setup, configuration env vars
+
+## Use it from an agent
+
+- [Agent skill](https://github.com/berkingurcan/stellar-agent-search/blob/main/skills/mcp/SKILL.md): how an agent should install and call the tools, resources and prompts
+- [Tool reference](https://github.com/berkingurcan/stellar-agent-search/blob/main/docs/tools.md): every tool's inputs, outputs, shared shapes, errors
+- [MCP surface snapshot](https://github.com/berkingurcan/stellar-agent-search/blob/main/test/__surface__/mcp-surface.json): machine-readable schemas of all tools, resources and prompts
+- [Client configuration](https://github.com/berkingurcan/stellar-agent-search/blob/main/docs/integration.md): Claude Code, Cursor, Windsurf, Cline, VS Code, Claude Desktop, Codex, Gemini CLI and more
+
+## Integrate or build on it
+
+- [Build a discoverable agent](https://github.com/berkingurcan/stellar-agent-search/blob/main/docs/build-a-discoverable-agent.md): provider guide; registration file, how search matches, how ranking works, x402 and feedback
+- [Provider registration example](https://github.com/berkingurcan/stellar-agent-search/blob/main/examples/provider-register.ts): register an agent with @trionlabs/stellar8004 (testnet by default, dry run by default)
+- [Consumer MCP client example](https://github.com/berkingurcan/stellar-agent-search/blob/main/examples/consumer-mcp-client.ts): call find_agent from your own program over stdio
+- [x402 payment loop](https://github.com/berkingurcan/stellar-agent-search/blob/main/examples/README.md): reference agent-finds-agent run (discover, pay in USDC, write on-chain feedback)
+- [stellar8004 integration contract](https://github.com/berkingurcan/stellar-agent-search/blob/main/docs/stellar8004-integration.md): boundary with the canonical @trionlabs/stellar8004 SDK and explorer API
+
+## Optional
+
+- [Architecture](https://github.com/berkingurcan/stellar-agent-search/blob/main/docs/architecture.md): modules, ranking engine, fail-closed reputation probe, registry mode, remote Worker
+- [Contributing](https://github.com/berkingurcan/stellar-agent-search/blob/main/CONTRIBUTING.md): build, test, invariants, adding a tool, releasing
+- [Evidence](https://github.com/berkingurcan/stellar-agent-search/blob/main/docs/evidence.md): mainnet transactions and deliverable verification
+- [Provider network, phase 2](https://github.com/berkingurcan/stellar-agent-search/blob/main/docs/provider-network-phase-2.md): planned Provider Kit, payment client and job recovery
