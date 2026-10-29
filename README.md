@@ -91,6 +91,7 @@ All three MCP primitives, all read-only:
 | | `get_agent_card` | Derived, unverified A2A-shaped projection + x402 hint; not protocol-conformance proof |
 | | `get_registry_stats` | Exact-count queries + capped sampled metrics, with definitions and coverage |
 | | `get_registry_health` | Per-registry indexer staleness |
+| **2 · provider network** | `get_provider_manifest` | A Provider Standard v1 provider's prices in USDC, network, payee and result retention; its binding to the on-chain registration and wallet; conformance badges from trusted validators |
 
 Full per-tool reference (inputs, outputs, defaults): **[docs/tools.md](docs/tools.md)**.
 
@@ -168,7 +169,8 @@ All configuration is via environment variables (canonical for MCP mode); CLI fla
 | `STELLAR_NETWORK` | `mainnet` | `mainnet` or `testnet` — `testnet` also requires `EXPLORER_BASE_URL` or `REGISTRY_AGENT_IDS`, see below |
 | `EXPLORER_BASE_URL` | `https://stellar8004.com` | Explorer HTTP API base. **Indexes mainnet only** |
 | `REGISTRY_AGENT_IDS` | — | Registry mode: comma-separated agent ids (at most 50) read straight from the Identity contract, no explorer. Not combinable with `EXPLORER_BASE_URL` |
-| `STELLAR_RPC_URL` | `https://mainnet.sorobanrpc.com` | Soroban RPC for the bounded Reputation-contract reachability probe |
+| `TRUSTED_VALIDATORS` | — | Comma-separated G… or C… addresses (at most 20) of the verifiers whose Validation Registry records earn Provider Standard badges. Empty: the registry is not read |
+| `STELLAR_RPC_URL` | `https://mainnet.sorobanrpc.com` | Soroban RPC for the bounded Reputation-contract reachability probe and the Identity and Validation reads |
 | `VERIFY_ONCHAIN` | `true` | Set `false` to skip the probe; reputation remains declared-only either way |
 | `RANK_SCORE_MAX` | `100` | Fixed v1 compatibility assertion; any value other than `100` is rejected |
 
@@ -206,7 +208,7 @@ builds. It reads only the agents you list, and it fetches registration files onl
 
 | Works over the allowlist (filters applied locally) | Needs an indexer — returns `INDEXER_REQUIRED` |
 |---|---|
-| `find_agent`, `list_services`, `list_agents`, `rank_agent`, `get_agent_profile`, `get_agent_card`, `verify_reputation` | `leaderboard`, `get_registry_stats`, `get_registry_health`, `get_agents_by_owner`, `get_agent_feedback`, `resolve_agent` for an owner address, a `minExplorerScore` filter (an argument, or a stated number like "score above 70") |
+| `find_agent`, `list_services`, `list_agents`, `rank_agent`, `get_agent_profile`, `get_agent_card`, `verify_reputation`, `get_provider_manifest` | `leaderboard`, `get_registry_stats`, `get_registry_health`, `get_agents_by_owner`, `get_agent_feedback`, `resolve_agent` for an owner address, a `minExplorerScore` filter (an argument, or a stated number like "score above 70") |
 
 What registry mode cannot know, it says. The contract cannot be enumerated, so coverage carries
 `registry-allowlist-only` and lists any agent it could not read in `unreadableAgentIds`. There is no indexed
@@ -215,7 +217,31 @@ reputation, so results carry `source: { kind: "registry", reputationIndexed: fal
 implies a minimum score on mainnet, is not applied as a filter here; coverage carries
 `implied-score-filter-not-applied` and the summary says so. Agents registered with
 `provider-kit register` show their manifest URL in `list_services` as an unverified
-`stellar-agent-services` service entry.
+`stellar-agent-services` service entry, marked `providerStandard: true`.
+
+### Provider Standard providers (find → approve → pay)
+
+[Provider Standard v1](https://github.com/AlgoriaLabs/stellar-agent-services/blob/main/docs/provider-standard.md)
+providers publish a manifest with their services, prices and payee, and name it in their registration.
+`get_provider_manifest` (CLI: `manifest <id>`) reads it for one agent and returns:
+
+- **Terms**: each service's price in USDC, the network, `payTo`, the charge mode (`on-success` or `upfront`) and
+  how long results stay collectable for job recovery. These are checked against the standard; a manifest whose
+  payment terms can't be read exactly is `invalid` and shows no price at all.
+- **Identity** ([I1]–[I3]): the on-chain registration names this manifest, the manifest names this agent, and
+  `payTo` is the agent's on-chain wallet. `identityBound` is true only when all three pass. Over the explorer the
+  registration is read again from the Identity contract, so the indexer never decides whom a user pays.
+- **Conformance**: badges (Standard v1, Payment verified, Recovery verified) from the Stellar 8004 Validation
+  Registry, counted only for the verifiers you list in `TRUSTED_VALIDATORS`, and never for a validator that is the
+  agent's own owner or wallet.
+
+The server stays read-only: a payment client pays from the manifest URL after the user approves, and refuses to
+sign if the 402 challenge differs from the manifest. A manifest for another network than the server's is refused,
+so one flow never mixes testnet and mainnet.
+
+```bash
+STELLAR_NETWORK=testnet REGISTRY_AGENT_IDS=12,40 TRUSTED_VALIDATORS=G... node dist/index.js manifest 12
+```
 
 ---
 

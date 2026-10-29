@@ -34,6 +34,10 @@
           "description": "Registry mode: comma-separated agent ids read straight from the Identity contract, with no explorer. Tools that need an indexer return INDEXER_REQUIRED. Not combinable with EXPLORER_BASE_URL."
         },
         {
+          "name": "TRUSTED_VALIDATORS",
+          "description": "Comma-separated G… or C… addresses of the verifiers whose Validation Registry records earn Provider Standard badges in get_provider_manifest. Empty: the registry is not read."
+        },
+        {
           "name": "STELLAR_RPC_URL",
           "description": "Override the Soroban RPC URL used for the bounded Reputation-contract probe."
         },

@@ -11,7 +11,7 @@
 
 import { getConfig } from "@trionlabs/stellar8004";
 import type { Network, StellarConfig } from "./types.js";
-import { MAX_AGENT_ID } from "./lib/identifier.js";
+import { MAX_AGENT_ID, validWalletOrNull } from "./lib/identifier.js";
 import { log } from "./lib/logger.js";
 
 /** Local display normalization policy; the protocol itself allows signed i128 + decimals. */
@@ -25,6 +25,9 @@ export const DEFAULT_EXPLORER_BASE = "https://stellar8004.com";
  * possibly a registration-file fetch, and every list or search reads them all.
  */
 export const MAX_REGISTRY_AGENT_IDS = 50;
+
+/** Most validators TRUSTED_VALIDATORS may list; each is one argument to a contract read. */
+export const MAX_TRUSTED_VALIDATORS = 20;
 
 /**
  * A launch refused because the environment is misconfigured — not a bug, and not
@@ -51,6 +54,11 @@ export interface Config {
    * (REGISTRY_AGENT_IDS). Null when the explorer is the data source.
    */
   registryAgentIds: readonly number[] | null;
+  /**
+   * Validation Registry validators whose Provider Standard records earn badges
+   * (TRUSTED_VALIDATORS). Empty: the registry is not read.
+   */
+  trustedValidators: readonly string[];
   /** Whether to attempt the bounded Reputation-contract probe. */
   verifyOnchain: boolean;
   /** Feedback score scale (RANK_SCORE_MAX). */
@@ -99,6 +107,30 @@ export function parseRegistryAgentIds(raw: string | undefined): number[] | null 
     );
   }
   return [...ids];
+}
+
+/**
+ * TRUSTED_VALIDATORS: comma- or space-separated G… or C… addresses with a valid
+ * checksum. Blank counts as absent (an empty list).
+ */
+export function parseTrustedValidators(raw: string | undefined): string[] {
+  const text = raw?.trim();
+  if (!text) return [];
+  const validators = new Set<string>();
+  for (const token of text.split(/[\s,]+/).filter(Boolean)) {
+    if (validWalletOrNull(token) !== token) {
+      throw new ConfigError(
+        `TRUSTED_VALIDATORS must be a comma-separated list of Stellar G… or C… addresses, got '${token}'`,
+      );
+    }
+    validators.add(token);
+  }
+  if (validators.size > MAX_TRUSTED_VALIDATORS) {
+    throw new ConfigError(
+      `TRUSTED_VALIDATORS lists ${validators.size} validators; at most ${MAX_TRUSTED_VALIDATORS} are read.`,
+    );
+  }
+  return [...validators];
 }
 
 /**
@@ -174,6 +206,7 @@ export function loadConfig(env: EnvironmentMap = defaultEnvironment()): Config {
     rpcUrl: env.STELLAR_RPC_URL?.trim() || stellar.rpcUrl,
     explorerBaseUrl,
     registryAgentIds,
+    trustedValidators: parseTrustedValidators(env.TRUSTED_VALIDATORS),
     verifyOnchain: parseBool(env.VERIFY_ONCHAIN, true, "VERIFY_ONCHAIN"),
     scoreMax,
     ...(env.RANK_SIM_SOURCE?.trim() ? { simSource: env.RANK_SIM_SOURCE.trim() } : {}),

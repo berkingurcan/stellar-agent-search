@@ -133,6 +133,118 @@ export const zSourceNote = z
   })
   .passthrough();
 
+/** A rule a Provider Standard manifest or its declaration breaks; messages are server-authored. */
+export const zManifestProblem = z
+  .object({
+    rule: z.string().optional().describe("Provider Standard v1 rule id, e.g. M3, P1, I1."),
+    message: z.string(),
+  })
+  .passthrough();
+
+/** The checked, typed terms of a Provider Standard v1 manifest (get_provider_manifest). */
+export const zProviderOffer = z
+  .object({
+    payment: z
+      .object({
+        protocol: z.literal("x402"),
+        x402Version: z.literal(2),
+        scheme: z.literal("exact"),
+        network: z.enum(["stellar:testnet", "stellar:pubnet"]),
+        asset: z.string().describe("The USDC Stellar Asset Contract for the network."),
+        assetSymbol: z.literal("USDC"),
+        payTo: z.string().describe("Checksummed G… or C… address the manifest says receives payment."),
+        maxTimeoutSeconds: z.number().int(),
+        feesSponsored: z.literal(true),
+      })
+      .passthrough(),
+    recovery: z
+      .object({
+        retentionSeconds: z.number().int().describe("How long results stay collectable without paying again."),
+        retentionDefaulted: z.boolean(),
+      })
+      .passthrough(),
+    dataUse: z
+      .object({ storesInputs: z.boolean().nullable(), trainsOnInputs: z.boolean().nullable() })
+      .passthrough(),
+    services: z.array(
+      z
+        .object({
+          name: z.string(),
+          price: z
+            .object({
+              amount: z.string().describe("Base units, exactly as the manifest states them."),
+              asset: z.literal("USDC"),
+              decimals: z.number().int(),
+              usdc: z.string().describe("The same amount in whole USDC."),
+            })
+            .passthrough(),
+          charge: z.enum(["on-success", "upfront"]),
+          expectedDurationSeconds: z.number().int().nullable(),
+          maxInputBytes: z.number().int(),
+          capacity: z
+            .object({ concurrency: z.number().int().nullable(), maxQueueWaitSeconds: z.number().int().nullable() })
+            .passthrough()
+            .nullable(),
+        })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
+
+/** [I1]–[I3]: whether the manifest is bound to the agent's on-chain registration and wallet. */
+export const zIdentityBinding = z
+  .object({
+    status: z.enum(["bound", "not-bound", "unverified"]),
+    registration: z.enum(["onchain", "indexed"]),
+    checks: z.array(
+      z
+        .object({
+          rule: z.enum(["I1", "I2", "I3"]),
+          status: z.enum(["pass", "fail", "unverified"]),
+          message: z.string(),
+        })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
+
+const zValidationRecord = z
+  .object({
+    requestHash: z.string(),
+    validator: z.string(),
+    trusted: z.boolean(),
+    selfValidated: z.boolean(),
+    response: z.number().int(),
+    level: z.number().int().nullable(),
+    responseHash: z.string(),
+    ledger: z.number().int(),
+  })
+  .passthrough();
+
+/** Provider Standard conformance from trusted validators' Validation Registry records. */
+export const zConformance = z
+  .object({
+    status: z.enum(["attested", "none", "not-configured", "unavailable"]),
+    tag: z.string(),
+    trustedValidators: z.number().int().nonnegative(),
+    trustedRecordCount: z.number().int().nonnegative().nullable(),
+    level: z.number().int().nullable(),
+    badges: z.array(
+      z
+        .object({
+          id: z.enum(["standard-v1", "payment-verified", "recovery-verified"]),
+          label: z.string(),
+          network: z.string(),
+        })
+        .passthrough(),
+    ),
+    latest: zValidationRecord.nullable(),
+    records: z.array(zValidationRecord),
+    limitations: z.array(z.string()),
+    reason: z.string().optional(),
+  })
+  .passthrough();
+
 /** Bounded-discovery coverage; `hasMore` is omitted when the API cannot derive it. */
 export const zDiscoveryCoverage = z
   .object({

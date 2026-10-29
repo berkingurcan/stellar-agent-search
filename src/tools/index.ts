@@ -9,6 +9,7 @@
  * Tier-1 (complete-core): list_agents, leaderboard, resolve_agent,
  *   get_agents_by_owner, get_agent_feedback, verify_reputation, get_agent_card,
  *   get_registry_stats, get_registry_health
+ * Phase 2 (provider network): get_provider_manifest
  */
 
 import type { McpServer } from "@modelcontextprotocol/server";
@@ -27,6 +28,7 @@ import { registerGetAgentsByOwner } from "./get_agents_by_owner.js";
 import { registerGetAgentFeedback } from "./get_agent_feedback.js";
 import { registerVerifyReputation } from "./verify_reputation.js";
 import { registerGetRegistryStats, registerGetRegistryHealth } from "./registry.js";
+import { registerGetProviderManifest } from "./get_provider_manifest.js";
 
 /** Ordered list of every tool registrar (registration order = listing order). */
 const REGISTRARS: Array<(server: McpServer, deps: ToolDeps) => void> = [
@@ -45,6 +47,8 @@ const REGISTRARS: Array<(server: McpServer, deps: ToolDeps) => void> = [
   registerGetAgentCard,
   registerGetRegistryStats,
   registerGetRegistryHealth,
+  // Phase 2 (provider network)
+  registerGetProviderManifest,
 ];
 
 /** Register all read-only tools on the given server. */

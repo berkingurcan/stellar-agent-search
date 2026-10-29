@@ -1084,6 +1084,8 @@ describe("health and real MCP factory smoke", () => {
       : [];
     expect(names).toContain("find_agent");
     expect(names).toContain("rank_agent");
+    // It fetches registrant-chosen URLs; the public Worker never does.
+    expect(names).not.toContain("get_provider_manifest");
 
     const toolByName = (name: string): Record<PropertyKey, unknown> => {
       const match = Array.isArray(tools)

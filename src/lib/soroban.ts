@@ -30,6 +30,7 @@
  *
  *     new ReputationClient(...)  ->  .spec  ->  new FetchContractClient(spec, opts)
  *     new IdentityClient(...)    ->  .spec  ->  new FetchContractClient(spec, opts)
+ *     new ValidationClient(...)  ->  .spec  ->  new FetchContractClient(spec, opts)
  *
  * The donor is constructed but never used for I/O; building it costs no network
  * call, and the spec it carries is the same XDR the contract was compiled from.
@@ -41,7 +42,14 @@
  * NULL_ACCOUNT and skips the `getAccount()` lookup public RPCs reject.
  */
 
-import { IdentityClient, ReputationClient, type SummaryResult } from "@trionlabs/stellar8004";
+import {
+  IdentityClient,
+  ReputationClient,
+  ValidationClient,
+  type SummaryResult,
+  type ValidationStatus,
+  type ValidationSummary,
+} from "@trionlabs/stellar8004";
 import { Client as FetchContractClient } from "@stellar/stellar-sdk/contract";
 import type { Config } from "../config.js";
 
@@ -76,6 +84,30 @@ export interface IdentityReadClient {
   get_agent_wallet(args: { agent_id: number }): Promise<{ result: string | undefined }>;
   /** The non-panicking owner lookup: `undefined` when the agent does not exist. */
   find_owner(args: { agent_id: number }): Promise<{ result: string | undefined }>;
+}
+
+/**
+ * The Validation Registry reads `ValidationEvidenceReader` performs, structural
+ * for the same reason; the generated client's `validation_request` and
+ * `validation_response` writes are deliberately not named.
+ */
+export interface ValidationReadClient {
+  /** How many of an agent's answered records carry `tag`, counting only `validator_addresses` (all when empty). */
+  get_summary(args: {
+    agent_id: number;
+    validator_addresses: string[];
+    tag: string;
+  }): Promise<{ result: ValidationSummary }>;
+  /** An agent's request hashes, oldest first. */
+  get_agent_validations_paginated(args: {
+    agent_id: number;
+    start: number;
+    limit: number;
+  }): Promise<{ result: Buffer[] }>;
+  /** `Err` when no request has this hash. */
+  get_validation_status(args: {
+    request_hash: Buffer;
+  }): Promise<{ result: { isOk(): boolean; unwrap(): ValidationStatus } }>;
 }
 
 export interface SorobanReadClientOptions {
@@ -161,6 +193,19 @@ export function createIdentityReadClient(
   return createFetchReadClient<IdentityReadClient>(
     IdentityClient,
     cfg.stellar.contracts.identity,
+    cfg,
+    opts,
+  );
+}
+
+/** Build the Validation Registry reader on the fetch-based SDK build. */
+export function createValidationReadClient(
+  cfg: Config,
+  opts: SorobanReadClientOptions = {},
+): ValidationReadClient {
+  return createFetchReadClient<ValidationReadClient>(
+    ValidationClient,
+    cfg.stellar.contracts.validation,
     cfg,
     opts,
   );

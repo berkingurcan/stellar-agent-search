@@ -38,6 +38,9 @@ export const WORKER_TOOL_POLICY = Object.freeze({
   maxVerificationConcurrency: 1,
   maxFeedbackScanPages: 3,
   maxExplorerConcurrency: 4,
+  // get_provider_manifest fetches manifest and registration URLs that registrants
+  // chose. Leaving it out keeps the Worker's egress to the Explorer binding and RPC.
+  fetchProviderDocuments: false,
 }) satisfies ToolRuntimePolicy;
 
 const SERVICE_BINDING_ORIGIN = "https://stellar8004.internal";

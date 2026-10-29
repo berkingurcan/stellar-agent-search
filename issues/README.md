@@ -30,7 +30,7 @@ the non-default `bootstrap` tag while private → public repository → protecte
 | [07](P1-07-testnet-mode-has-no-explorer.md) | P1 | ~~`STELLAR_NETWORK=testnet` has no explorer and cannot work~~ **resolved** | Code |
 | [08](P2-08-verify-scrapper-endpoint-is-live.md) | P2 | Correct the target's HTTP resource echo — evidence-run gate resolved; upstream metadata fix remains | Upstream Scrapper deploy owner |
 | [09](P2-09-substantiate-only-non-evm-claim.md) | P2 | ~~Substantiate or soften the "only live non-EVM" claim~~ **resolved** | Code |
-| [10](P3-10-validation-registry-axis.md) | P3 | Validation registry as a fourth trust axis | Code |
+| [10](P3-10-validation-registry-axis.md) | P3 | Validation registry as a fourth trust axis — **partly implemented:** Provider Standard badges read; ranking axis deferred | Code |
 | [11](P3-11-remote-stateless-deployment.md) | P3 | Remote / stateless deployment — **implemented; production canary blocked** | Code + Builder |
 | [12](P3-12-stellar-native-paid-tools.md) | P3 | Stellar-native paid MCP tools — direct core path available | Code |
 | [13](P3-13-upstream-discovery-api-v2.md) | P3 | Upstream cursor-based discovery API v2 | Blocked upstream |
@@ -43,7 +43,8 @@ the non-default `bootstrap` tag while private → public repository → protecte
 | [20](P1-20-upstream-rate-limiter-must-fail-closed.md) | P1 | Stop allowing requests when the upstream limiter RPC fails | Blocked upstream |
 | [21](P1-21-upstream-indexer-integrity-watermark.md) | P1 | Expose durable checkpoint/dead-letter integrity state | Blocked upstream |
 | [22](P1-22-upstream-leaderboard-freshness.md) | P1 | Bind leaderboard freshness to its last successful projection refresh | Blocked upstream |
-| [23](P3-23-provider-network-phase-2.md) | P3 | Stellar Agent Search Phase 2: reusable provider network | Code + Builder |
+| [23](P3-23-provider-network-phase-2.md) | P3 | Stellar Agent Search Phase 2: reusable provider network — **in progress:** discovery side done | Code + Builder |
+| [24](P3-24-provider-receipt-badges.md) | P3 | Load-safe and 8004 validated badges from the verification receipt | Code |
 
 ## A note on review
 

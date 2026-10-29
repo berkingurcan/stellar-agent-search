@@ -27,6 +27,10 @@ import {
   type ExplorerServiceOptions,
 } from "../lib/explorer.js";
 import type { ParsedQuery } from "../lib/nlparse.js";
+import {
+  ProviderManifestService,
+  type ProviderManifestServiceOptions,
+} from "../lib/provider-manifest.js";
 import { RegistryService, type RegistryServiceOptions } from "../lib/registry-source.js";
 import { requireIndexer, type AgentSource, type RegistrySourceNote } from "../lib/source.js";
 import { ReputationVerifier, type ReputationVerifierOptions } from "../lib/reputation.js";
@@ -78,6 +82,11 @@ export interface ToolDeps {
   /** The explorer (indexer) or, in registry mode, direct Identity contract reads. */
   source: AgentSource;
   verifier: ReputationVerifier;
+  /**
+   * Provider Standard manifests and their Validation Registry badges
+   * (get_provider_manifest). Built from `config` when omitted.
+   */
+  providers?: ProviderManifestService;
   /** Optional runtime-specific public-surface caps (the local stdio defaults stay broader). */
   policy?: ToolRuntimePolicy;
 }
@@ -91,6 +100,12 @@ export interface ToolRuntimePolicy {
   maxVerificationConcurrency?: number;
   maxFeedbackScanPages?: number;
   maxExplorerConcurrency?: number;
+  /**
+   * false leaves out get_provider_manifest, the one tool that fetches documents a
+   * registrant chose (manifests and registration files). The public Worker sets
+   * it, so it never fetches an agent-declared URL.
+   */
+  fetchProviderDocuments?: boolean;
 }
 
 /** Construction options for runtime-specific fetch/cache and test seams. */
@@ -98,6 +113,7 @@ export interface CreateToolDepsOptions {
   explorer?: ExplorerServiceOptions;
   registry?: RegistryServiceOptions;
   verifier?: ReputationVerifierOptions;
+  providers?: ProviderManifestServiceOptions;
 }
 
 /** Convenience factory: build the read-only deps from a loaded Config. */
@@ -108,6 +124,7 @@ export function createToolDeps(config: Config, opts: CreateToolDepsOptions = {})
       ? new RegistryService(config, opts.registry)
       : new ExplorerService(config, opts.explorer),
     verifier: new ReputationVerifier(config, opts.verifier),
+    providers: new ProviderManifestService(config, opts.providers),
   };
 }
 

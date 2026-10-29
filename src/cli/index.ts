@@ -4,8 +4,9 @@
  * ranking engine), so there is no duplicated discovery/ranking logic.
  *
  * Subcommands: find <query> · profile <id> · rank <query|ids> · services ·
- * doctor · setup · serve · --help · --version. Flags override env (precedence:
- * flag → env → default). All diagnostics go to stderr; command output to stdout.
+ * manifest <id> · doctor · setup · serve · --help · --version. Flags override
+ * env (precedence: flag → env → default). All diagnostics go to stderr; command
+ * output to stdout.
  *
  * TRUST BOUNDARY: every agent-authored string printed here (name / description /
  * service labels) comes out of the sanitized, labeled `selfDeclared` slot — never
@@ -48,6 +49,8 @@ import {
 } from "@trionlabs/stellar8004";
 import { buildServer, SERVER_NAME } from "../server.js";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
+import { MANIFEST_SERVICE_NAME, MANIFEST_SERVICE_VERSION } from "../lib/provider-standard.js";
+import { providerManifestReport } from "../tools/get_provider_manifest.js";
 import { executeSetup, formatSetupReport } from "./setup.js";
 
 // ---------------------------------------------------------------------------
@@ -60,6 +63,7 @@ export interface CliFlags {
   network?: string;
   explorerUrl?: string;
   registryAgentIds?: string;
+  trustedValidators?: string;
   rpcUrl?: string;
   verify: boolean;
   noVerify: boolean;
@@ -88,6 +92,7 @@ const VALUE_FLAGS = new Map<string, keyof CliFlags>([
   ["-n", "network"],
   ["--explorer-url", "explorerUrl"],
   ["--registry-agent-ids", "registryAgentIds"],
+  ["--trusted-validators", "trustedValidators"],
   ["--rpc-url", "rpcUrl"],
   ["--limit", "limit"],
   ["--min-explorer-score", "minExplorerScore"],
@@ -199,6 +204,7 @@ export function buildConfig(flags: CliFlags, baseEnv: NodeJS.ProcessEnv = proces
   if (flags.network) env.STELLAR_NETWORK = flags.network;
   if (flags.explorerUrl) env.EXPLORER_BASE_URL = flags.explorerUrl;
   if (flags.registryAgentIds) env.REGISTRY_AGENT_IDS = flags.registryAgentIds;
+  if (flags.trustedValidators) env.TRUSTED_VALIDATORS = flags.trustedValidators;
   if (flags.rpcUrl) env.STELLAR_RPC_URL = flags.rpcUrl;
   if (flags.verify) env.VERIFY_ONCHAIN = "true";
   if (flags.noVerify) env.VERIFY_ONCHAIN = "false";
@@ -650,6 +656,7 @@ async function cmdServices(deps: ToolDeps, flags: CliFlags): Promise<number> {
         livenessVerified: false,
         protocolConformanceVerified: false,
         paymentVerified: false,
+        providerStandard: svc.name === MANIFEST_SERVICE_NAME && svc.version === MANIFEST_SERVICE_VERSION,
         service: svc,
       });
     }
@@ -678,6 +685,96 @@ async function cmdServices(deps: ToolDeps, flags: CliFlags): Promise<number> {
   if (hydrationMissing > 0) {
     out(`${INFO} ${hydrationMissing} agent(s) disappeared between list and detail reads.`);
   }
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// manifest — a Provider Standard v1 provider's terms, binding and badges
+// ---------------------------------------------------------------------------
+
+async function cmdManifest(deps: ToolDeps, flags: CliFlags): Promise<number> {
+  const ref = flags.positionals[1];
+  if (!ref) {
+    err("usage: stellar-agent-search manifest <id | stellar:...#id> [--trusted-validators <G…,…>] [--json]");
+    return 2;
+  }
+  const id = resolveAgentId(ref, {
+    network: deps.config.network,
+    identity: deps.config.stellar.contracts.identity,
+  });
+  if (id == null) {
+    err(`Could not resolve agent reference '${ref}'.`);
+    return 2;
+  }
+
+  const { structured: r } = await providerManifestReport(deps, id);
+  if (flags.json) {
+    out(JSON.stringify(r, null, 2));
+    return 0;
+  }
+
+  // Provider text comes only from the sanitized selfDeclared slot.
+  const self = r.selfDeclared?.value;
+  out(`Agent ${id}  (${deps.config.network})  Provider Standard v1 manifest: ${r.status}`);
+  if (self?.manifestUrl) out(`  manifest   : ${self.manifestUrl}  (URL from the registration)`);
+  for (const p of r.problems) out(`  ${CROSS} ${p.rule ? `[${p.rule}] ` : ""}${p.message}`);
+  if (r.offer) {
+    const pay = r.offer.payment;
+    out(`  payment    : x402 ${pay.scheme}, USDC on ${pay.network}, fees sponsored, ${pay.maxTimeoutSeconds} s to sign`);
+    out(`  payTo      : ${pay.payTo}`);
+    out(
+      `  recovery   : results kept ${r.offer.recovery.retentionSeconds} s` +
+        (r.offer.recovery.retentionDefaulted ? " (the standard's default)" : ""),
+    );
+  }
+  if (r.identity) {
+    const mark = r.identity.status === "bound" ? CHECK : CROSS;
+    out(
+      `  identity   : ${mark} ${r.identity.status}  ` +
+        r.identity.checks.map((c) => `${c.rule} ${c.status}`).join(", ") +
+        `  (registration ${r.identity.registration === "onchain" ? "read on chain" : "from the indexer"})`,
+    );
+    for (const c of r.identity.checks) if (c.status !== "pass") out(`               ${c.rule}: ${c.message}`);
+  }
+  if (r.conformance) {
+    const v = r.conformance;
+    const what =
+      v.status === "attested"
+        ? `level ${v.level} attested by a trusted validator: ${v.badges.map((b) => b.label).join(", ") || "no badge"}`
+        : v.status === "none"
+          ? `no trusted Validation Registry record (${v.trustedValidators} trusted validator(s))`
+          : v.status === "not-configured"
+            ? "not read; set TRUSTED_VALIDATORS or --trusted-validators"
+            : `unavailable${v.reason ? ` (${v.reason})` : ""}`;
+    out(`  conformance: ${what}`);
+    if (v.latest) {
+      out(`               validator ${v.latest.validator}, ledger ${v.latest.ledger}, receipt sha256 ${v.latest.responseHash}`);
+    }
+  }
+  if (r.offer) {
+    const titles = self?.services ?? [];
+    out();
+    out(
+      table(
+        ["SERVICE", "USDC", "CHARGE", "~SECONDS", "TITLE (self-declared)"],
+        r.offer.services.map((s, i) => [
+          s.name,
+          s.price.usdc,
+          s.charge,
+          s.expectedDurationSeconds === null ? "-" : String(s.expectedDurationSeconds),
+          truncate(titles[i]?.title ?? "", 40),
+        ]),
+      ),
+    );
+  }
+  if (self?.provider) {
+    out();
+    out(`  self-declared (UNVERIFIED):`);
+    out(`    name        : ${self.provider.name}`);
+    if (self.provider.description) out(`    description : ${truncate(self.provider.description, 100)}`);
+  }
+  out();
+  out(`${INFO} Nothing was paid. A payment client pays from the manifest URL after you approve the price and payee.`);
   return 0;
 }
 
@@ -884,6 +981,7 @@ COMMANDS
   rank <query | id...>    Rank a query's candidates or an explicit id set (3-axis + evidence limits)
   profile <id>            Full profile: identity, capabilities, declared reputation + evidence limits
   services [search]       Catalog of self-declared x402/MPP endpoint candidates
+  manifest <id>           A Provider Standard v1 provider's prices, payee, identity binding and badges
   doctor                  Self-check: env, explorer health, RPC reachability, read-only posture
   setup --client <name>   Idempotently register with Claude Code, Cursor, or Codex
   serve                   Explicitly start the MCP stdio server
@@ -895,6 +993,8 @@ FLAGS
   --explorer-url <url>          Explorer API base (env EXPLORER_BASE_URL)
   --registry-agent-ids <ids>    Registry mode: read these agents from the Identity contract, no
                                 explorer (env REGISTRY_AGENT_IDS; e.g. 12,40)
+  --trusted-validators <G…>     Validation Registry validators whose Provider Standard records
+                                earn badges (env TRUSTED_VALIDATORS; comma-separated)
   --rpc-url <url>               Soroban RPC (env STELLAR_RPC_URL)
   --verify                      Attempt bounded on-chain evidence reads for find results (off by default)
   --no-verify                   Skip on-chain reputation evidence reads (env VERIFY_ONCHAIN=false)
@@ -918,7 +1018,7 @@ current contract has no authoritative client-set cursor/count, so no reputation 
 // Dispatcher
 // ---------------------------------------------------------------------------
 
-const CLI_COMMANDS = new Set(["find", "rank", "profile", "services", "doctor", "setup"]);
+const CLI_COMMANDS = new Set(["find", "rank", "profile", "services", "manifest", "doctor", "setup"]);
 
 /**
  * Run the human CLI for the given parsed flags. Returns a process exit code.
@@ -960,6 +1060,7 @@ export async function runCli(
         network: flags.network,
         explorerUrl: flags.explorerUrl,
         registryAgentIds: flags.registryAgentIds,
+        trustedValidators: flags.trustedValidators,
         rpcUrl: flags.rpcUrl,
         noVerify: flags.noVerify,
         version,
@@ -985,6 +1086,8 @@ export async function runCli(
         return await cmdProfile(deps, flags);
       case "services":
         return await cmdServices(deps, flags);
+      case "manifest":
+        return await cmdManifest(deps, flags);
       case "doctor":
         return await cmdDoctor(deps, flags);
       default:

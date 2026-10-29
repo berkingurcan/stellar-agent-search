@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`get_provider_manifest`** (CLI `manifest <id>`): the Provider Standard v1 (`stellar-agent-services/provider@1`)
+  step between discovery and payment. For one agent it finds the manifest its registration names
+  (`{ name: "stellar-agent-services", version: "1" }`), fetches it the way the standard tells clients to (public
+  HTTPS host, no redirect, at most 256 KiB, `application/json`, I-JSON), and returns:
+  - `offer`: each service's price in base units and whole USDC, charge mode, expected duration and capacity, the
+    network, asset, `payTo` and payment window, and result retention for job recovery. Every field shown is checked
+    against the standard, and a manifest whose payment terms can't be read exactly is `invalid` and shows none. A
+    manifest for another network than the server's is refused.
+  - `identity` / `identityBound`: rules [I1]–[I3]. The registration names this manifest, the manifest names this
+    agent, and `payTo` is the agent's on-chain wallet. Over the explorer the registration is read again from the
+    Identity contract, so the indexer never decides whom a user pays.
+  - `conformance`: badges (Standard v1, Payment verified, Recovery verified) from Stellar 8004 Validation Registry
+    records with tag `provider-standard-v1`, counted only for validators in the new `TRUSTED_VALIDATORS` setting and
+    never for the agent's own owner or wallet. Any failed read makes it `unavailable`, never a partial set.
+  - Provider text (names, descriptions, titles, tags, URLs) only in the sanitized `selfDeclared` slot.
+
+  It works in explorer and registry mode, and never pays. `test/provider-standard.test.ts` runs the manifest reader
+  over the standard's own test vectors (`test/fixtures/provider-standard/manifests.json`).
+- **`TRUSTED_VALIDATORS`** (CLI `--trusted-validators`, `setup --trusted-validators`): up to 20 checksummed G… or
+  C… validator addresses whose Validation Registry records earn badges. Empty by default, and then the registry is
+  not read.
+- `list_services` rows carry `providerStandard: true` for an entry that declares a Provider Standard v1 manifest,
+  and the summary says how many do. The `find-and-vet-agent` and `prepare-x402-call` prompts call
+  `get_provider_manifest` for those providers and drop any that is not `ok` or not identity-bound.
 - **AI-agent onboarding**: `AGENTS.md` (read by Codex, Cursor, Copilot and others; `CLAUDE.md` and `GEMINI.md`
   import it) routes an agent visiting the repo to the right doc for using, integrating, building a provider, or
   contributing. `llms.txt` is the same index as plain links, also served by the landing site.
@@ -85,6 +109,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   presented as funded evidence.
 
 ### Security
+
+- **Provider documents are the only agent-chosen URLs the local server fetches, and the public Worker fetches
+  none.** `get_provider_manifest` reads a registration's manifest (and, over the explorer, the registration file)
+  with one HTTPS `GET` each: no redirect, a 10 s deadline, a size cap, and IP-literal, `localhost`, single-label and
+  `.local`/`.internal` hosts refused before any request (`src/lib/http.ts`). The Worker's tool policy
+  (`fetchProviderDocuments: false`) leaves the tool out, so its egress stays the Explorer binding and RPC.
+  `SECURITY.md` T7 is updated.
 
 - **On-chain reads no longer use axios.** `ReputationVerifier` now talks to the Reputation contract through
   `@stellar/stellar-sdk/no-axios/contract` (fetch-based), reusing the generated bindings' `Spec` so argument
