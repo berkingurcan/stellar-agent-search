@@ -124,7 +124,8 @@ misrepresented as authentication:
 - Explorer egress is limited to `GET` on the configured base's `/api/v1` and `/api/v2` paths, then rewritten
   to `STELLAR8004_API`. Caller authorization, cookies, MCP headers, forwarding headers, bodies, and arbitrary
   headers are not forwarded. The Worker never fetches an agent-declared endpoint, so registry metadata cannot
-  turn it into a general SSRF proxy.
+  turn it into a general SSRF proxy. Its tool policy (`fetchProviderDocuments: false`) leaves out
+  `get_provider_manifest`, the one tool that would.
 - Every accepted request builds a fresh MCP server. The handler is stateless (including its legacy
   compatibility lane), with no session store, Durable Object, resume token, or server-initiated message.
 - The shared Explorer `TtlCache` and the separately bounded verifier cache are isolate-local and
@@ -157,7 +158,7 @@ permissionless registry. Mapped to OWASP MCP Top-10.
 | **T4** | Tool-contract rug-pull (**MCP03**) | Low × Med | Semver on the tool contract + a "Tool contract changes" changelog section; clean non-imperative tool descriptions. |
 | **T5** | stdout protocol corruption | Med × Med | stderr-only logger + stdout-cleanliness CI test. |
 | **T6** | Upstream outage / rate-limit → hang | Med × Med | SDK backoff + 429 handling; the contract probe degrades **closed** and reputation stays declared-only; hard page caps; bounded top-K attempts. |
-| **T7** | SSRF via endpoint probes (**MCP05-adj**) | Med × High *if built* | The probe tools (`agent_health`, `x402_compliance_scan`) that would fetch attacker-declared endpoints are **deferred from v0.1**. This server makes no requests to agent-declared URLs. |
+| **T7** | SSRF via endpoint probes (**MCP05-adj**) | Med × High *if built* | The probe tools (`agent_health`, `x402_compliance_scan`) that would call attacker-declared service endpoints are **deferred from v0.1**; no job or service endpoint is ever called. Two reads fetch a document a registrant chose, each one HTTPS `GET` with no redirect, a 10 s deadline and a size cap, and each parsed into checked fields, never returned raw. Registry mode reads the registration files (64 KiB) of the agents the operator allowlisted. `get_provider_manifest` (local stdio only) reads the Provider Standard manifest (256 KiB) a registration names, plus, over the explorer, that registration file; it refuses IP literals, `localhost`, single-label and `.local`/`.internal` host names before any request. A public name that resolves to a private address is not caught, so a shared deployment should only reach the public internet. The public Worker leaves `get_provider_manifest` out. |
 | **T8** | Context / token DoS | Low × Med | Length/count caps + truncation (same control as T1); `limit` capped at 50. |
 | **T9** | Ranking sybil manipulation | Med × Med | Indexer-declared breadth is weighted above raw volume. The bounded contract probe verifies no rank input, and breadth is not chain-verified; `RANK_SCORE_MAX = 100`. |
 | **T10** | Secret exposure (**MCP01**) | Very Low × High | Server holds no secrets; CI greps for signer/secret patterns; `STELLAR_PRIVATE_KEY` ignored if present. |

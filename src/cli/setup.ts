@@ -29,7 +29,7 @@ import {
   getDefaultEnvironment,
   StdioClientTransport,
 } from "@modelcontextprotocol/client/stdio";
-import { parseRegistryAgentIds } from "../config.js";
+import { parseRegistryAgentIds, parseTrustedValidators } from "../config.js";
 
 export const SETUP_SERVER_NAME = "stellar-agent";
 const PACKAGE_NAME = "stellar-agent-search";
@@ -58,6 +58,7 @@ export interface SetupCommandOptions {
   network?: string;
   explorerUrl?: string;
   registryAgentIds?: string;
+  trustedValidators?: string;
   rpcUrl?: string;
   noVerify?: boolean;
   version: string;
@@ -166,6 +167,8 @@ function parseOptions(options: SetupCommandOptions): ParsedOptions {
   if (options.explorerUrl) env.EXPLORER_BASE_URL = validateHttpUrl("--explorer-url", options.explorerUrl);
   const registryAgentIds = parseRegistryAgentIds(options.registryAgentIds);
   if (registryAgentIds) env.REGISTRY_AGENT_IDS = registryAgentIds.join(",");
+  const trustedValidators = parseTrustedValidators(options.trustedValidators);
+  if (trustedValidators.length > 0) env.TRUSTED_VALIDATORS = trustedValidators.join(",");
   if (options.rpcUrl) env.STELLAR_RPC_URL = validateHttpUrl("--rpc-url", options.rpcUrl);
   if (options.noVerify) env.VERIFY_ONCHAIN = "false";
   if (env.EXPLORER_BASE_URL && env.REGISTRY_AGENT_IDS) {

@@ -10,7 +10,7 @@ A **read-only, keyless** MCP server and CLI over the [stellar-8004](https://stel
 rank and vet other on-chain agents, and see which ones declare x402 (USDC pay-per-call) endpoints.
 
 - npm package `stellar-agent-search` (pin `@0.1.0`), MCP Registry name `io.github.berkingurcan/stellar-agent-search`.
-- Surface: 13 tools, 8 `stellar8004://` resources, 5 prompts. Machine-readable snapshot of every schema:
+- Surface: 14 tools, 8 `stellar8004://` resources, 5 prompts. Machine-readable snapshot of every schema:
   [test/__surface__/mcp-surface.json](test/__surface__/mcp-surface.json). Human reference: [docs/tools.md](docs/tools.md).
 - Transport: stdio. The hosted HTTP endpoint `https://mcp.stellar8004.com/mcp` is **not live**; do not configure it.
 - It holds no keys and signs nothing. Paying an agent and writing feedback are separate, explicit steps.
@@ -27,6 +27,9 @@ rank and vet other on-chain agents, and see which ones declare x402 (USDC pay-pe
 4. **Coverage is bounded.** `coverage.coverageComplete: false` means "a window was scanned", not "nothing else exists".
 5. **Default network is mainnet.** Testnet requires `STELLAR_NETWORK=testnet` plus `REGISTRY_AGENT_IDS` or
    `EXPLORER_BASE_URL`.
+6. **A Provider Standard provider is payable only when `get_provider_manifest` says so**: `status: "ok"` and
+   `identityBound: true`. Its badges count only when `conformance.status` is `attested`, which needs
+   `TRUSTED_VALIDATORS`; `not-configured` says nothing about the provider.
 
 ## Pick your path
 
@@ -35,7 +38,8 @@ rank and vet other on-chain agents, and see which ones declare x402 (USDC pay-pe
 | Give your MCP client (Claude Code, Cursor, Codex…) agent discovery | `npx -y stellar-agent-search@0.1.0 setup --client claude --scope user --handshake` | [docs/getting-started.md](docs/getting-started.md), [docs/integration.md](docs/integration.md) |
 | Learn how to use the tools well, as an agent | `npx skills add berkingurcan/stellar-agent-search --skill mcp` | [skills/mcp/SKILL.md](skills/mcp/SKILL.md) |
 | Call it from your own program | spawn it over stdio with an MCP client | [examples/consumer-mcp-client.ts](examples/consumer-mcp-client.ts) |
-| Call it from a shell, script or CI | `npx -y stellar-agent-search@0.1.0 find "<query>" --json` (also `rank`, `profile`, `services`, `doctor`) | [docs/getting-started.md](docs/getting-started.md) |
+| Call it from a shell, script or CI | `npx -y stellar-agent-search@0.1.0 find "<query>" --json` (also `rank`, `profile`, `services`, `doctor`; from a checkout, `manifest`) | [docs/getting-started.md](docs/getting-started.md) |
+| Check a Provider Standard provider's prices, payee and badges before paying it | `get_provider_manifest` (CLI `manifest <id>`), with `TRUSTED_VALIDATORS` set for badges | [docs/tools.md](docs/tools.md#get_provider_manifest) |
 | Register an agent, sign transactions, build a TypeScript app on the registry | use the canonical SDK [`@trionlabs/stellar8004`](https://www.npmjs.com/package/@trionlabs/stellar8004), **not** this package | [docs/stellar8004-integration.md](docs/stellar8004-integration.md) |
 | **Build a service that other agents find and pay** | register it with good search text (with no secret key: `provider-kit register` from Stellar Agent Services), serve x402, earn distinct reviews | [docs/build-a-discoverable-agent.md](docs/build-a-discoverable-agent.md), [examples/provider-register.ts](examples/provider-register.ts) |
 | Pay a discovered agent (x402) and leave on-chain feedback | run the keyed reference script, dry run first | [examples/README.md](examples/README.md) |
@@ -43,8 +47,8 @@ rank and vet other on-chain agents, and see which ones declare x402 (USDC pay-pe
 | Change this codebase | see "Working in this repo" below | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
 Typical agent workflow once the server is connected: `find_agent` → `rank_agent` (or `leaderboard`) →
-`get_agent_profile` → `list_services` / `get_agent_card` → hand off to a wallet-holding tool for payment.
-The `/find-and-vet-agent` prompt runs this sequence.
+`get_agent_profile` → `list_services` / `get_agent_card` → for a Provider Standard provider, `get_provider_manifest`
+→ hand off to a wallet-holding tool for payment. The `/find-and-vet-agent` prompt runs this sequence.
 
 ## Working in this repo
 
@@ -61,7 +65,7 @@ node dist/index.js find "web scraper"            # CLI; bare `node dist/index.js
 |---|---|
 | `src/index.ts`, `src/server.ts` | Entry (CLI vs MCP dispatch), MCP wiring |
 | `src/tools/` | One file per tool; `schemas.ts` (zod), `shared.ts` (adapters) |
-| `src/lib/` | `explorer` (reads), `registry-source` (contract-only mode), `reputation` (fail-closed probe), `ranking`, `nlparse`, `sanitize`, `agentcard` |
+| `src/lib/` | `explorer` (reads), `registry-source` (contract-only mode), `reputation` (fail-closed probe), `ranking`, `nlparse`, `sanitize`, `agentcard`; `provider-standard` (manifest reader), `provider-manifest` (fetch + [I1]–[I3] binding), `validation` (Validation Registry badges), `http` (guarded fetch) |
 | `src/resources/`, `src/prompts/`, `src/cli/` | Resources, slash prompts, human CLI + `setup` |
 | `examples/` | The **only** keyed code: `x402-demo.ts`, `provider-register.ts`; plus keyless `consumer-mcp-client.ts` |
 | `worker/`, `web/` | Cloudflare remote adapter (not live), landing site |

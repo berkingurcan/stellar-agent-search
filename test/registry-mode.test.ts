@@ -19,6 +19,7 @@ import { parseFlags, runCli } from "../src/cli/index.js";
 import { loadConfig, type Config } from "../src/config.js";
 import { classifyError, IndexerRequiredError, RegistryReadError } from "../src/lib/errors.js";
 import { ExplorerService } from "../src/lib/explorer.js";
+import { ProviderManifestService } from "../src/lib/provider-manifest.js";
 import { RegistryService } from "../src/lib/registry-source.js";
 import { ReputationVerifier } from "../src/lib/reputation.js";
 import type { IdentityReadClient } from "../src/lib/soroban.js";
@@ -95,6 +96,48 @@ function hostedFetch(body: unknown = HOSTED_REGISTRATION) {
     expect(init?.redirect).toBe("error");
     return new Response(typeof body === "string" ? body : JSON.stringify(body), { status: 200 });
   });
+}
+
+/** Agent 7's Provider Standard manifest, bound to its registration and wallet. */
+const PILOT_MANIFEST = {
+  standard: "stellar-agent-services/provider@1",
+  provider: { name: "Pilot Provider", agentId: 7 },
+  baseUrl: "https://provider.example",
+  payment: {
+    protocol: "x402",
+    x402Version: 2,
+    accepts: [
+      {
+        scheme: "exact",
+        network: "stellar:testnet",
+        asset: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+        payTo: WALLET,
+        maxTimeoutSeconds: 60,
+        extra: { areFeesSponsored: true },
+      },
+    ],
+  },
+  services: [
+    {
+      name: "infer",
+      description: "Paid inference.",
+      price: { amount: "100000" },
+      inputSchema: { type: "object" },
+      outputSchema: { type: "object" },
+    },
+  ],
+};
+
+/** Reads agent 7's manifest offline; registration files never come through here. */
+function manifestProviders(config: Config): ProviderManifestService {
+  const fetch = vi.fn(async (input: string | URL | Request) => {
+    expect(String(input)).toBe(MANIFEST_URL);
+    return new Response(JSON.stringify(PILOT_MANIFEST), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  return new ProviderManifestService(config, { fetch: fetch as unknown as typeof globalThis.fetch });
 }
 
 function registryConfig(ids = "7,8,9,10"): Config {
@@ -341,7 +384,12 @@ afterEach(async () => {
 
 async function connect(): Promise<Client> {
   const config = registryConfig();
-  const deps: ToolDeps = { config, source: registry(), verifier: new ReputationVerifier(config) };
+  const deps: ToolDeps = {
+    config,
+    source: registry(),
+    verifier: new ReputationVerifier(config),
+    providers: manifestProviders(config),
+  };
   const server = buildServer(config, { version: "test", deps });
   const client = new Client({ name: "registry-mode-test", version: "test" }, { capabilities: {} });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -380,11 +428,34 @@ describe("tools in registry mode", () => {
       endpointVerified: false,
       livenessVerified: false,
       paymentVerified: false,
+      providerStandard: true,
       service: { provenance: "self-declared", verified: false, value: { endpoint: MANIFEST_URL } },
     });
+    expect(services.filter((row: any) => row.providerStandard)).toHaveLength(1);
     expect(result.structuredContent.source).toMatchObject(SOURCE_NOTE);
     expect(result.structuredContent.coverage.limitations).toContain("registry-allowlist-only");
     expect(textOf(result)).toContain("Registry mode");
+    expect(textOf(result)).toMatch(/1 declare a Provider Standard v1 manifest/);
+  });
+
+  it("get_provider_manifest reads the pilot's manifest and binds it to the on-chain registration", async () => {
+    const client = await connect();
+    const result = await call(client, "get_provider_manifest", { agent: 7 });
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toMatchObject({
+      agentId: 7,
+      network: "testnet",
+      status: "ok",
+      identityBound: true,
+      identity: { registration: "onchain" },
+      offer: { payment: { network: "stellar:testnet", payTo: WALLET }, services: [{ name: "infer" }] },
+      conformance: { status: "not-configured" },
+      source: SOURCE_NOTE,
+    });
+    expect(textOf(result)).toMatch(/identity bound/);
+
+    const absent = await call(client, "get_provider_manifest", { agent: 8 });
+    expect(absent.structuredContent).toMatchObject({ status: "absent", offer: null, selfDeclared: null });
   });
 
   it("find_agent, list_agents and rank_agent work over the allowlist and say reputation is not measured", async () => {
@@ -609,6 +680,7 @@ describe.sequential("every description of registry mode names the tools that ref
     get_registry_health: [{}],
     get_agents_by_owner: [{ owner: OWNER }],
     get_agent_feedback: [{ agent: 7 }],
+    get_provider_manifest: [{ agent: 7 }],
   };
 
   /** How the instructions and doctor, which use words rather than tool names, refer to each one. */

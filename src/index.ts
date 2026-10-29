@@ -2,7 +2,7 @@
  * index.ts — the single `stellar-agent-search` bin entry (shebang injected by tsup).
  *
  * Dual CLI + MCP dispatch (research/B §3.4):
- *   - A known CLI subcommand (find/profile/rank/services/doctor/setup) → human CLI.
+ *   - A known CLI subcommand (find/profile/rank/services/manifest/doctor/setup) → human CLI.
  *   - `serve` / `mcp` / `--stdio`                                → explicit MCP stdio server.
  *   - No args on a TTY                                           → friendly help.
  *   - No args on a non-TTY (how every MCP client launches us)    → MCP stdio server.
@@ -34,7 +34,7 @@ function getVersion(): string {
 /** Commands that mean "start the MCP server", not "run a CLI subcommand". */
 const SERVE_COMMANDS = new Set(["serve", "mcp"]);
 /** Human CLI subcommands. */
-const CLI_COMMANDS = new Set(["find", "rank", "profile", "services", "doctor", "setup"]);
+const CLI_COMMANDS = new Set(["find", "rank", "profile", "services", "manifest", "doctor", "setup"]);
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);

@@ -38,7 +38,15 @@ export const TIER1: Tool[] = [
 	{ name: 'get_registry_health', what: 'Per-registry indexer staleness' }
 ];
 
-export const TOOL_COUNT = TIER0.length + TIER1.length;
+/** Tier 2 — the provider network: Provider Standard v1 providers. */
+export const TIER2: Tool[] = [
+	{
+		name: 'get_provider_manifest',
+		what: 'Prices in USDC, payee and result retention, the identity binding, and badges from trusted validators'
+	}
+];
+
+export const TOOL_COUNT = TIER0.length + TIER1.length + TIER2.length;
 
 /**
  * Small counts read as words in prose ("Four invariants"), not digits. Derived

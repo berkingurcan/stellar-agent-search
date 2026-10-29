@@ -8,8 +8,9 @@
  * share this factory so there is one source of truth for what the server exposes.
  *
  * READ-ONLY: `createToolDeps` builds only a read source (ExplorerService, or
- * RegistryService in registry mode) + ReputationVerifier — no signer, no keys,
- * no write clients. The `instructions` string below is what
+ * RegistryService in registry mode), the ReputationVerifier and the
+ * ProviderManifestService — no signer, no keys, no write clients. The
+ * `instructions` string below is what
  * a tool-search client reads to decide *when* to reach for this server before it
  * even loads the individual tool schemas (research/B §5.5), so keep it crisp.
  */
@@ -53,6 +54,11 @@ export const SERVER_INSTRUCTIONS =
   "reputation fields: attempted checks are unavailable, verifiedFields is empty, and rankings remain " +
   "Explorer-declared. Reserved verification statuses never add a ranking bonus.";
 
+/** Appended wherever get_provider_manifest is registered (every deployment but the public Worker). */
+export const PROVIDER_STANDARD_INSTRUCTIONS =
+  " Before paying a Provider Standard provider, get_provider_manifest checks its prices, payee, identityBound " +
+  "and trusted badges.";
+
 /** Appended in registry mode (REGISTRY_AGENT_IDS), where there is no explorer. */
 export const REGISTRY_MODE_INSTRUCTIONS =
   " REGISTRY MODE: this server has no explorer. It reads an operator allowlist of agents straight from the " +
@@ -90,9 +96,11 @@ export function buildServer(config: Config, opts: BuildServerOptions = {}): McpS
         resources: { listChanged: false },
         prompts: { listChanged: false },
       },
-      instructions: config.registryAgentIds
-        ? SERVER_INSTRUCTIONS + REGISTRY_MODE_INSTRUCTIONS
-        : SERVER_INSTRUCTIONS,
+      instructions:
+        SERVER_INSTRUCTIONS +
+        // Same condition registerGetProviderManifest uses.
+        (deps.policy?.fetchProviderDocuments === false ? "" : PROVIDER_STANDARD_INSTRUCTIONS) +
+        (config.registryAgentIds ? REGISTRY_MODE_INSTRUCTIONS : ""),
     },
   );
 

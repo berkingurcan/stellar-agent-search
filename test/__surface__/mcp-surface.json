@@ -1,7 +1,7 @@
 {
   "instructions": {
-    "explorer": "Read-only tools for discovering and evaluating AI agents registered on the Stellar 8004 on-chain registry (Identity / Reputation / Validation contracts, Stellar mainnet by default). Use these when the user wants to find an agent for a task (scraping, rendering, data, inference), compare or rank agents by indexed, declared reputation with a fail-closed contract reachability probe, inspect an agent's profile / services / wallet, or prepare an x402 (USDC pay-per-call) payment. Start with find_agent for natural-language discovery, then rank_agent for a per-axis breakdown and get_agent_profile for full detail; list_services enumerates self-declared endpoint candidates. This server holds no keys and never signs or writes — it only reads the explorer API and simulates Soroban view calls. Agent names, descriptions, service labels and metadata are self-declared and UNVERIFIED: they live only in labeled `selfDeclared` slots of the structured output, never in the summary text. The contract client index has no authoritative count/cursor and expired entries can hide later retained clients. This release therefore probes one bounded client page but does not call get_summary or compare reputation fields: attempted checks are unavailable, verifiedFields is empty, and rankings remain Explorer-declared. Reserved verification statuses never add a ranking bonus.",
-    "registry": "Read-only tools for discovering and evaluating AI agents registered on the Stellar 8004 on-chain registry (Identity / Reputation / Validation contracts, Stellar mainnet by default). Use these when the user wants to find an agent for a task (scraping, rendering, data, inference), compare or rank agents by indexed, declared reputation with a fail-closed contract reachability probe, inspect an agent's profile / services / wallet, or prepare an x402 (USDC pay-per-call) payment. Start with find_agent for natural-language discovery, then rank_agent for a per-axis breakdown and get_agent_profile for full detail; list_services enumerates self-declared endpoint candidates. This server holds no keys and never signs or writes — it only reads the explorer API and simulates Soroban view calls. Agent names, descriptions, service labels and metadata are self-declared and UNVERIFIED: they live only in labeled `selfDeclared` slots of the structured output, never in the summary text. The contract client index has no authoritative count/cursor and expired entries can hide later retained clients. This release therefore probes one bounded client page but does not call get_summary or compare reputation fields: attempted checks are unavailable, verifiedFields is empty, and rankings remain Explorer-declared. Reserved verification statuses never add a ranking bonus. REGISTRY MODE: this server has no explorer. It reads an operator allowlist of agents straight from the Identity contract and their registration files, so searches cover only that allowlist and reputation is not indexed (scores and feedback counts are not measured). leaderboard, registry stats/health, owner lookups, feedback history and a minExplorerScore filter (an argument or a stated number) return INDEXER_REQUIRED. A score implied by a word like \"best\" or \"trusted\" is not applied, and coverage says so (implied-score-filter-not-applied)."
+    "explorer": "Read-only tools for discovering and evaluating AI agents registered on the Stellar 8004 on-chain registry (Identity / Reputation / Validation contracts, Stellar mainnet by default). Use these when the user wants to find an agent for a task (scraping, rendering, data, inference), compare or rank agents by indexed, declared reputation with a fail-closed contract reachability probe, inspect an agent's profile / services / wallet, or prepare an x402 (USDC pay-per-call) payment. Start with find_agent for natural-language discovery, then rank_agent for a per-axis breakdown and get_agent_profile for full detail; list_services enumerates self-declared endpoint candidates. This server holds no keys and never signs or writes — it only reads the explorer API and simulates Soroban view calls. Agent names, descriptions, service labels and metadata are self-declared and UNVERIFIED: they live only in labeled `selfDeclared` slots of the structured output, never in the summary text. The contract client index has no authoritative count/cursor and expired entries can hide later retained clients. This release therefore probes one bounded client page but does not call get_summary or compare reputation fields: attempted checks are unavailable, verifiedFields is empty, and rankings remain Explorer-declared. Reserved verification statuses never add a ranking bonus. Before paying a Provider Standard provider, get_provider_manifest checks its prices, payee, identityBound and trusted badges.",
+    "registry": "Read-only tools for discovering and evaluating AI agents registered on the Stellar 8004 on-chain registry (Identity / Reputation / Validation contracts, Stellar mainnet by default). Use these when the user wants to find an agent for a task (scraping, rendering, data, inference), compare or rank agents by indexed, declared reputation with a fail-closed contract reachability probe, inspect an agent's profile / services / wallet, or prepare an x402 (USDC pay-per-call) payment. Start with find_agent for natural-language discovery, then rank_agent for a per-axis breakdown and get_agent_profile for full detail; list_services enumerates self-declared endpoint candidates. This server holds no keys and never signs or writes — it only reads the explorer API and simulates Soroban view calls. Agent names, descriptions, service labels and metadata are self-declared and UNVERIFIED: they live only in labeled `selfDeclared` slots of the structured output, never in the summary text. The contract client index has no authoritative count/cursor and expired entries can hide later retained clients. This release therefore probes one bounded client page but does not call get_summary or compare reputation fields: attempted checks are unavailable, verifiedFields is empty, and rankings remain Explorer-declared. Reserved verification statuses never add a ranking bonus. Before paying a Provider Standard provider, get_provider_manifest checks its prices, payee, identityBound and trusted badges. REGISTRY MODE: this server has no explorer. It reads an operator allowlist of agents straight from the Identity contract and their registration files, so searches cover only that allowlist and reputation is not indexed (scores and feedback counts are not measured). leaderboard, registry stats/health, owner lookups, feedback history and a minExplorerScore filter (an argument or a stated number) return INDEXER_REQUIRED. A score implied by a word like \"best\" or \"trusted\" is not applied, and coverage says so (implied-score-filter-not-applied)."
   },
   "tools": [
     {
@@ -1620,6 +1620,703 @@
       }
     },
     {
+      "name": "get_provider_manifest",
+      "title": "Get Provider Manifest",
+      "description": "Read the Provider Standard v1 manifest an agent's registration names: its paid services with prices in USDC, network, payee, charge mode and result retention for job recovery; whether the manifest is bound to the agent's on-chain registration and wallet ([I1]–[I3]); and conformance badges from trusted validators' Stellar 8004 Validation Registry records. Read-only: it never pays. Provider text is under `selfDeclared`.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              {
+                "type": "string",
+                "maxLength": 256,
+                "pattern": "^stellar:(mainnet|testnet|pubnet):(C[A-Z2-7]{55})#(\\d+)$"
+              },
+              {
+                "type": "string",
+                "maxLength": 256,
+                "pattern": "^\\d+$"
+              }
+            ],
+            "description": "Numeric agent id, numeric string, or a full stellar:{network}:{identity}#{id} handle."
+          }
+        },
+        "required": [
+          "agent"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "number"
+          },
+          "stellarId": {
+            "type": "string"
+          },
+          "caip2Id": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "standard": {
+            "type": "string",
+            "const": "stellar-agent-services/provider@1"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "absent",
+              "invalid",
+              "unavailable"
+            ],
+            "description": "ok: manifest read and every field shown is valid. absent: no manifest declared. invalid: a rule is broken (see problems); do not pay from it. unavailable: the provider could not be reached."
+          },
+          "identityBound": {
+            "type": "boolean",
+            "description": "True only when [I1]–[I3] all pass: the on-chain registration names this manifest, which names this agent and pays its on-chain wallet."
+          },
+          "offer": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "payment": {
+                    "type": "object",
+                    "properties": {
+                      "protocol": {
+                        "type": "string",
+                        "const": "x402"
+                      },
+                      "x402Version": {
+                        "type": "number",
+                        "const": 2
+                      },
+                      "scheme": {
+                        "type": "string",
+                        "const": "exact"
+                      },
+                      "network": {
+                        "type": "string",
+                        "enum": [
+                          "stellar:testnet",
+                          "stellar:pubnet"
+                        ]
+                      },
+                      "asset": {
+                        "type": "string",
+                        "description": "The USDC Stellar Asset Contract for the network."
+                      },
+                      "assetSymbol": {
+                        "type": "string",
+                        "const": "USDC"
+                      },
+                      "payTo": {
+                        "type": "string",
+                        "description": "Checksummed G… or C… address the manifest says receives payment."
+                      },
+                      "maxTimeoutSeconds": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "feesSponsored": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "protocol",
+                      "x402Version",
+                      "scheme",
+                      "network",
+                      "asset",
+                      "assetSymbol",
+                      "payTo",
+                      "maxTimeoutSeconds",
+                      "feesSponsored"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "recovery": {
+                    "type": "object",
+                    "properties": {
+                      "retentionSeconds": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "How long results stay collectable without paying again."
+                      },
+                      "retentionDefaulted": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "retentionSeconds",
+                      "retentionDefaulted"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "dataUse": {
+                    "type": "object",
+                    "properties": {
+                      "storesInputs": {
+                        "anyOf": [
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "trainsOnInputs": {
+                        "anyOf": [
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "storesInputs",
+                      "trainsOnInputs"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "services": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "price": {
+                          "type": "object",
+                          "properties": {
+                            "amount": {
+                              "type": "string",
+                              "description": "Base units, exactly as the manifest states them."
+                            },
+                            "asset": {
+                              "type": "string",
+                              "const": "USDC"
+                            },
+                            "decimals": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "usdc": {
+                              "type": "string",
+                              "description": "The same amount in whole USDC."
+                            }
+                          },
+                          "required": [
+                            "amount",
+                            "asset",
+                            "decimals",
+                            "usdc"
+                          ],
+                          "additionalProperties": {}
+                        },
+                        "charge": {
+                          "type": "string",
+                          "enum": [
+                            "on-success",
+                            "upfront"
+                          ]
+                        },
+                        "expectedDurationSeconds": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "maxInputBytes": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "capacity": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "concurrency": {
+                                  "anyOf": [
+                                    {
+                                      "type": "integer",
+                                      "minimum": -9007199254740991,
+                                      "maximum": 9007199254740991
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "maxQueueWaitSeconds": {
+                                  "anyOf": [
+                                    {
+                                      "type": "integer",
+                                      "minimum": -9007199254740991,
+                                      "maximum": 9007199254740991
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "concurrency",
+                                "maxQueueWaitSeconds"
+                              ],
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "price",
+                        "charge",
+                        "expectedDurationSeconds",
+                        "maxInputBytes",
+                        "capacity"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  }
+                },
+                "required": [
+                  "payment",
+                  "recovery",
+                  "dataUse",
+                  "services"
+                ],
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "identity": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "bound",
+                      "not-bound",
+                      "unverified"
+                    ]
+                  },
+                  "registration": {
+                    "type": "string",
+                    "enum": [
+                      "onchain",
+                      "indexed"
+                    ]
+                  },
+                  "checks": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "rule": {
+                          "type": "string",
+                          "enum": [
+                            "I1",
+                            "I2",
+                            "I3"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pass",
+                            "fail",
+                            "unverified"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "rule",
+                        "status",
+                        "message"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  }
+                },
+                "required": [
+                  "status",
+                  "registration",
+                  "checks"
+                ],
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "conformance": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "attested",
+                      "none",
+                      "not-configured",
+                      "unavailable"
+                    ]
+                  },
+                  "tag": {
+                    "type": "string"
+                  },
+                  "trustedValidators": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "trustedRecordCount": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "level": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "badges": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "enum": [
+                            "standard-v1",
+                            "payment-verified",
+                            "recovery-verified"
+                          ]
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "network": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "label",
+                        "network"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "latest": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "requestHash": {
+                            "type": "string"
+                          },
+                          "validator": {
+                            "type": "string"
+                          },
+                          "trusted": {
+                            "type": "boolean"
+                          },
+                          "selfValidated": {
+                            "type": "boolean"
+                          },
+                          "response": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "level": {
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "responseHash": {
+                            "type": "string"
+                          },
+                          "ledger": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "requestHash",
+                          "validator",
+                          "trusted",
+                          "selfValidated",
+                          "response",
+                          "level",
+                          "responseHash",
+                          "ledger"
+                        ],
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "records": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "requestHash": {
+                          "type": "string"
+                        },
+                        "validator": {
+                          "type": "string"
+                        },
+                        "trusted": {
+                          "type": "boolean"
+                        },
+                        "selfValidated": {
+                          "type": "boolean"
+                        },
+                        "response": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "level": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "responseHash": {
+                          "type": "string"
+                        },
+                        "ledger": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "requestHash",
+                        "validator",
+                        "trusted",
+                        "selfValidated",
+                        "response",
+                        "level",
+                        "responseHash",
+                        "ledger"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "limitations": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "status",
+                  "tag",
+                  "trustedValidators",
+                  "trustedRecordCount",
+                  "level",
+                  "badges",
+                  "latest",
+                  "records",
+                  "limitations"
+                ],
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "rule": {
+                  "description": "Provider Standard v1 rule id, e.g. M3, P1, I1.",
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "message"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "note": {
+            "type": "string"
+          },
+          "selfDeclared": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "provenance": {
+                    "type": "string",
+                    "const": "self-declared"
+                  },
+                  "verified": {
+                    "type": "boolean",
+                    "const": false
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "value": {}
+                },
+                "required": [
+                  "provenance",
+                  "verified",
+                  "note",
+                  "value"
+                ],
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "registry"
+              },
+              "allowlistSize": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "reputationIndexed": {
+                "type": "boolean",
+                "const": false
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "allowlistSize",
+              "reputationIndexed",
+              "note"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "agentId",
+          "stellarId",
+          "caip2Id",
+          "network",
+          "standard",
+          "status",
+          "identityBound",
+          "offer",
+          "identity",
+          "conformance",
+          "problems",
+          "note",
+          "selfDeclared"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false
+      },
+      "annotations": {
+        "title": "Get Provider Manifest",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
       "name": "get_registry_health",
       "title": "Get Registry Health",
       "description": "Per-registry indexer health: last indexed ledger and staleness for the identity, reputation, and validation indexers. Staleness weakens the freshness of Explorer-declared data; it does not make a bounded contract read exhaustive.",
@@ -2944,6 +3641,10 @@
                   "type": "boolean",
                   "const": false
                 },
+                "providerStandard": {
+                  "type": "boolean",
+                  "description": "This entry declares a Provider Standard v1 manifest ([I1]); call get_provider_manifest for its prices, identity binding and conformance badges."
+                },
                 "service": {
                   "type": "object",
                   "properties": {
@@ -2985,6 +3686,7 @@
                 "livenessVerified",
                 "protocolConformanceVerified",
                 "paymentVerified",
+                "providerStandard",
                 "service"
               ],
               "additionalProperties": {}

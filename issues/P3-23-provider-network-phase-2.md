@@ -1,6 +1,8 @@
 # P3-23 — Stellar Agent Search Phase 2: Provider Network
 
-**Owner:** Code + Builder · **Status:** proposed follow-on Instaward scope; not implemented
+**Owner:** Code + Builder · **Status:** in progress — the Provider Standard, Provider Kit, payment client, Job
+Recovery and verifier are built in [Stellar Agent Services](https://github.com/AlgoriaLabs/stellar-agent-services);
+the discovery side is `get_provider_manifest` here. The independent pilot and public evidence remain.
 
 ## Why this is the next phase
 

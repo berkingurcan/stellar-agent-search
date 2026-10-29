@@ -7,12 +7,14 @@
  * forced. The server does not probe liveness, endpoint ownership, protocol
  * conformance, or payment behavior. Untrusted service text
  * (name/endpoint/version/description) is confined to a labeled `selfDeclared`
- * slot per row.
+ * slot per row. `providerStandard` marks the entry that declares a Provider
+ * Standard v1 manifest ([I1]); get_provider_manifest reads and checks it.
  */
 
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { NotFoundError, ValidationError } from "@trionlabs/stellar8004";
+import { MANIFEST_SERVICE_NAME, MANIFEST_SERVICE_VERSION } from "../lib/provider-standard.js";
 import { scoreAgent } from "../lib/ranking.js";
 import { buildSelfDeclaredFields, safe, selfDeclared, serverText } from "../lib/sanitize.js";
 import type { GetAgentsParams } from "../lib/explorer.js";
@@ -72,6 +74,12 @@ const zServiceRow = z
     livenessVerified: z.literal(false),
     protocolConformanceVerified: z.literal(false),
     paymentVerified: z.literal(false),
+    providerStandard: z
+      .boolean()
+      .describe(
+        "This entry declares a Provider Standard v1 manifest ([I1]); call get_provider_manifest for its prices, " +
+          "identity binding and conformance badges.",
+      ),
     service: zSelfDeclaredSlot,
   })
   .passthrough();
@@ -180,6 +188,7 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
 
       const rows = [];
       let agentsWithServices = 0; // count only agents that actually contribute a row
+      let providerStandardRows = 0;
       for (const { a, result } of pairs) {
         const services = buildSelfDeclaredFields({ services: a.services ?? null }).services;
         if (services.length === 0) continue;
@@ -187,6 +196,9 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
         const caps = deriveCapabilities(a);
         const ids = agentIds(deps.config, a.id);
         for (const svc of services) {
+          // Decided on the sanitized entry; the tool re-reads the registration itself.
+          const providerStandard = svc.name === MANIFEST_SERVICE_NAME && svc.version === MANIFEST_SERVICE_VERSION;
+          if (providerStandard) providerStandardRows++;
           rows.push({
             agentId: a.id,
             stellarId: ids.stellarId,
@@ -208,6 +220,7 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
             livenessVerified: false as const,
             protocolConformanceVerified: false as const,
             paymentVerified: false as const,
+            providerStandard,
             service: selfDeclared(svc),
           });
         }
@@ -216,6 +229,9 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
       const text = serverText`${rows.length} self-declared service candidate(s) across ${agentsWithServices} agent(s) on ${safe(
         deps.config.network,
       )} (page ${args.page}). Liveness, ownership, protocol conformance, and payment behavior were not verified.` +
+        (providerStandardRows > 0
+          ? serverText` ${providerStandardRows} declare a Provider Standard v1 manifest (providerStandard: true); get_provider_manifest reads its prices, identity binding and badges.`
+          : "") +
         sourceText(deps);
 
       // The list response and each detail hydration are independent v1 reads

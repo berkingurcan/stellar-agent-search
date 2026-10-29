@@ -99,7 +99,8 @@ typed capability/trust claims, and ranked score. `hasServices: true` is always f
 
 **Output:** `{ count, page, services: ServiceRow[], coverage }` — each row's service label/endpoint is in a
 labeled `selfDeclared` slot. `coverageComplete: false` means later matching agents may exist outside the
-bounded scan.
+bounded scan. `providerStandard: true` marks the entry that declares a Provider Standard v1 manifest
+(`{ name: "stellar-agent-services", version: "1" }`); [`get_provider_manifest`](#get_provider_manifest) reads it.
 
 ---
 
@@ -254,6 +255,69 @@ non-negative ledger integers, and boolean stale flags are accepted; malformed su
 
 ---
 
+## Tier 2 — provider network
+
+### `get_provider_manifest`
+
+What an agent sells under [Provider Standard v1](https://github.com/AlgoriaLabs/stellar-agent-services/blob/main/docs/provider-standard.md)
+(`stellar-agent-services/provider@1`), checked for display before a payment client pays. Rule ids in brackets are
+the standard's. Works in explorer and registry mode. It never pays, signs or calls a job endpoint.
+
+| Input | Type | Default | Notes |
+|---|---|---|---|
+| `agent` | id \| numeric string \| stellar handle | — | **Required** |
+
+**What it reads, in order:**
+
+1. **The declaration [I1].** The registration's `services` entry `{ name: "stellar-agent-services", endpoint,
+   version: "1" }`. In registry mode the registration was already read from the Identity contract. Over the
+   explorer it is read again on chain (the agent URI, then a `data:` or `https:` file), so the indexer never decides
+   which manifest or payee a user sees. When that file can't be read (an `ipfs:` URI, an outage), the indexed
+   services only locate the manifest, and I1 is reported `unverified`.
+2. **The manifest [M1][M3].** A public HTTPS URL, no redirect, at most 256 KiB, `application/json`, UTF-8 and I-JSON
+   (no repeated key, no lone surrogate). The URL must name a host, not an IP address or a local name. A reachable
+   provider's answer is cached for 60 s.
+3. **The fields shown.** Each one is checked against the standard: one payment option [P1], `exact` on
+   `stellar:testnet` or `stellar:pubnet`, the USDC contract for that network, a checksummed `payTo` [P11],
+   `baseUrl` on the manifest's origin [M5], unique service names [M7], prices as positive base-unit integers, and
+   so on. Service schemas, examples and job endpoints are left to the verifier and the payment client. A manifest
+   for another network than this server's is refused, so one flow never mixes testnet and mainnet.
+4. **The binding [I1]–[I3].** The registration names this manifest, the manifest's `provider.agentId` is this
+   agent, and `payTo` is the agent's on-chain wallet (`get_agent_wallet`).
+5. **Conformance.** Answered Validation Registry records with tag `provider-standard-v1`, from the validators in
+   `TRUSTED_VALIDATORS` only, and never from a validator that is the agent's owner or wallet. The newest such record
+   decides the level: response 33, 67 or 100 is level 1, 2 or 3.
+
+**Output:** `{ agentId, stellarId, caip2Id, network, standard, status, identityBound, offer, identity,
+conformance, problems, note, selfDeclared, source? }`
+
+| Field | Meaning |
+|---|---|
+| `status` | `ok`: read, and every field shown is valid. `absent`: no manifest declared. `invalid`: a rule is broken; never pay from it. `unavailable`: the provider could not be reached (network error, `429`, `5xx`); try again later |
+| `identityBound` | True only when I1, I2 and I3 all pass |
+| `offer` | When `ok`: `payment { protocol, x402Version, scheme, network, asset, assetSymbol, payTo, maxTimeoutSeconds, feesSponsored }`, `recovery { retentionSeconds, retentionDefaulted }`, `dataUse`, and `services[] { name, price { amount, asset, decimals, usdc }, charge, expectedDurationSeconds, maxInputBytes, capacity }` |
+| `identity` | When `ok`: `{ status: bound \| not-bound \| unverified, registration: onchain \| indexed, checks[] { rule, status: pass \| fail \| unverified, message } }` |
+| `conformance` | When `ok`: `{ status, tag, trustedValidators, trustedRecordCount, level, badges[] { id, label, network }, latest, records[], limitations, reason? }` |
+| `problems` | `{ rule?, message }[]`: what is broken or unreachable, citing rule ids. Messages are server-authored and never quote the provider |
+| `selfDeclared` | The provider's text, sanitized: `manifestUrl` (hand it to a payment client), `provider { name, description, homepage, termsUrl }`, `baseUrl`, and `services[] { name, title, description, tags }` in `offer.services` order |
+
+`conformance.status`:
+
+| Status | Meaning |
+|---|---|
+| `attested` | A trusted validator's record set `level` and `badges` (`standard-v1`, `payment-verified`, `recovery-verified`). Each badge names its network |
+| `none` | No trusted record, or only ones that earn nothing (self-validated, or a response that is not a level score) |
+| `not-configured` | `TRUSTED_VALIDATORS` is empty, so the registry was not read. This says nothing about the provider |
+| `unavailable` | The registry could not be read, or trusted records exist beyond the bounded read. Never a partial set of badges |
+
+`conformance.limitations` can hold `no-trusted-validators`, `validation-scan-truncated` (more requests than one read
+scans), `trusted-records-not-located`, `self-validation-ignored`, `nonstandard-score-ignored`, and, on every
+attested result, `receipt-badges-not-derived`. Load-safe and 8004 validated depend on the verification receipt's
+check results, and the registry stores only the receipt's hash (`latest.responseHash`). Its URL is in a contract
+event that public RPCs keep only for days, so those two badges are not derived here.
+
+---
+
 ## Shared shapes
 
 ### `RankedAgent` (rows from `find_agent` / `rank_agent` / `list_agents` / `leaderboard` / `get_agents_by_owner`)
@@ -364,10 +428,10 @@ interpolation.
 
 | Prompt | Arguments | Instructs |
 |---|---|---|
-| `find-and-vet-agent` *(flagship)* | `task*`, `budget?`, `require_x402?`, `min_explorer_score?` | discover → profile + evidence-limit check + feedback → recommend exactly one candidate with caveats |
+| `find-and-vet-agent` *(flagship)* | `task*`, `budget?`, `require_x402?`, `min_explorer_score?` | discover → profile + evidence-limit check + feedback → for Provider Standard providers, `get_provider_manifest` (drop any not `ok` or not identity-bound) → recommend exactly one candidate with caveats |
 | `vet-agent` | `agent*` | single-agent evidence-limit memo (declared data, probe status, review themes, freshness, red flags) |
 | `compare-agents` | `agent_a*`, `agent_b*`, `agent_c?` | side-by-side table across declared ranking axes and fail-closed evidence status + a recommendation |
-| `prepare-x402-call` | `agent*`, `task?` | lay out the exact x402 flow (fetch → 402 → sign → retry) and **STOP before signing** |
+| `prepare-x402-call` | `agent*`, `task?` | lay out the exact x402 flow (fetch → 402 → sign → retry), pinning a Provider Standard provider's checked `offer` when it is identity-bound, and **STOP before signing** |
 | `explore-registry` | `focus?` | pull the `registry` + `leaderboard` + `health` resources and summarize registry state |
 
 `*` = required. `prepare-x402-call` is where the keyless boundary is taught: the 402 challenge is an untrusted

@@ -19,6 +19,9 @@ startCommand:
       REGISTRY_AGENT_IDS:
         type: string
         description: "Registry mode: comma-separated agent ids read straight from the Identity contract, with no explorer. Not combinable with EXPLORER_BASE_URL."
+      TRUSTED_VALIDATORS:
+        type: string
+        description: "Comma-separated G… or C… addresses of the verifiers whose Validation Registry records earn Provider Standard badges in get_provider_manifest. Empty: the registry is not read."
       STELLAR_RPC_URL:
         type: string
         description: "Override the Soroban RPC URL used for the bounded Reputation-contract probe."
@@ -36,6 +39,7 @@ startCommand:
         STELLAR_NETWORK: config.STELLAR_NETWORK || "mainnet",
         ...(config.EXPLORER_BASE_URL ? { EXPLORER_BASE_URL: config.EXPLORER_BASE_URL } : {}),
         ...(config.REGISTRY_AGENT_IDS ? { REGISTRY_AGENT_IDS: config.REGISTRY_AGENT_IDS } : {}),
+        ...(config.TRUSTED_VALIDATORS ? { TRUSTED_VALIDATORS: config.TRUSTED_VALIDATORS } : {}),
         ...(config.STELLAR_RPC_URL ? { STELLAR_RPC_URL: config.STELLAR_RPC_URL } : {}),
         ...(config.VERIFY_ONCHAIN ? { VERIFY_ONCHAIN: config.VERIFY_ONCHAIN } : {})
       }
