@@ -20,8 +20,11 @@
  *     (Tools drop a threshold implied by a word like "best" before it gets
  *     here, and say so: see queryMinScore in tools/shared.ts.)
  *
- * Registration files are fetched only for allowlisted agents, never for an id
- * a caller supplies, with no redirects, a timeout and a size cap.
+ * RegistryService fetches registration files only for allowlisted agents, never
+ * for an id a caller supplies, with no redirects, a timeout and a size cap. The
+ * contract and file reads are also exported (readIdentity, readRegistration):
+ * provider-manifest.ts uses them in explorer mode to check a manifest's binding
+ * to its registration [I1]–[I3] on chain rather than trust the indexer for it.
  */
 
 import { NotFoundError, type AgentResponse, type ServiceEntry } from "@trionlabs/stellar8004";
@@ -37,6 +40,7 @@ import {
   type FindAgentsResult,
   type GetAgentsParams,
 } from "./explorer.js";
+import { readCappedText } from "./http.js";
 import { validWalletOrNull } from "./identifier.js";
 import { log, type Logger } from "./logger.js";
 import { createIdentityReadClient, type IdentityReadClient } from "./soroban.js";
@@ -217,33 +221,54 @@ export class RegistryService implements RegistrySource {
 
   private readAgent(id: number): Promise<AgentResponse> {
     return this.cache.wrap(`registry-agent:${id}`, TTL_AGENT_MS, async () => {
-      const [uri, wallet, owner] = await this.readIdentity(id);
-      const registration = uri ? await readRegistration(id, uri, this.fetcher) : {};
-      return toAgentRow(id, owner, wallet, uri, registration);
+      const identity = await readIdentity(this.client, id);
+      const registration = identity.uri ? await readRegistration(id, identity.uri, this.fetcher) : {};
+      return toAgentRow(id, identity, registration);
     });
   }
+}
 
-  private async readIdentity(id: number): Promise<[string, string | undefined, string]> {
-    let uriResult: { isOk(): boolean; unwrap(): string };
-    let wallet: string | undefined;
-    let owner: string | undefined;
-    try {
-      [uriResult, wallet, owner] = await Promise.all([
-        this.client.agent_uri({ agent_id: id }).then((tx) => tx.result),
-        this.client.get_agent_wallet({ agent_id: id }).then((tx) => tx.result),
-        this.client.find_owner({ agent_id: id }).then((tx) => tx.result),
-      ]);
-    } catch (error) {
-      throw new RegistryReadError(`Identity contract read for agent ${id} failed`, { cause: error });
-    }
-    if (!uriResult.isOk() || owner === undefined) {
-      throw new NotFoundError(`agent ${id} (not registered in the Identity contract)`);
-    }
-    if (validWalletOrNull(owner) !== owner) {
-      throw new RegistryReadError(`Identity contract returned a malformed owner for agent ${id}`);
-    }
-    return [uriResult.unwrap(), wallet, owner];
+/** What the Identity contract itself says about one agent. */
+export interface OnchainIdentity {
+  /** The agent URI; "" when the agent has none. */
+  uri: string;
+  wallet: string | undefined;
+  owner: string;
+}
+
+/**
+ * `agent_uri`, `get_agent_wallet` and `find_owner` for one agent. NotFoundError
+ * when it is not registered; RegistryReadError when the contract can't be read.
+ */
+export async function readIdentity(client: IdentityReadClient, id: number): Promise<OnchainIdentity> {
+  let uriResult: { isOk(): boolean; unwrap(): string };
+  let wallet: string | undefined;
+  let owner: string | undefined;
+  try {
+    [uriResult, wallet, owner] = await Promise.all([
+      client.agent_uri({ agent_id: id }).then((tx) => tx.result),
+      client.get_agent_wallet({ agent_id: id }).then((tx) => tx.result),
+      client.find_owner({ agent_id: id }).then((tx) => tx.result),
+    ]);
+  } catch (error) {
+    throw new RegistryReadError(`Identity contract read for agent ${id} failed`, { cause: error });
   }
+  if (!uriResult.isOk() || owner === undefined) {
+    throw new NotFoundError(`agent ${id} (not registered in the Identity contract)`);
+  }
+  if (validWalletOrNull(owner) !== owner) {
+    throw new RegistryReadError(`Identity contract returned a malformed owner for agent ${id}`);
+  }
+  return { uri: uriResult.unwrap(), wallet, owner };
+}
+
+/**
+ * The services a registration file lists, the way registry mode decodes them:
+ * `services`, or an older file's `endpoints`.
+ */
+export function registrationServiceEntries(registration: Record<string, unknown>): ServiceEntry[] {
+  const services = registrationServices(registration.services);
+  return services.length > 0 ? services : legacyEndpoints(registration.endpoints);
 }
 
 function assertNoScoreFilter(minScore: number | undefined): void {
@@ -269,15 +294,9 @@ function matchesFilters(a: AgentResponse, f: Omit<GetAgentsParams, "search" | "p
 }
 
 /** The explorer row shape, from the contract reads and the decoded registration file. */
-function toAgentRow(
-  id: number,
-  owner: string,
-  wallet: string | undefined,
-  uri: string,
-  registration: UnknownRecord,
-): AgentResponse {
-  let services = registrationServices(registration.services);
-  if (services.length === 0) services = legacyEndpoints(registration.endpoints);
+function toAgentRow(id: number, identity: OnchainIdentity, registration: UnknownRecord): AgentResponse {
+  const { uri, wallet, owner } = identity;
+  const services = registrationServiceEntries(registration);
   return {
     id,
     owner,
@@ -348,7 +367,11 @@ function legacyEndpoints(value: unknown): ServiceEntry[] {
  * (base64 or percent-encoded) or an `https:` URL. Other schemes need an indexer
  * or gateway this mode does not have, so they fail rather than read as empty.
  */
-async function readRegistration(id: number, uri: string, fetcher: typeof fetch): Promise<UnknownRecord> {
+export async function readRegistration(
+  id: number,
+  uri: string,
+  fetcher: typeof fetch,
+): Promise<UnknownRecord> {
   const fail = (reason: string, cause?: unknown): never => {
     throw new RegistryReadError(
       `Registration file for agent ${id} could not be read: ${reason}`,
@@ -400,31 +423,4 @@ async function readRegistration(id: number, uri: string, fetcher: typeof fetch):
   }
   if (!isRecord(parsed)) fail("file is not a JSON object");
   return parsed as UnknownRecord;
-}
-
-/** Read a response body as UTF-8, stopping once it exceeds `max` bytes. */
-async function readCappedText(response: Response, max: number): Promise<string> {
-  const declared = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > max) throw new Error("file is too large");
-  if (!response.body) return "";
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > max) {
-      await reader.cancel();
-      throw new Error("file is too large");
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 }
