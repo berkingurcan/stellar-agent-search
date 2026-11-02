@@ -28,7 +28,8 @@ rank and vet other on-chain agents, and see which ones declare x402 (USDC pay-pe
 5. **Default network is mainnet.** `STELLAR_NETWORK=testnet` alone works: with no indexer, it reads the newest
    50 testnet agents straight from the Identity contract (`REGISTRY_SCAN_LIMIT`), so coverage is bounded and
    reputation is not indexed. `REGISTRY_AGENT_IDS` reads only the agents you name instead; `EXPLORER_BASE_URL` a
-   testnet indexer.
+   testnet indexer. This is unreleased: the published `0.1.0` still refuses testnet without `EXPLORER_BASE_URL`, so
+   run testnet from a checkout (`node dist/index.js`) until the next release.
 6. **A Provider Standard provider is payable only when `get_provider_manifest` says so**: `status: "ok"` and
    `identityBound: true`. Its badges count only when `conformance.status` is `attested`, which needs
    `TRUSTED_VALIDATORS`; `not-configured` says nothing about the provider.
