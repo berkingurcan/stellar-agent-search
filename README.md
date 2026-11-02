@@ -166,9 +166,10 @@ All configuration is via environment variables (canonical for MCP mode); CLI fla
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `STELLAR_NETWORK` | `mainnet` | `mainnet` or `testnet` — `testnet` also requires `EXPLORER_BASE_URL` or `REGISTRY_AGENT_IDS`, see below |
-| `EXPLORER_BASE_URL` | `https://stellar8004.com` | Explorer HTTP API base. **Indexes mainnet only** |
-| `REGISTRY_AGENT_IDS` | — | Registry mode: comma-separated agent ids (at most 50) read straight from the Identity contract, no explorer. Not combinable with `EXPLORER_BASE_URL` |
+| `STELLAR_NETWORK` | `mainnet` | `mainnet` or `testnet`. With no other data source set, `testnet` reads its newest agents straight from the Identity contract, see below |
+| `EXPLORER_BASE_URL` | `https://stellar8004.com` on mainnet | Explorer HTTP API base. **Indexes mainnet only**, so testnet never falls back to it |
+| `REGISTRY_AGENT_IDS` | — | Registry mode over an allowlist: comma-separated agent ids (at most 50) read straight from the Identity contract, no explorer. Not combinable with `EXPLORER_BASE_URL` or `REGISTRY_SCAN_LIMIT` |
+| `REGISTRY_SCAN_LIMIT` | `50` on testnet | Registry mode over the newest agents: how many (1–50) of the most recently registered agents lists and searches read. Testnet's default source; set it on mainnet to use it there instead of the explorer. Not combinable with `EXPLORER_BASE_URL` or `REGISTRY_AGENT_IDS` |
 | `TRUSTED_VALIDATORS` | — | Comma-separated G… or C… addresses (at most 20) of the verifiers whose Validation Registry records earn Provider Standard badges. Empty: the registry is not read |
 | `STELLAR_RPC_URL` | `https://mainnet.sorobanrpc.com` | Soroban RPC for the bounded Reputation-contract reachability probe and the Identity and Validation reads |
 | `VERIFY_ONCHAIN` | `true` | Set `false` to skip the probe; reputation remains declared-only either way |
@@ -182,42 +183,64 @@ published score semantics.
 `STELLAR_PRIVATE_KEY` is **intentionally ignored** if present (and warned about on stderr) — this server is
 keyless by construction.
 
-> **`testnet` needs a testnet data source, and refuses to start without one.** The default explorer indexes
-> **mainnet only**, while `STELLAR_NETWORK` also selects the Soroban contracts and RPC. That pairing would give
-> you mainnet registry rows alongside testnet on-chain reads — two chains described as one — so
-> `STELLAR_NETWORK=testnet` **fails at startup** unless you set one of:
+> **`testnet` reads testnet, and works with no other setting.** The default explorer indexes **mainnet only**,
+> while `STELLAR_NETWORK` also selects the Soroban contracts and RPC, so testnet never uses it: that would give
+> you mainnet registry rows alongside testnet on-chain reads, two chains described as one. With no data source
+> set, `STELLAR_NETWORK=testnet` turns on **registry mode** over the newest 50 agents of the testnet Identity
+> contract (below). You can instead set:
 >
-> - `EXPLORER_BASE_URL`, pointing at a testnet indexer you run, or
-> - `REGISTRY_AGENT_IDS`, which turns on **registry mode** (below).
+> - `EXPLORER_BASE_URL`, pointing at a testnet indexer you run,
+> - `REGISTRY_AGENT_IDS`, to read only the agents you name, or
+> - `REGISTRY_SCAN_LIMIT`, to read fewer of the newest agents.
 >
 > The dry-run gate for the x402 demo is `DRY_RUN=1` on mainnet, which spends nothing.
 
 ### Registry mode (no indexer)
 
-No public testnet indexer exists, so the server can instead read a list of agents you name straight from the
-Identity contract. Registry mode is unreleased (not in `0.1.0`), so run it from a checkout for now:
+No public testnet indexer exists, so the server reads agents straight from the Identity contract instead. Registry
+mode is unreleased (not in `0.1.0`), so run it from a checkout for now:
 
 ```bash
 npm ci && npm run build
-STELLAR_NETWORK=testnet REGISTRY_AGENT_IDS=12,40 node dist/index.js find "inference"
+STELLAR_NETWORK=testnet node dist/index.js find "inference"                         # the newest 50 agents
+STELLAR_NETWORK=testnet REGISTRY_AGENT_IDS=12,40 node dist/index.js find "inference"  # only these agents
 ```
 
-For each agent it reads the URI, wallet and owner from the Identity contract (keyless simulations), then
-decodes the registration file the URI points at (`data:` or `https:`) into the same profile the explorer path
-builds. It reads only the agents you list, and it fetches registration files only for those agents.
+It reads one of two scopes:
 
-| Works over the allowlist (filters applied locally) | Needs an indexer — returns `INDEXER_REQUIRED` |
+- **The newest agents** (testnet's default; `REGISTRY_SCAN_LIMIT`, 50 unless set). The contract assigns agent
+  ids in order from 0 and cannot delete one, so its `total_agents` count names the newest: ids `count − 50` to
+  `count − 1`, read newest first. An agent that registered a moment ago is found by the next search. Any older
+  agent can still be read by id (`profile`, `rank_agent` ids, `get_provider_manifest`).
+- **An allowlist** (`REGISTRY_AGENT_IDS`): only the agents you list, and nothing else.
+
+For each agent it reads the URI, wallet and owner from the Identity contract (keyless simulations), then decodes
+the registration file the URI points at into the same profile the explorer path builds: a `data:` URI, or an
+`https:` URL on a public host (no redirect, 10 s, 64 KiB). Rows are cached for a minute, the agent count for 30 s,
+and a registration that could not be read is not fetched again for a minute either.
+
+| Works over the allowlist or the newest agents (filters applied locally) | Needs an indexer — returns `INDEXER_REQUIRED` |
 |---|---|
 | `find_agent`, `list_services`, `list_agents`, `rank_agent`, `get_agent_profile`, `get_agent_card`, `verify_reputation`, `get_provider_manifest` | `leaderboard`, `get_registry_stats`, `get_registry_health`, `get_agents_by_owner`, `get_agent_feedback`, `resolve_agent` for an owner address, a `minExplorerScore` filter (an argument, or a stated number like "score above 70") |
 
-What registry mode cannot know, it says. The contract cannot be enumerated, so coverage carries
-`registry-allowlist-only` and lists any agent it could not read in `unreadableAgentIds`. There is no indexed
-reputation, so results carry `source: { kind: "registry", reputationIndexed: false }`: scores, feedback counts and
-`unrated` reflect missing data, not an agent without feedback. A query word like "best" or "trusted", which
-implies a minimum score on mainnet, is not applied as a filter here; coverage carries
+What registry mode cannot know, it says. Coverage is never complete: an allowlist carries
+`registry-allowlist-only`; a scan that stopped short of agent 0 carries `registry-newest-agents-only` and says how
+many agents exist in `registryAgentCount`. Agents it could not read are listed in `unreadableAgentIds`. There is no
+indexed reputation, so results carry `source: { kind: "registry", scope, reputationIndexed: false }`: scores,
+feedback counts and `unrated` reflect missing data, not an agent without feedback. A query word like "best" or
+"trusted", which implies a minimum score on mainnet, is not applied as a filter here; coverage carries
 `implied-score-filter-not-applied` and the summary says so. Agents registered with
 `provider-kit register` show their manifest URL in `list_services` as an unverified
 `stellar-agent-services` service entry, marked `providerStandard: true`.
+
+**Searches match a provider's services.** In registry mode, an agent whose registration names a Provider Standard
+manifest is also matched against that manifest's services (name, title, description and tags), if the manifest is
+bound to it ([I1]–[I3]) and its registration text did not already match. A search reads at most 10 manifests,
+newest agents first, through the same guarded reader as `get_provider_manifest` (public HTTPS, no redirect,
+256 KiB, 5 s), and lists any it could not read in `unsearchedManifestAgentIds`. Every `find_agent` and
+`rank_agent` row says why it matched in `match.fields` (`name`, `description`, `registrationServices`,
+`manifestServices`), with the matching services in a labeled, sanitized slot. Over the explorer only the name and
+description are matched: its v1 list omits `services[]`, and the hosted Worker fetches no registrant-chosen URL.
 
 ### Provider Standard providers (find → approve → pay)
 

@@ -6,7 +6,9 @@ want AI agents using stellar-agent-search to discover it, rank it, and pay it ov
 stellar-agent-search adds no registry of its own. If your agent is registered on the
 [stellar-8004](https://stellar8004.com) Identity contract on Stellar **mainnet** and indexed by the
 stellar8004.com explorer, every `find_agent`, `list_agents`, `list_services` and `leaderboard` call can return
-it. Everything below is about making that registration findable and credible.
+it. On **testnet** there is no indexer: the server reads the newest registered agents straight from the Identity
+contract, so an agent that just registered is found right away (§6). Everything below is about making that
+registration findable and credible.
 
 > This repository never signs anything. You register with your own tools, in one of two ways (§2):
 >
@@ -47,7 +49,7 @@ Discovery reads the JSON file your agent's `agent_uri` points to. The SDK's `bui
 | Field | Effect in stellar-agent-search |
 |---|---|
 | `name`, `description` | **The search text.** Query keywords are matched here (see §3). |
-| `services[]` | Becomes `hasServices: true` and appears in `list_services` as a self-declared endpoint candidate. |
+| `services[]` | Becomes `hasServices: true` and appears in `list_services` as a self-declared endpoint candidate. Each entry's name and endpoint are searched. On testnet, a `stellar-agent-services` entry also makes your manifest's services searchable (§3). |
 | `x402` | Becomes `capabilities.x402`; queries with "paid", "x402", "usdc", "cheap", "pay-per-call"… filter on it. |
 | `supportedTrust` | One of `reputation`, `crypto-economic`, `tee-attestation`, `validation`; queries with "validated", "tee", "attested" filter on it. |
 | `image` | Shown in profiles only. |
@@ -72,8 +74,10 @@ Its `name` and `description` are `provider.name` and `provider.description` from
 examples; `list_services` shows it as an unverified endpoint candidate. The file declares no `supportedTrust`, so
 trust words such as "validated" don't match it.
 
-Under 8 KB the file fits in a `data:` URI and needs no hosting; above that, upload it to IPFS with the SDK's
-`PinataStorage`. Registry mode accepts only `data:` and `https:` URIs.
+Under 8 KB the file fits in a `data:` URI and needs no hosting; above that, host it at an `https:` URL. The SDK's
+`PinataStorage` can upload it to IPFS instead, but testnet discovery reads the file straight from your URI and only
+from a `data:` URI or an `https:` URL on a public host: not `http:`, `ipfs:`, `localhost` or a private address, nor a
+URL that answers 404. `find` lists such agents in `coverage.unreadableAgentIds`.
 
 ## 2. Register (testnet first)
 
@@ -103,7 +107,8 @@ xBull, Albedo, Hana or a Ledger, then review the registration and approve it the
 - **Registered from `payTo`:** the registry makes the registering account the agent's owner and its wallet, so the
   wallet buyers see in your profile is the one your 402 challenge pays.
 - **Network:** your manifest's. Use `stellar:testnet` first. stellar-agent-search's default explorer indexes
-  mainnet.
+  mainnet; on testnet it reads the Identity contract directly, so you can check yourself right after registering
+  (§6).
 - **A new account** gets its USDC trustline first, on the same page, and on testnet some test XLM.
 - **Changing it later:** run `register` again after you change the name, description or manifest URL. It updates
   the registration (`set_agent_uri`), signed by the agent's owner.
@@ -143,37 +148,52 @@ The script calls `identity.register_with_uri` and prints your new agent id. To c
 ## 3. How search finds you
 
 `find_agent` does **no** LLM or embedding search. It is deterministic
-([`src/lib/nlparse.ts`](../src/lib/nlparse.ts), `matchAgentsByQuery` in
-[`src/lib/explorer.ts`](../src/lib/explorer.ts)):
+([`src/lib/nlparse.ts`](../src/lib/nlparse.ts), then [`src/lib/text-match.ts`](../src/lib/text-match.ts)):
 
-1. **Filter words become structured filters** sent to the explorer:
+1. **Filter words become structured filters**:
    payment words → `x402`; "api", "endpoint", "callable", "service" → `hasServices`; "validated", "tee",
    "attested" → `trust`; "best", "top-rated" → `minExplorerScore: 80`; "good reputation", "trusted",
    "reputable" → `minExplorerScore: 70`.
-2. **The remaining words are keywords** (stopwords such as "agent", "find", "service" are dropped). They are
-   crudely stemmed ("scraper", "scraping" → `scra`) and substring-matched against your **name + description**.
-   `find_agent` keeps an agent when **any** keyword hits.
-3. The matched window is ranked by reputation evidence (§4), **not** by how many keywords matched. Text gets
+2. **The remaining words are keywords.** Stopwords such as "agent", "find", "service" are dropped. Each keyword
+   is folded (accents removed, lowercased) and crudely stemmed ("scraper", "scraping" → `scra`), then looked for
+   as a substring of your **name**, your **description** and your registration's **service entries** (each
+   entry's name and endpoint).
+3. **On testnet, your Provider Standard manifest's services are searched too**: each service's `name`,
+   `title`, `description` and `tags`. This needs a manifest bound to your agent ([I1]–[I3]): your registration
+   names it, its `provider.agentId` is your agent id, and its `payTo` is your agent's on-chain wallet. A search
+   reads a manifest only when your registration text did not already match, at most 10 manifests per search
+   (newest agents first, 5 s each), and names any it could not read in `coverage.unsearchedManifestAgentIds`.
+4. `find_agent` keeps an agent when **any** keyword hits, and each row's `match.fields` says where:
+   `name`, `description`, `registrationServices` or `manifestServices` (with the matching services, as
+   provider-supplied text).
+5. The matched window is ranked by reputation evidence (§4), **not** by how many keywords matched. Text gets
    you into the candidate set; only reviews move you up inside it.
 
 What this means for you:
 
 - **Put the plain nouns a buyer would type in `name` and `description`.** "Web scraping agent that returns
-  markdown" is findable by "web scraper"; "Pulsar ✨ next-gen data ops" is not.
-- **Service names and endpoints are not reliably searchable today.** The explorer's v1 list response omits
-  `services[]`, and SDK 0.0.11 drops service `description`/`inputExample`
-  ([details](stellar8004-integration.md#sdk-0011-service-field-preservation-gap)). Don't rely on them for
-  discovery.
+  markdown" is findable by "web scraper"; "Pulsar ✨ next-gen data ops" is not. They are the only text that
+  every search reads, on every network.
+- **On testnet, your services' words count without a new registration.** A service title, description or tag
+  is searched from your live manifest, so rewording it needs no wallet signature: redeploy the manifest.
+  Mainnet search does not read manifests yet: the explorer's v1 list omits `services[]`, so finding which
+  agents name a manifest would take one detail read per candidate on every search, and the hosted server
+  fetches no URL a registrant chose. There, name and description are all that is matched.
+- **Testnet search reads the newest agents only** (50 by default; `REGISTRY_SCAN_LIMIT`). `coverage` says how
+  many agents exist (`registryAgentCount`) and which could not be read. Once 50 newer agents exist, a search no
+  longer reaches yours, though `profile <id>` and `manifest <id>` still read it; `REGISTRY_AGENT_IDS=<id>`
+  searches it directly.
 - **Declare `x402: true` only if your endpoint really answers with an x402 challenge.** Otherwise every "paid …"
   query filters you out, or buyers find an endpoint that doesn't behave as declared.
 - **Quality phrases apply the explorer's own score.** "good reputation" requires the upstream
   `leaderboard_scores.total_score ≥ 70`, so a brand-new agent does not appear for those phrasings until it has
-  reviews. Plain queries ("web scraper") still find it.
-- The scan is bounded (`coverage.coverageComplete` is `false` on explorer v1), so a precise description beats a
-  generic one.
+  reviews. Plain queries ("web scraper") still find it. On testnet there are no indexed scores, so the phrase is
+  not applied and coverage says so.
+- The scan is bounded (`coverage.coverageComplete` is `false` on explorer v1 and on testnet), so a precise
+  description beats a generic one.
 - **`provider-kit check` shows this for a Provider Kit service:** the name and description search matches, the words
   from your services' names, titles and tags that a search for them would miss, and whether the registry still has
-  an older name or description than your manifest. It matches words the way this repository's search does.
+  an older name or description than your manifest.
 
 ## 4. How you are ranked
 
@@ -217,9 +237,11 @@ A buyer agent (see [`examples/x402-demo.ts`](../examples/x402-demo.ts)) finds yo
 # A Provider Kit service: the registration names your manifest and its wallet is your payTo, then how agents see you
 provider-kit check --config provider.config.json      # or --manifest <url>
 
-# Read your registration straight from the Identity contract (works on testnet, no indexer wait)
-STELLAR_NETWORK=testnet REGISTRY_AGENT_IDS=<id> npx -y stellar-agent-search@0.1.0 profile <id>
-STELLAR_NETWORK=testnet REGISTRY_AGENT_IDS=<id> npx -y stellar-agent-search@0.1.0 find "web scraper"
+# Testnet: read straight from the Identity contract, no indexer and no wait. Testnet support is newer than the
+# published 0.1.0, so run it from a checkout of this repository (npm ci && npm run build) until the next release.
+STELLAR_NETWORK=testnet node dist/index.js profile <id>
+STELLAR_NETWORK=testnet node dist/index.js find "the words your buyers would type"
+STELLAR_NETWORK=testnet node dist/index.js manifest <id>    # a Provider Standard provider: prices, payee, binding
 
 # Mainnet, through the explorer index, exactly as other agents see you
 npx -y stellar-agent-search@0.1.0 profile <id>
@@ -227,13 +249,18 @@ npx -y stellar-agent-search@0.1.0 find "the words your buyers would type" --json
 npx -y stellar-agent-search@0.1.0 services --x402
 ```
 
+`find` on testnet reads the newest 50 registered agents and prints how many exist and how many it could not read;
+the `MATCHED` column says whether your name, description, service entries or manifest services matched. From the
+release after 0.1.0, `npx -y stellar-agent-search@<that version>` replaces `node dist/index.js` in the testnet
+lines.
+
 Checklist:
 
 - [ ] `find "<buyer query>"` returns your agent, with and without "paid".
 - [ ] `profile <id>` shows the right name, description, `x402`, services and trust.
 - [ ] `services --x402` lists your endpoint.
 - [ ] Your endpoint answers an unpaid request with a valid 402 challenge whose `payTo` is your wallet.
-- [ ] The registration file is under 8 KB or hosted on IPFS/HTTPS.
+- [ ] The registration file is under 8 KB, or hosted at a public `https:` URL (testnet discovery can't read IPFS).
 - [ ] For a Provider Kit service, `provider-kit check` passes, and you have gone through its "How agents see you"
   hints.
 

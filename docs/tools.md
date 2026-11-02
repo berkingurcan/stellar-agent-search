@@ -26,6 +26,14 @@ deterministically; explicit args override inferred filters. Structured filters a
 then a bounded candidate window is text-filtered and ranked client-side because the raw `/search`
 substring-matches poorly and has no score sort.
 
+Keywords (the query minus stopwords and filter words) are folded, crudely stemmed and matched as substrings of an
+agent's name, description and registration service entries (name and endpoint); a row is kept when any keyword
+hits ([`src/lib/text-match.ts`](../src/lib/text-match.ts)). In registry mode a search also matches the services of
+an agent's Provider Standard manifest (name, title, description, tags) when the manifest is bound to the agent
+([I1]–[I3]) and its registration text did not already match: at most 10 manifests per search, newest agents
+first, read like `get_provider_manifest` reads them. Over the explorer the v1 list carries no `services[]`, so
+only name and description are matched there.
+
 | Input | Type | Default | Notes |
 |---|---|---|---|
 | `query` | string (min 1) | — | **Required.** e.g. `"a paid web scraper with a good reputation"` |
@@ -43,7 +51,15 @@ substring-matches poorly and has no score sort.
 `coverage` is `{ coverageComplete, paginationExhausted, snapshotConsistent, pagesScanned, recordsScanned,
 hasMore?, limitations? }`. Explorer v1 reports `coverageComplete: false` and `snapshotConsistent: false`;
 `paginationExhausted: true` means only that the observed page stream ended. Callers must not interpret a
-ranked window as a complete or snapshot-consistent global result.
+ranked window as a complete or snapshot-consistent global result. Registry mode adds `unreadableAgentIds`, a
+scan's `registryAgentCount` (how many agents the Identity contract has registered) and
+`unsearchedManifestAgentIds` (manifests a search needed but could not read, with limitation
+`provider-manifests-not-searched`).
+
+Each row of a keyword search carries `match`: `fields` lists where a keyword hit (`name`, `description`,
+`registrationServices`, `manifestServices`), and `manifestServices` (when present) is a labeled, sanitized
+`selfDeclared` slot holding the matching manifest services' `{ name, title }`. `match` is absent when the query
+had no keywords. `rank_agent` with a `query` returns the same field.
 
 ### `rank_agent`
 
@@ -88,7 +104,7 @@ typed capability/trust claims, and ranked score. `hasServices: true` is always f
 
 | Input | Type | Default | Notes |
 |---|---|---|---|
-| `search` | string | — | Free-text filter over agent name/description |
+| `search` | string | — | Free-text filter over agent name/description; in registry mode also a bound manifest's services |
 | `x402` | boolean | — | Only x402 services |
 | `mpp` | boolean | — | Only MPP services (filtered by the explorer) |
 | `trust` | `reputation`\|`validation`\|`tee` | — | Trust model |
@@ -340,6 +356,10 @@ event that public RPCs keep only for days, so those two badges are not derived h
   "flags": { "unrated": false, "newAgent": false, "lowEvidence": false, "lowConfidence": false, "verified": false, "verificationMismatch": false },
   "breakdown": { /* full RankResult — present when includeBreakdown (rank_agent, leaderboard) */ },
   "verification": { /* VerificationResult — present for checked rows */ },
+  "match": {                       // find_agent / rank_agent query rows: why a keyword search kept the row
+    "fields": ["manifestServices"],  // name | description | registrationServices | manifestServices
+    "manifestServices": { "provenance": "self-declared", "verified": false, "note": "…", "value": [{ "name": "pitch-deck", "title": "…" }] }
+  },
   "selfDeclared": {                // UNTRUSTED, labeled
     "provenance": "self-declared",
     "verified": false,
@@ -388,7 +408,7 @@ with a **stable** `code`:
 | `NOT_FOUND` | Agent / resource does not exist | — |
 | `BAD_REQUEST` | Invalid argument that passed zod but failed a domain check | — |
 | `UPSTREAM_ERROR` | Explorer/RPC error, scope mismatch, malformed HTTP-success payload, or (registry mode) a failed Identity read or unreadable registration file | status/scope/payload detail, or `registry read failed` |
-| `INDEXER_REQUIRED` | Registry mode (`REGISTRY_AGENT_IDS`) and the request needs an indexer: `leaderboard`, `get_registry_stats`, `get_registry_health`, `get_agents_by_owner`, `get_agent_feedback`, `resolve_agent` for an owner, or a `minExplorerScore` filter given as an argument or a stated number ("score above 70"). A threshold implied by a word like "best" is dropped instead, with coverage limitation `implied-score-filter-not-applied` | `detail: registry mode` |
+| `INDEXER_REQUIRED` | Registry mode (`REGISTRY_AGENT_IDS`, or testnet's newest-agents scan) and the request needs an indexer: `leaderboard`, `get_registry_stats`, `get_registry_health`, `get_agents_by_owner`, `get_agent_feedback`, `resolve_agent` for an owner, or a `minExplorerScore` filter given as an argument or a stated number ("score above 70"). A threshold implied by a word like "best" is dropped instead, with coverage limitation `implied-score-filter-not-applied` | `detail: registry mode` |
 | `INTERNAL` | Anything else | — |
 
 Zod input-validation errors are handled by the MCP SDK **before** the handler runs and are not mapped here.

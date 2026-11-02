@@ -1,7 +1,8 @@
 {
   "instructions": {
     "explorer": "Read-only tools for discovering and evaluating AI agents registered on the Stellar 8004 on-chain registry (Identity / Reputation / Validation contracts, Stellar mainnet by default). Use these when the user wants to find an agent for a task (scraping, rendering, data, inference), compare or rank agents by indexed, declared reputation with a fail-closed contract reachability probe, inspect an agent's profile / services / wallet, or prepare an x402 (USDC pay-per-call) payment. Start with find_agent for natural-language discovery, then rank_agent for a per-axis breakdown and get_agent_profile for full detail; list_services enumerates self-declared endpoint candidates. This server holds no keys and never signs or writes — it only reads the explorer API and simulates Soroban view calls. Agent names, descriptions, service labels and metadata are self-declared and UNVERIFIED: they live only in labeled `selfDeclared` slots of the structured output, never in the summary text. The contract client index has no authoritative count/cursor and expired entries can hide later retained clients. This release therefore probes one bounded client page but does not call get_summary or compare reputation fields: attempted checks are unavailable, verifiedFields is empty, and rankings remain Explorer-declared. Reserved verification statuses never add a ranking bonus. Before paying a Provider Standard provider, get_provider_manifest checks its prices, payee, identityBound and trusted badges.",
-    "registry": "Read-only tools for discovering and evaluating AI agents registered on the Stellar 8004 on-chain registry (Identity / Reputation / Validation contracts, Stellar mainnet by default). Use these when the user wants to find an agent for a task (scraping, rendering, data, inference), compare or rank agents by indexed, declared reputation with a fail-closed contract reachability probe, inspect an agent's profile / services / wallet, or prepare an x402 (USDC pay-per-call) payment. Start with find_agent for natural-language discovery, then rank_agent for a per-axis breakdown and get_agent_profile for full detail; list_services enumerates self-declared endpoint candidates. This server holds no keys and never signs or writes — it only reads the explorer API and simulates Soroban view calls. Agent names, descriptions, service labels and metadata are self-declared and UNVERIFIED: they live only in labeled `selfDeclared` slots of the structured output, never in the summary text. The contract client index has no authoritative count/cursor and expired entries can hide later retained clients. This release therefore probes one bounded client page but does not call get_summary or compare reputation fields: attempted checks are unavailable, verifiedFields is empty, and rankings remain Explorer-declared. Reserved verification statuses never add a ranking bonus. Before paying a Provider Standard provider, get_provider_manifest checks its prices, payee, identityBound and trusted badges. REGISTRY MODE: this server has no explorer. It reads an operator allowlist of agents straight from the Identity contract and their registration files, so searches cover only that allowlist and reputation is not indexed (scores and feedback counts are not measured). leaderboard, registry stats/health, owner lookups, feedback history and a minExplorerScore filter (an argument or a stated number) return INDEXER_REQUIRED. A score implied by a word like \"best\" or \"trusted\" is not applied, and coverage says so (implied-score-filter-not-applied)."
+    "registry": "Read-only tools for discovering and evaluating AI agents registered on the Stellar 8004 on-chain registry (Identity / Reputation / Validation contracts, Stellar mainnet by default). Use these when the user wants to find an agent for a task (scraping, rendering, data, inference), compare or rank agents by indexed, declared reputation with a fail-closed contract reachability probe, inspect an agent's profile / services / wallet, or prepare an x402 (USDC pay-per-call) payment. Start with find_agent for natural-language discovery, then rank_agent for a per-axis breakdown and get_agent_profile for full detail; list_services enumerates self-declared endpoint candidates. This server holds no keys and never signs or writes — it only reads the explorer API and simulates Soroban view calls. Agent names, descriptions, service labels and metadata are self-declared and UNVERIFIED: they live only in labeled `selfDeclared` slots of the structured output, never in the summary text. The contract client index has no authoritative count/cursor and expired entries can hide later retained clients. This release therefore probes one bounded client page but does not call get_summary or compare reputation fields: attempted checks are unavailable, verifiedFields is empty, and rankings remain Explorer-declared. Reserved verification statuses never add a ranking bonus. Before paying a Provider Standard provider, get_provider_manifest checks its prices, payee, identityBound and trusted badges. REGISTRY MODE: this server has no explorer. It reads an operator allowlist of agents straight from the Identity contract and their registration files, so searches cover only that allowlist and reputation is not indexed (scores and feedback counts are not measured). leaderboard, registry stats/health, owner lookups, feedback history and a minExplorerScore filter (an argument or a stated number) return INDEXER_REQUIRED. A score implied by a word like \"best\" or \"trusted\" is not applied, and coverage says so (implied-score-filter-not-applied). Searches also match the services an agent's bound Provider Standard manifest lists; each row's match says which fields matched.",
+    "registryScan": "Read-only tools for discovering and evaluating AI agents registered on the Stellar 8004 on-chain registry (Identity / Reputation / Validation contracts, Stellar mainnet by default). Use these when the user wants to find an agent for a task (scraping, rendering, data, inference), compare or rank agents by indexed, declared reputation with a fail-closed contract reachability probe, inspect an agent's profile / services / wallet, or prepare an x402 (USDC pay-per-call) payment. Start with find_agent for natural-language discovery, then rank_agent for a per-axis breakdown and get_agent_profile for full detail; list_services enumerates self-declared endpoint candidates. This server holds no keys and never signs or writes — it only reads the explorer API and simulates Soroban view calls. Agent names, descriptions, service labels and metadata are self-declared and UNVERIFIED: they live only in labeled `selfDeclared` slots of the structured output, never in the summary text. The contract client index has no authoritative count/cursor and expired entries can hide later retained clients. This release therefore probes one bounded client page but does not call get_summary or compare reputation fields: attempted checks are unavailable, verifiedFields is empty, and rankings remain Explorer-declared. Reserved verification statuses never add a ranking bonus. Before paying a Provider Standard provider, get_provider_manifest checks its prices, payee, identityBound and trusted badges. REGISTRY MODE: this server has no explorer. It reads the newest agents registered on the Identity contract straight from the chain, with their registration files, so searches cover only those agents (coverage registryAgentCount says how many exist; any agent can still be read by id) and reputation is not indexed (scores and feedback counts are not measured). leaderboard, registry stats/health, owner lookups, feedback history and a minExplorerScore filter (an argument or a stated number) return INDEXER_REQUIRED. A score implied by a word like \"best\" or \"trusted\" is not applied, and coverage says so (implied-score-filter-not-applied). Searches also match the services an agent's bound Provider Standard manifest lists; each row's match says which fields matched."
   },
   "tools": [
     {
@@ -348,6 +349,54 @@
                   ],
                   "additionalProperties": {}
                 },
+                "match": {
+                  "description": "Why a text search kept this row; absent when the query had no search words.",
+                  "type": "object",
+                  "properties": {
+                    "fields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "name",
+                          "description",
+                          "registrationServices",
+                          "manifestServices"
+                        ]
+                      },
+                      "description": "Fields that held a query word: the registration's name, description, or service entries (name and endpoint), or the services of the agent's bound Provider Standard manifest (registry mode only)."
+                    },
+                    "manifestServices": {
+                      "description": "The manifest services ({ name, title }) that matched: provider-supplied text, sanitized.",
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "const": "self-declared"
+                        },
+                        "verified": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "note": {
+                          "type": "string"
+                        },
+                        "value": {}
+                      },
+                      "required": [
+                        "provenance",
+                        "verified",
+                        "note",
+                        "value"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "fields"
+                  ],
+                  "additionalProperties": {}
+                },
                 "selfDeclared": {
                   "type": "object",
                   "properties": {
@@ -423,6 +472,30 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "unreadableAgentIds": {
+                "description": "Registry mode: agents in scope that could not be read, so were not searched.",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "registryAgentCount": {
+                "description": "Registry mode, newest-agents scan: how many agents the Identity contract had registered.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "unsearchedManifestAgentIds": {
+                "description": "Registry mode: agents whose Provider Standard manifest a search needed but could not read, so its services were not matched.",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
               }
             },
             "required": [
@@ -441,10 +514,19 @@
                 "type": "string",
                 "const": "registry"
               },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "allowlist",
+                  "newest"
+                ],
+                "description": "Which agents lists and searches read straight from the Identity contract: the operator's allowlist (REGISTRY_AGENT_IDS), or the newest registered agents (REGISTRY_SCAN_LIMIT; testnet's default)."
+              },
               "allowlistSize": {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 9007199254740991
+                "maximum": 9007199254740991,
+                "description": "The most agents a list or search reads: the allowlist's size, or the scan limit."
               },
               "reputationIndexed": {
                 "type": "boolean",
@@ -456,6 +538,7 @@
             },
             "required": [
               "kind",
+              "scope",
               "allowlistSize",
               "reputationIndexed",
               "note"
@@ -542,10 +625,19 @@
                 "type": "string",
                 "const": "registry"
               },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "allowlist",
+                  "newest"
+                ],
+                "description": "Which agents lists and searches read straight from the Identity contract: the operator's allowlist (REGISTRY_AGENT_IDS), or the newest registered agents (REGISTRY_SCAN_LIMIT; testnet's default)."
+              },
               "allowlistSize": {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 9007199254740991
+                "maximum": 9007199254740991,
+                "description": "The most agents a list or search reads: the allowlist's size, or the scan limit."
               },
               "reputationIndexed": {
                 "type": "boolean",
@@ -557,6 +649,7 @@
             },
             "required": [
               "kind",
+              "scope",
               "allowlistSize",
               "reputationIndexed",
               "note"
@@ -1224,10 +1317,19 @@
                 "type": "string",
                 "const": "registry"
               },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "allowlist",
+                  "newest"
+                ],
+                "description": "Which agents lists and searches read straight from the Identity contract: the operator's allowlist (REGISTRY_AGENT_IDS), or the newest registered agents (REGISTRY_SCAN_LIMIT; testnet's default)."
+              },
               "allowlistSize": {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 9007199254740991
+                "maximum": 9007199254740991,
+                "description": "The most agents a list or search reads: the allowlist's size, or the scan limit."
               },
               "reputationIndexed": {
                 "type": "boolean",
@@ -1239,6 +1341,7 @@
             },
             "required": [
               "kind",
+              "scope",
               "allowlistSize",
               "reputationIndexed",
               "note"
@@ -1522,6 +1625,54 @@
                     "snapshotComparable",
                     "limitations",
                     "checkedAt"
+                  ],
+                  "additionalProperties": {}
+                },
+                "match": {
+                  "description": "Why a text search kept this row; absent when the query had no search words.",
+                  "type": "object",
+                  "properties": {
+                    "fields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "name",
+                          "description",
+                          "registrationServices",
+                          "manifestServices"
+                        ]
+                      },
+                      "description": "Fields that held a query word: the registration's name, description, or service entries (name and endpoint), or the services of the agent's bound Provider Standard manifest (registry mode only)."
+                    },
+                    "manifestServices": {
+                      "description": "The manifest services ({ name, title }) that matched: provider-supplied text, sanitized.",
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "const": "self-declared"
+                        },
+                        "verified": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "note": {
+                          "type": "string"
+                        },
+                        "value": {}
+                      },
+                      "required": [
+                        "provenance",
+                        "verified",
+                        "note",
+                        "value"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "fields"
                   ],
                   "additionalProperties": {}
                 },
@@ -2268,10 +2419,19 @@
                 "type": "string",
                 "const": "registry"
               },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "allowlist",
+                  "newest"
+                ],
+                "description": "Which agents lists and searches read straight from the Identity contract: the operator's allowlist (REGISTRY_AGENT_IDS), or the newest registered agents (REGISTRY_SCAN_LIMIT; testnet's default)."
+              },
               "allowlistSize": {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 9007199254740991
+                "maximum": 9007199254740991,
+                "description": "The most agents a list or search reads: the allowlist's size, or the scan limit."
               },
               "reputationIndexed": {
                 "type": "boolean",
@@ -2283,6 +2443,7 @@
             },
             "required": [
               "kind",
+              "scope",
               "allowlistSize",
               "reputationIndexed",
               "note"
@@ -2915,6 +3076,54 @@
                   ],
                   "additionalProperties": {}
                 },
+                "match": {
+                  "description": "Why a text search kept this row; absent when the query had no search words.",
+                  "type": "object",
+                  "properties": {
+                    "fields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "name",
+                          "description",
+                          "registrationServices",
+                          "manifestServices"
+                        ]
+                      },
+                      "description": "Fields that held a query word: the registration's name, description, or service entries (name and endpoint), or the services of the agent's bound Provider Standard manifest (registry mode only)."
+                    },
+                    "manifestServices": {
+                      "description": "The manifest services ({ name, title }) that matched: provider-supplied text, sanitized.",
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "const": "self-declared"
+                        },
+                        "verified": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "note": {
+                          "type": "string"
+                        },
+                        "value": {}
+                      },
+                      "required": [
+                        "provenance",
+                        "verified",
+                        "note",
+                        "value"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "fields"
+                  ],
+                  "additionalProperties": {}
+                },
                 "selfDeclared": {
                   "type": "object",
                   "properties": {
@@ -2989,6 +3198,30 @@
                 "type": "array",
                 "items": {
                   "type": "string"
+                }
+              },
+              "unreadableAgentIds": {
+                "description": "Registry mode: agents in scope that could not be read, so were not searched.",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "registryAgentCount": {
+                "description": "Registry mode, newest-agents scan: how many agents the Identity contract had registered.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "unsearchedManifestAgentIds": {
+                "description": "Registry mode: agents whose Provider Standard manifest a search needed but could not read, so its services were not matched.",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
                 }
               }
             },
@@ -3171,6 +3404,30 @@
                 "type": "array",
                 "items": {
                   "type": "string"
+                }
+              },
+              "unreadableAgentIds": {
+                "description": "Registry mode: agents in scope that could not be read, so were not searched.",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "registryAgentCount": {
+                "description": "Registry mode, newest-agents scan: how many agents the Identity contract had registered.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "unsearchedManifestAgentIds": {
+                "description": "Registry mode: agents whose Provider Standard manifest a search needed but could not read, so its services were not matched.",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
                 }
               }
             },
@@ -3407,6 +3664,54 @@
                   ],
                   "additionalProperties": {}
                 },
+                "match": {
+                  "description": "Why a text search kept this row; absent when the query had no search words.",
+                  "type": "object",
+                  "properties": {
+                    "fields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "name",
+                          "description",
+                          "registrationServices",
+                          "manifestServices"
+                        ]
+                      },
+                      "description": "Fields that held a query word: the registration's name, description, or service entries (name and endpoint), or the services of the agent's bound Provider Standard manifest (registry mode only)."
+                    },
+                    "manifestServices": {
+                      "description": "The manifest services ({ name, title }) that matched: provider-supplied text, sanitized.",
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "const": "self-declared"
+                        },
+                        "verified": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "note": {
+                          "type": "string"
+                        },
+                        "value": {}
+                      },
+                      "required": [
+                        "provenance",
+                        "verified",
+                        "note",
+                        "value"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "fields"
+                  ],
+                  "additionalProperties": {}
+                },
                 "selfDeclared": {
                   "type": "object",
                   "properties": {
@@ -3459,10 +3764,19 @@
                 "type": "string",
                 "const": "registry"
               },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "allowlist",
+                  "newest"
+                ],
+                "description": "Which agents lists and searches read straight from the Identity contract: the operator's allowlist (REGISTRY_AGENT_IDS), or the newest registered agents (REGISTRY_SCAN_LIMIT; testnet's default)."
+              },
               "allowlistSize": {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 9007199254740991
+                "maximum": 9007199254740991,
+                "description": "The most agents a list or search reads: the allowlist's size, or the scan limit."
               },
               "reputationIndexed": {
                 "type": "boolean",
@@ -3474,6 +3788,7 @@
             },
             "required": [
               "kind",
+              "scope",
               "allowlistSize",
               "reputationIndexed",
               "note"
@@ -3507,7 +3822,7 @@
         "type": "object",
         "properties": {
           "search": {
-            "description": "Free-text filter over agent name/description.",
+            "description": "Free-text filter over agent name/description; in registry mode also the services of a bound Provider Standard manifest.",
             "type": "string",
             "maxLength": 256
           },
@@ -3722,6 +4037,30 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "unreadableAgentIds": {
+                "description": "Registry mode: agents in scope that could not be read, so were not searched.",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "registryAgentCount": {
+                "description": "Registry mode, newest-agents scan: how many agents the Identity contract had registered.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "unsearchedManifestAgentIds": {
+                "description": "Registry mode: agents whose Provider Standard manifest a search needed but could not read, so its services were not matched.",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
               }
             },
             "required": [
@@ -3740,10 +4079,19 @@
                 "type": "string",
                 "const": "registry"
               },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "allowlist",
+                  "newest"
+                ],
+                "description": "Which agents lists and searches read straight from the Identity contract: the operator's allowlist (REGISTRY_AGENT_IDS), or the newest registered agents (REGISTRY_SCAN_LIMIT; testnet's default)."
+              },
               "allowlistSize": {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 9007199254740991
+                "maximum": 9007199254740991,
+                "description": "The most agents a list or search reads: the allowlist's size, or the scan limit."
               },
               "reputationIndexed": {
                 "type": "boolean",
@@ -3755,6 +4103,7 @@
             },
             "required": [
               "kind",
+              "scope",
               "allowlistSize",
               "reputationIndexed",
               "note"
@@ -4095,6 +4444,54 @@
                   ],
                   "additionalProperties": {}
                 },
+                "match": {
+                  "description": "Why a text search kept this row; absent when the query had no search words.",
+                  "type": "object",
+                  "properties": {
+                    "fields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "name",
+                          "description",
+                          "registrationServices",
+                          "manifestServices"
+                        ]
+                      },
+                      "description": "Fields that held a query word: the registration's name, description, or service entries (name and endpoint), or the services of the agent's bound Provider Standard manifest (registry mode only)."
+                    },
+                    "manifestServices": {
+                      "description": "The manifest services ({ name, title }) that matched: provider-supplied text, sanitized.",
+                      "type": "object",
+                      "properties": {
+                        "provenance": {
+                          "type": "string",
+                          "const": "self-declared"
+                        },
+                        "verified": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "note": {
+                          "type": "string"
+                        },
+                        "value": {}
+                      },
+                      "required": [
+                        "provenance",
+                        "verified",
+                        "note",
+                        "value"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "fields"
+                  ],
+                  "additionalProperties": {}
+                },
                 "selfDeclared": {
                   "type": "object",
                   "properties": {
@@ -4170,6 +4567,30 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "unreadableAgentIds": {
+                "description": "Registry mode: agents in scope that could not be read, so were not searched.",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "registryAgentCount": {
+                "description": "Registry mode, newest-agents scan: how many agents the Identity contract had registered.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "unsearchedManifestAgentIds": {
+                "description": "Registry mode: agents whose Provider Standard manifest a search needed but could not read, so its services were not matched.",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
               }
             },
             "required": [
@@ -4188,10 +4609,19 @@
                 "type": "string",
                 "const": "registry"
               },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "allowlist",
+                  "newest"
+                ],
+                "description": "Which agents lists and searches read straight from the Identity contract: the operator's allowlist (REGISTRY_AGENT_IDS), or the newest registered agents (REGISTRY_SCAN_LIMIT; testnet's default)."
+              },
               "allowlistSize": {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 9007199254740991
+                "maximum": 9007199254740991,
+                "description": "The most agents a list or search reads: the allowlist's size, or the scan limit."
               },
               "reputationIndexed": {
                 "type": "boolean",
@@ -4203,6 +4633,7 @@
             },
             "required": [
               "kind",
+              "scope",
               "allowlistSize",
               "reputationIndexed",
               "note"
@@ -4479,10 +4910,19 @@
                 "type": "string",
                 "const": "registry"
               },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "allowlist",
+                  "newest"
+                ],
+                "description": "Which agents lists and searches read straight from the Identity contract: the operator's allowlist (REGISTRY_AGENT_IDS), or the newest registered agents (REGISTRY_SCAN_LIMIT; testnet's default)."
+              },
               "allowlistSize": {
                 "type": "integer",
                 "minimum": 0,
-                "maximum": 9007199254740991
+                "maximum": 9007199254740991,
+                "description": "The most agents a list or search reads: the allowlist's size, or the scan limit."
               },
               "reputationIndexed": {
                 "type": "boolean",
@@ -4494,6 +4934,7 @@
             },
             "required": [
               "kind",
+              "scope",
               "allowlistSize",
               "reputationIndexed",
               "note"

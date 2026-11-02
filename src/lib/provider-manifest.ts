@@ -19,6 +19,12 @@
  *      authenticate the manifest without a signature (§7).
  *   4. Attest: badges from trusted validators' records (validation.ts).
  *
+ * searchServices() is the cheap form registry-mode search uses: steps 1–3 over
+ * the on-chain row it already holds, with a shorter deadline, no contract read
+ * and no Validation Registry read. Only a manifest that is ok and bound gives
+ * services to match, so an agent cannot borrow another provider's words by
+ * naming its manifest.
+ *
  * Read-only and keyless: contract simulations and two GETs at most. Nothing here
  * pays, signs or calls a job endpoint.
  */
@@ -43,6 +49,7 @@ import {
   MAX_MANIFEST_URL_LENGTH,
   parseManifestText,
   type ManifestProblem,
+  type ManifestService,
   type ProviderManifestView,
 } from "./provider-standard.js";
 import {
@@ -62,6 +69,12 @@ import type { Network } from "../types.js";
 const MANIFEST_TIMEOUT_MS = 10_000;
 /** Within the standard's advice that manifests be cached for at most 300 s [M4]. */
 const MANIFEST_TTL_MS = 60_000;
+/** A search waits on several manifests at once, so each gets less time than read() gives one. */
+const SEARCH_MANIFEST_TIMEOUT_MS = 5_000;
+/** How long searches skip a manifest that could not be fetched, so each query does not wait on it again. */
+const SEARCH_UNAVAILABLE_TTL_MS = 30_000;
+/** Most unreachable manifests remembered at once. */
+const MAX_SEARCH_UNAVAILABLE = 200;
 
 /**
  * - ok: the manifest was read, and every field this server shows is valid.
@@ -103,6 +116,15 @@ export interface ProviderManifestResult {
   problems: ManifestProblem[];
 }
 
+/**
+ * What a search may match for one agent. Only `ok` carries services: the
+ * manifest was read, is valid, takes payment on this network and is bound to
+ * the agent [I1]–[I3]. Service text is raw: sanitize it before output.
+ */
+export type ManifestSearchResult =
+  | { status: "ok"; services: readonly ManifestService[] }
+  | { status: "absent" | "invalid" | "not-bound" | "unavailable" };
+
 export interface ProviderManifestServiceOptions {
   /** Identity contract reader for explorer mode (tests inject a fake). */
   identityClient?: IdentityReadClient;
@@ -142,15 +164,19 @@ export class ProviderManifestService {
   private readonly cfg: Config;
   private readonly fetcher: typeof fetch;
   private readonly cache: TtlCache;
+  private readonly clock: Clock;
   private readonly logger: Logger;
   private readonly injectedIdentity: IdentityReadClient | undefined;
   private identity: IdentityReadClient | undefined;
   private readonly validation: ValidationEvidenceReader;
+  /** Manifest URL → until when (ms) searches treat it as unreachable without fetching. */
+  private readonly searchUnavailable = new Map<string, number>();
 
   constructor(cfg: Config, opts: ProviderManifestServiceOptions = {}) {
     this.cfg = cfg;
     this.fetcher = opts.fetch ?? ((input, init) => fetch(input, init));
     const clock = opts.clock ?? systemClock;
+    this.clock = clock;
     this.cache = opts.cache ?? new TtlCache({ maxEntries: 200, clock });
     this.logger = (opts.logger ?? log).child({ component: "provider-manifest" });
     this.injectedIdentity = opts.identityClient;
@@ -227,6 +253,52 @@ export class ProviderManifestService {
     };
   }
 
+  /**
+   * For registry-mode search: the services of the manifest an on-chain
+   * registration row names, when that manifest is ok and bound to the agent
+   * [I1]–[I3]. [I1] holds because the row is the on-chain registration; [I2] and
+   * [I3] compare the manifest with the row's id and on-chain wallet, so nothing
+   * else is read. Never throws: an unreachable provider is `unavailable`.
+   */
+  async searchServices(row: AgentResponse): Promise<ManifestSearchResult> {
+    const registration = fromRow(row, "onchain");
+    const declaration = findManifestDeclaration(registration.services);
+    if (declaration.kind !== "declared") return { status: declaration.kind };
+    const url = declaration.url;
+    if (publicHttpsUrlProblem(url, MAX_MANIFEST_URL_LENGTH) !== null) return { status: "invalid" };
+
+    const skipUntil = this.searchUnavailable.get(url);
+    if (skipUntil !== undefined && skipUntil > this.clock.now()) return { status: "unavailable" };
+    let fetched: FetchOutcome;
+    try {
+      fetched = await this.fetchManifest(url, SEARCH_MANIFEST_TIMEOUT_MS);
+    } catch (error) {
+      this.logger.debug("manifest fetch for search failed", { agentId: row.id, error: errorText(error) });
+      fetched = { kind: "unavailable", problem: { message: "the manifest could not be fetched" } };
+    }
+    if (fetched.kind === "unavailable") {
+      this.rememberUnavailable(url);
+      return { status: "unavailable" };
+    }
+    if (fetched.kind === "invalid") return { status: "invalid" };
+
+    const parsed = parseManifestText(fetched.text, url);
+    if (!parsed.ok || parsed.manifest.payment.network !== caip2Network(this.cfg.network)) {
+      return { status: "invalid" };
+    }
+    if (bind(row.id, parsed.manifest, registration).status !== "bound") return { status: "not-bound" };
+    return { status: "ok", services: parsed.manifest.services };
+  }
+
+  private rememberUnavailable(url: string): void {
+    this.searchUnavailable.delete(url);
+    if (this.searchUnavailable.size >= MAX_SEARCH_UNAVAILABLE) {
+      const oldest = this.searchUnavailable.keys().next().value;
+      if (oldest !== undefined) this.searchUnavailable.delete(oldest);
+    }
+    this.searchUnavailable.set(url, this.clock.now() + SEARCH_UNAVAILABLE_TTL_MS);
+  }
+
   private identityClient(): IdentityReadClient {
     this.identity ??=
       this.injectedIdentity ??
@@ -276,11 +348,14 @@ export class ProviderManifestService {
     }
   }
 
-  /** The manifest text, or why there is none. Only a reachable provider's answer is cached. */
-  private async fetchManifest(url: string): Promise<FetchOutcome> {
+  /**
+   * The manifest text, or why there is none. Only a reachable provider's answer
+   * is cached, and read() and searches share it.
+   */
+  private async fetchManifest(url: string, timeoutMs = MANIFEST_TIMEOUT_MS): Promise<FetchOutcome> {
     try {
       return await this.cache.wrap(`manifest:${url}`, MANIFEST_TTL_MS, async () => {
-        const outcome = await this.fetchManifestOnce(url);
+        const outcome = await this.fetchManifestOnce(url, timeoutMs);
         if (outcome.kind === "unavailable") throw new ProviderUnreachable(outcome);
         return outcome;
       });
@@ -290,7 +365,7 @@ export class ProviderManifestService {
     }
   }
 
-  private async fetchManifestOnce(url: string): Promise<FetchOutcome> {
+  private async fetchManifestOnce(url: string, timeoutMs: number): Promise<FetchOutcome> {
     const invalid = (rule: string, message: string): FetchOutcome => ({ kind: "invalid", problem: { rule, message } });
     const unavailable = (message: string): FetchOutcome => ({ kind: "unavailable", problem: { message } });
 
@@ -300,7 +375,7 @@ export class ProviderManifestService {
         // [M3]: never follow. "manual" hands back the 3xx so it can be named.
         redirect: "manual",
         headers: { accept: "application/json" },
-        signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
       this.logger.warn("manifest fetch failed", { error: errorText(error) });

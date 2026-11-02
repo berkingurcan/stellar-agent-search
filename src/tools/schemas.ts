@@ -69,6 +69,21 @@ export const zVerification = z
 /** Full 3-axis breakdown — permissive record (numbers + nested axes + flags). */
 export const zBreakdown = z.record(z.string(), z.any());
 
+/** Why a text search kept a row (lib/text-match.ts). */
+export const zMatch = z
+  .object({
+    fields: z
+      .array(z.enum(["name", "description", "registrationServices", "manifestServices"]))
+      .describe(
+        "Fields that held a query word: the registration's name, description, or service entries (name and " +
+          "endpoint), or the services of the agent's bound Provider Standard manifest (registry mode only).",
+      ),
+    manifestServices: zSelfDeclaredSlot
+      .optional()
+      .describe("The manifest services ({ name, title }) that matched: provider-supplied text, sanitized."),
+  })
+  .passthrough();
+
 export const zRankedAgent = z
   .object({
     id: z.number(),
@@ -87,6 +102,7 @@ export const zRankedAgent = z
     flags: zFlags,
     breakdown: zBreakdown.optional(),
     verification: zVerification.optional(),
+    match: zMatch.optional().describe("Why a text search kept this row; absent when the query had no search words."),
     selfDeclared: zSelfDeclaredSlot,
   })
   .passthrough();
@@ -127,7 +143,17 @@ export const zInterpretedQuery = z
 export const zSourceNote = z
   .object({
     kind: z.literal("registry"),
-    allowlistSize: z.number().int().nonnegative(),
+    scope: z
+      .enum(["allowlist", "newest"])
+      .describe(
+        "Which agents lists and searches read straight from the Identity contract: the operator's allowlist " +
+          "(REGISTRY_AGENT_IDS), or the newest registered agents (REGISTRY_SCAN_LIMIT; testnet's default).",
+      ),
+    allowlistSize: z
+      .number()
+      .int()
+      .nonnegative()
+      .describe("The most agents a list or search reads: the allowlist's size, or the scan limit."),
     reputationIndexed: z.literal(false),
     note: z.string(),
   })
@@ -255,5 +281,22 @@ export const zDiscoveryCoverage = z
     recordsScanned: z.number().int().nonnegative(),
     hasMore: z.boolean().optional(),
     limitations: z.array(z.string()).optional(),
+    unreadableAgentIds: z
+      .array(z.number().int().nonnegative())
+      .optional()
+      .describe("Registry mode: agents in scope that could not be read, so were not searched."),
+    registryAgentCount: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe("Registry mode, newest-agents scan: how many agents the Identity contract had registered."),
+    unsearchedManifestAgentIds: z
+      .array(z.number().int().nonnegative())
+      .optional()
+      .describe(
+        "Registry mode: agents whose Provider Standard manifest a search needed but could not read, so its " +
+          "services were not matched.",
+      ),
   })
   .passthrough();

@@ -77,16 +77,13 @@ describe("setup flag parsing", () => {
     ).rejects.toThrow("mutually exclusive");
   });
 
-  it("rejects embedded URL credentials and incomplete testnet config", async () => {
+  it("rejects embedded URL credentials and conflicting or malformed data sources", async () => {
     await expect(
       executeSetup(
         { client: "cursor", explorerUrl: "https://user:secret@example.test", version: "0.1.0" },
         runtime(),
       ),
     ).rejects.toThrow("without embedded credentials");
-    await expect(
-      executeSetup({ client: "cursor", network: "testnet", version: "0.1.0" }, runtime()),
-    ).rejects.toThrow("requires --explorer-url for a testnet indexer, or --registry-agent-ids");
     await expect(
       executeSetup(
         {
@@ -105,6 +102,28 @@ describe("setup flag parsing", () => {
         runtime(),
       ),
     ).rejects.toThrow("REGISTRY_AGENT_IDS must be");
+    await expect(
+      executeSetup(
+        { client: "cursor", network: "testnet", registryAgentIds: "12", registryScanLimit: "20", version: "0.1.0" },
+        runtime(),
+      ),
+    ).rejects.toThrow("--registry-agent-ids or --registry-scan-limit, not both");
+    await expect(
+      executeSetup({ client: "cursor", network: "testnet", registryScanLimit: "0", version: "0.1.0" }, runtime()),
+    ).rejects.toThrow("REGISTRY_SCAN_LIMIT must be");
+  });
+
+  it("configures testnet with no data-source flag: the server reads its newest agents", async () => {
+    const result = await executeSetup(
+      { client: "cursor", network: "testnet", dryRun: true, version: "0.1.0" },
+      runtime(),
+    );
+    expect(result.report.launch.env).toEqual({ STELLAR_NETWORK: "testnet" });
+    const limited = await executeSetup(
+      { client: "cursor", network: "testnet", registryScanLimit: " 20 ", dryRun: true, version: "0.1.0" },
+      runtime(),
+    );
+    expect(limited.report.launch.env).toEqual({ STELLAR_NETWORK: "testnet", REGISTRY_SCAN_LIMIT: "20" });
   });
 
   it("configures testnet registry mode from an allowlist, normalized", async () => {

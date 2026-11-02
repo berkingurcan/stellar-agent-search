@@ -22,7 +22,7 @@ import { ExplorerService } from "../src/lib/explorer.js";
 import { ProviderManifestService } from "../src/lib/provider-manifest.js";
 import { RegistryService } from "../src/lib/registry-source.js";
 import { ReputationVerifier } from "../src/lib/reputation.js";
-import type { IdentityReadClient } from "../src/lib/soroban.js";
+import type { RegistryReadClient } from "../src/lib/soroban.js";
 import { buildServer, REGISTRY_MODE_INSTRUCTIONS } from "../src/server.js";
 import { buildAgentProfile, type ToolDeps } from "../src/tools/shared.js";
 
@@ -70,8 +70,10 @@ const AGENTS: Record<number, FakeAgent> = {
 function fakeIdentity(
   agents: Record<number, FakeAgent> = AGENTS,
   reads: number[] = [],
-): IdentityReadClient {
+): RegistryReadClient {
   return {
+    // Ids run from 0 to count − 1, so the count is one past the highest registered id.
+    total_agents: async () => ({ result: Math.max(-1, ...Object.keys(agents).map(Number)) + 1 }),
     agent_uri: async ({ agent_id }) => {
       reads.push(agent_id);
       const agent = agents[agent_id];
@@ -266,7 +268,7 @@ describe("RegistryService reads the Identity contract and decodes the registrati
       find_owner: async () => {
         throw new Error("socket hang up");
       },
-    } satisfies IdentityReadClient;
+    } satisfies RegistryReadClient;
     const service = new RegistryService(registryConfig(), { client: failing });
     const error = await service.getAgent(7).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(RegistryReadError);
@@ -314,12 +316,13 @@ describe("RegistryService searches the allowlist locally and says what it skippe
 
   it("throws when an outage leaves nothing readable, so it never looks like an empty registry", async () => {
     const down = {
+      total_agents: async () => ({ result: 11 }),
       agent_uri: async () => {
         throw new Error("503");
       },
       get_agent_wallet: async () => ({ result: undefined }),
       find_owner: async () => ({ result: undefined }),
-    } satisfies IdentityReadClient;
+    } satisfies RegistryReadClient;
     const service = new RegistryService(registryConfig(), { client: down });
     await expect(service.findAgentsWithCoverage("")).rejects.toBeInstanceOf(RegistryReadError);
   });
@@ -409,6 +412,7 @@ const textOf = (result: CallResult) => result.content.map((c) => c.text ?? "").j
 
 const SOURCE_NOTE = {
   kind: "registry",
+  scope: "allowlist",
   allowlistSize: 4,
   reputationIndexed: false,
 };
@@ -737,9 +741,10 @@ describe.sequential("every description of registry mode names the tools that ref
 
   it("the skill's registry-mode paragraph", () => {
     const skill = read("skills", "mcp", "SKILL.md");
-    const start = skill.indexOf("**Registry mode (`REGISTRY_AGENT_IDS`).**");
+    const start = skill.indexOf("**Registry mode (no indexer).**");
+    expect(start).toBeGreaterThanOrEqual(0);
     const paragraph = skill.slice(start, skill.indexOf("\n\n", start));
-    const [works, needs] = paragraph.split("work over that allowlist");
+    const [works, needs] = paragraph.split("work over those agents");
     expect(namesIn(works!)).toEqual(working);
     expect(namesIn(needs!)).toEqual(refusing);
   });

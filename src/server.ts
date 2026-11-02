@@ -59,14 +59,42 @@ export const PROVIDER_STANDARD_INSTRUCTIONS =
   " Before paying a Provider Standard provider, get_provider_manifest checks its prices, payee, identityBound " +
   "and trusted badges.";
 
-/** Appended in registry mode (REGISTRY_AGENT_IDS), where there is no explorer. */
-export const REGISTRY_MODE_INSTRUCTIONS =
-  " REGISTRY MODE: this server has no explorer. It reads an operator allowlist of agents straight from the " +
-  "Identity contract and their registration files, so searches cover only that allowlist and reputation is not " +
-  "indexed (scores and feedback counts are not measured). leaderboard, registry stats/health, owner lookups, " +
+/** What registry mode refuses and drops, whichever agents it reads. */
+const REGISTRY_MODE_LIMITS =
+  " leaderboard, registry stats/health, owner lookups, " +
   "feedback history and a minExplorerScore filter (an argument or a stated number) return INDEXER_REQUIRED. A " +
   "score implied by a word like \"best\" or \"trusted\" is not applied, and coverage says so " +
   "(implied-score-filter-not-applied).";
+
+/** Appended in registry mode over an allowlist (REGISTRY_AGENT_IDS), where there is no explorer. */
+export const REGISTRY_MODE_INSTRUCTIONS =
+  " REGISTRY MODE: this server has no explorer. It reads an operator allowlist of agents straight from the " +
+  "Identity contract and their registration files, so searches cover only that allowlist and reputation is not " +
+  "indexed (scores and feedback counts are not measured)." +
+  REGISTRY_MODE_LIMITS;
+
+/** Appended in registry mode over the newest agents (testnet's default, REGISTRY_SCAN_LIMIT). */
+export const REGISTRY_SCAN_INSTRUCTIONS =
+  " REGISTRY MODE: this server has no explorer. It reads the newest agents registered on the Identity contract " +
+  "straight from the chain, with their registration files, so searches cover only those agents (coverage " +
+  "registryAgentCount says how many exist; any agent can still be read by id) and reputation is not indexed " +
+  "(scores and feedback counts are not measured)." +
+  REGISTRY_MODE_LIMITS;
+
+/** Appended in registry mode where get_provider_manifest is registered: searches read manifests too. */
+export const REGISTRY_MANIFEST_SEARCH_INSTRUCTIONS =
+  " Searches also match the services an agent's bound Provider Standard manifest lists; each row's match says " +
+  "which fields matched.";
+
+/** The registry-mode paragraph for `config`; "" over an explorer. */
+export function registryInstructions(config: Config, fetchProviderDocuments = true): string {
+  const scope = config.registryAgentIds
+    ? REGISTRY_MODE_INSTRUCTIONS
+    : config.registryScanLimit !== null
+      ? REGISTRY_SCAN_INSTRUCTIONS
+      : "";
+  return scope && fetchProviderDocuments ? scope + REGISTRY_MANIFEST_SEARCH_INSTRUCTIONS : scope;
+}
 
 export interface BuildServerOptions {
   /** Version reported in the MCP initialize handshake (defaults from package.json). */
@@ -98,9 +126,9 @@ export function buildServer(config: Config, opts: BuildServerOptions = {}): McpS
       },
       instructions:
         SERVER_INSTRUCTIONS +
-        // Same condition registerGetProviderManifest uses.
+        // Same condition registerGetProviderManifest and searchesManifests use.
         (deps.policy?.fetchProviderDocuments === false ? "" : PROVIDER_STANDARD_INSTRUCTIONS) +
-        (config.registryAgentIds ? REGISTRY_MODE_INSTRUCTIONS : ""),
+        registryInstructions(config, deps.policy?.fetchProviderDocuments !== false),
     },
   );
 

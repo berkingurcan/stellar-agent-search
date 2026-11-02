@@ -123,10 +123,13 @@ async function fetchAgentsPaged(
 
 /** Registry mode: a line saying the reputation figures were not measured; "" otherwise. */
 function registryModeMarkdown(deps: ResourceDeps): string {
-  return deps.source.kind === "registry"
-    ? "\n\n> Registry mode: read from the Identity contract for an operator allowlist. Reputation is not " +
-        "indexed, so the scores and feedback counts above were not measured.\n"
-    : "";
+  if (deps.source.kind !== "registry") return "";
+  const scope =
+    deps.source.describe().scope === "allowlist" ? "for an operator allowlist" : "(a scan of the newest agents)";
+  return (
+    `\n\n> Registry mode: read from the Identity contract ${scope}. Reputation is not ` +
+    "indexed, so the scores and feedback counts above were not measured.\n"
+  );
 }
 
 /** Registry mode: `{ source }` for a resource's JSON; nothing otherwise. */
@@ -750,13 +753,14 @@ async function computeLeaderboard(deps: ResourceDeps): Promise<LeaderboardResult
 async function listTopAgentResources(deps: ResourceDeps) {
   try {
     if (deps.source.kind === "registry") {
-      // No reputation to rank by or quote: list the allowlist as it is.
+      // No reputation to rank by or quote: list the scope as it is (an allowlist by id, a scan newest first).
+      const scope = deps.source.describe().scope === "allowlist" ? "allowlisted" : "newest agents";
       const { agents } = await deps.source.findAgentsWithCoverage("");
       return agents.slice(0, LEADERBOARD_N).map((a) => ({
         uri: `${SCHEME}agent/${a.id}`,
         name: `agent-${a.id}`,
         title: `Agent #${a.id}`,
-        description: `allowlisted (registry mode) · x402=${a.x402Enabled === true}`,
+        description: `${scope} (registry mode) · x402=${a.x402Enabled === true}`,
         mimeType: JSON_MIME,
       }));
     }

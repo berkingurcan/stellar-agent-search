@@ -19,13 +19,14 @@ import type {
   AgentResponse,
   FeedbackResponse,
 } from "@trionlabs/stellar8004";
-import type { Config } from "../config.js";
+import { isRegistryMode, type Config } from "../config.js";
 import {
   ExplorerService,
   V1_UNVERSIONED_PAGINATION_LIMITATION,
   type DiscoveryCoverage,
   type ExplorerServiceOptions,
 } from "../lib/explorer.js";
+import type { AgentMatch, MatchField } from "../lib/text-match.js";
 import type { ParsedQuery } from "../lib/nlparse.js";
 import {
   ProviderManifestService,
@@ -55,6 +56,7 @@ import {
   selfDeclared,
   serverText,
   CAPS,
+  MANIFEST_TEXT_NOTE,
   type SelfDeclared,
 } from "../lib/sanitize.js";
 import type {
@@ -118,14 +120,25 @@ export interface CreateToolDepsOptions {
 
 /** Convenience factory: build the read-only deps from a loaded Config. */
 export function createToolDeps(config: Config, opts: CreateToolDepsOptions = {}): ToolDeps {
+  const providers = new ProviderManifestService(config, opts.providers);
   return {
     config,
-    source: config.registryAgentIds
-      ? new RegistryService(config, opts.registry)
+    source: isRegistryMode(config)
+      ? // Searches match bound manifests' services through the same reader (and cache) as get_provider_manifest.
+        new RegistryService(config, { manifests: providers, ...opts.registry })
       : new ExplorerService(config, opts.explorer),
     verifier: new ReputationVerifier(config, opts.verifier),
-    providers: new ProviderManifestService(config, opts.providers),
+    providers,
   };
+}
+
+/**
+ * Whether a registry-mode search may fetch Provider Standard manifests to match
+ * their services. A deployment that must not fetch registrant-chosen URLs (the
+ * public Worker) turns it off with `fetchProviderDocuments: false`.
+ */
+export function searchesManifests(deps: ToolDeps): boolean {
+  return deps.policy?.fetchProviderDocuments !== false;
 }
 
 export { mapWithConcurrency } from "../lib/concurrency.js";
@@ -140,16 +153,34 @@ export function sourceFields(deps: ToolDeps): { source?: RegistrySourceNote } {
 }
 
 /**
- * A summary-text suffix saying what registry mode cannot measure; "" in explorer
- * mode. Pass the search coverage so a dropped implied score threshold is named too.
+ * A summary-text suffix saying what registry mode read and cannot measure; "" in
+ * explorer mode. Pass the search coverage so a dropped implied score threshold,
+ * the size of a newest-agents scan and unsearched manifests are named too.
  */
 export function sourceText(deps: ToolDeps, coverage?: DiscoveryCoverage): string {
   if (deps.source.kind !== "registry") return "";
-  const { allowlistSize } = deps.source.describe();
+  const { scope, allowlistSize } = deps.source.describe();
   const dropped = coverage?.limitations?.includes(IMPLIED_SCORE_NOT_APPLIED)
     ? serverText` A quality word in the query (such as "best" or "trusted") implies a minimum score, which registry mode cannot apply; results are not filtered by score.`
     : "";
-  return serverText` Registry mode: ${allowlistSize} allowlisted agent(s) read from the Identity contract; reputation is not indexed, so scores and feedback counts are not measured.` + dropped;
+  const unsearched = coverage?.unsearchedManifestAgentIds?.length ?? 0;
+  const manifests =
+    unsearched > 0
+      ? serverText` ${unsearched} provider manifest(s) could not be searched (unsearchedManifestAgentIds), so their services were not matched.`
+      : "";
+  const total = coverage?.registryAgentCount;
+  const read =
+    scope === "allowlist"
+      ? serverText` Registry mode: ${allowlistSize} allowlisted agent(s) read from the Identity contract;`
+      : total !== undefined
+        ? serverText` Registry mode: the newest ${Math.min(allowlistSize, total)} of ${total} registered agent(s) read from the Identity contract;`
+        : serverText` Registry mode: agents read from the Identity contract, searches over the newest ${allowlistSize};`;
+  return (
+    read +
+    serverText` reputation is not indexed, so scores and feedback counts are not measured.` +
+    dropped +
+    manifests
+  );
 }
 
 /** Coverage limitation: a score threshold implied by a quality word was not applied (registry mode). */
@@ -359,8 +390,35 @@ export interface RankedRow {
   flags: AgentFlags;
   breakdown?: RankResult;
   verification?: VerificationResult;
+  /** Why a text search kept the row; absent when the query had no search words. */
+  match?: RowMatch;
   /** UNTRUSTED, labeled: name/description/services/metadata/image. */
   selfDeclared: SelfDeclared<SelfDeclaredFields>;
+}
+
+/** Why a search kept a row: field names are server vocabulary; manifest service text is labeled and sanitized. */
+export interface RowMatch {
+  fields: MatchField[];
+  /** Present when a bound Provider Standard manifest's services matched. */
+  manifestServices?: SelfDeclared<Array<{ name: string; title: string | null }>>;
+}
+
+/** The trust-boundary-safe projection of a match record. */
+export function toRowMatch(match: AgentMatch): RowMatch {
+  return {
+    fields: [...match.fields],
+    ...(match.manifestServices.length > 0
+      ? {
+          manifestServices: selfDeclared(
+            match.manifestServices.slice(0, CAPS.services).map((s) => ({
+              name: sanitizeText(s.name, CAPS.serviceName),
+              title: sanitizeNullable(s.title, CAPS.serviceName),
+            })),
+            MANIFEST_TEXT_NOTE,
+          ),
+        }
+      : {}),
+  };
 }
 
 export function toRankedRow(
@@ -368,7 +426,7 @@ export function toRankedRow(
   a: AgentResponse,
   rank: number,
   result: RankResult,
-  opts: { verification?: VerificationResult; includeBreakdown?: boolean } = {},
+  opts: { verification?: VerificationResult; includeBreakdown?: boolean; match?: AgentMatch } = {},
 ): RankedRow {
   const ids = agentIds(config, a.id);
   const caps = deriveCapabilities(a);
@@ -392,6 +450,7 @@ export function toRankedRow(
   };
   if (opts.includeBreakdown) row.breakdown = projectedRank;
   if (opts.verification) row.verification = opts.verification;
+  if (opts.match) row.match = toRowMatch(opts.match);
   return row;
 }
 
@@ -473,6 +532,8 @@ export interface RankVerifyOptions {
   /** How many rows to return (post-sort slice). */
   limit: number;
   includeBreakdown?: boolean;
+  /** Why each candidate matched the query (FindAgentsResult.matches), attached to its row. */
+  matches?: ReadonlyMap<number, AgentMatch>;
 }
 
 /**
@@ -542,6 +603,7 @@ export async function rankAndVerify(
     toRankedRow(deps.config, byId.get(r.id)!, r.rank, r.result, {
       verification: verifications.get(r.id),
       includeBreakdown: opts.includeBreakdown,
+      match: opts.matches?.get(r.id),
     }),
   );
 }

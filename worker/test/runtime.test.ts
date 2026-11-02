@@ -924,8 +924,23 @@ describe("health and real MCP factory smoke", () => {
       STELLAR_NETWORK: "testnet",
       REGISTRY_AGENT_IDS: "1,2",
     };
+    // Testnet with no source reads its newest agents straight from the Identity contract,
+    // and REGISTRY_SCAN_LIMIT asks for that scan on mainnet: neither is the canonical explorer.
+    const testnetScanEnv: WorkerEnv = { ...workerEnv(binding), STELLAR_NETWORK: "testnet" };
+    const mainnetScanEnv: WorkerEnv = {
+      ...workerEnv(binding),
+      STELLAR_NETWORK: "mainnet",
+      REGISTRY_SCAN_LIMIT: "10",
+    };
 
-    for (const env of [testnetEnv, customMainnetEnv, registryMainnetEnv, registryTestnetEnv]) {
+    for (const env of [
+      testnetEnv,
+      customMainnetEnv,
+      registryMainnetEnv,
+      registryTestnetEnv,
+      testnetScanEnv,
+      mainnetScanEnv,
+    ]) {
       const mcp = await worker.fetch(legacyRequest(initializeBody), env, new TestContext());
       expect(mcp.status).toBe(503);
       const payload = await rpcPayload(mcp);

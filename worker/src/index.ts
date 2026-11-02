@@ -102,6 +102,8 @@ export interface WorkerEnv {
   EXPLORER_BASE_URL?: string;
   /** Read only so the canonical-config check can refuse it: the hosted Worker never runs registry mode. */
   REGISTRY_AGENT_IDS?: string;
+  /** Read only so the canonical-config check can refuse it, for the same reason. */
+  REGISTRY_SCAN_LIMIT?: string;
   VERIFY_ONCHAIN?: string;
   RANK_SCORE_MAX?: string;
   RANK_W_QUALITY?: string;
@@ -215,6 +217,7 @@ function workerEnvironment(env: WorkerEnv): EnvironmentMap {
     STELLAR_RPC_URL: env.STELLAR_RPC_URL,
     EXPLORER_BASE_URL: env.EXPLORER_BASE_URL,
     REGISTRY_AGENT_IDS: env.REGISTRY_AGENT_IDS,
+    REGISTRY_SCAN_LIMIT: env.REGISTRY_SCAN_LIMIT,
     VERIFY_ONCHAIN: env.VERIFY_ONCHAIN,
     RANK_SCORE_MAX: env.RANK_SCORE_MAX,
     RANK_W_QUALITY: env.RANK_W_QUALITY,
@@ -777,6 +780,7 @@ function isCanonicalRemoteConfig(config: Config): config is Config & { explorerB
   if (
     config.explorerBaseUrl === null ||
     config.registryAgentIds !== null ||
+    config.registryScanLimit !== null ||
     config.network !== "mainnet" ||
     config.verifyOnchain !== true ||
     config.scoreMax !== RANK_SCORE_MAX ||

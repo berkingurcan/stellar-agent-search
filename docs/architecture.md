@@ -24,7 +24,8 @@ MCP client (Claude Code / Cursor / Windsurf / Cline / VS Code)   +   human termi
                  ├─ AgentSource (one of)
                  │    ├─ ExplorerService ──HTTPS──► stellar8004 public API [PRIMARY DATA]
                  │    └─ RegistryService ──► Soroban RPC ──► Identity contract   [registry mode]
-                 │                       └─HTTPS──► registration files (allowlisted agents only)
+                 │                       ├─HTTPS──► registration files (public hosts only)
+                 │                       └─HTTPS──► Provider Standard manifests (searches, ≤10 each)
                  └─ ReputationVerifier ──► Soroban RPC ──► Reputation contract
 
 REMOTE — implemented, not deployed
@@ -174,18 +175,30 @@ manufacturing a partial/mismatch verdict.
 ## Registry mode (`lib/registry-source.ts`)
 
 Tools read through the `AgentSource` interface (`lib/source.ts`), not a concrete class. `ExplorerService` is one
-implementation. `RegistryService` is the other: with `REGISTRY_AGENT_IDS` set (and no `EXPLORER_BASE_URL`), it
-reads `agent_uri`, `get_agent_wallet` and `find_owner` for each allowlisted agent, on the same fetch-only
-simulation transport the Reputation reader uses (`lib/soroban.ts`). It then decodes the registration file into
-the explorer's row shape, so every adapter and the `AgentProfile` join run unchanged.
+implementation. `RegistryService` is the other. It reads `agent_uri`, `get_agent_wallet` and `find_owner` for
+each agent, on the same fetch-only simulation transport the Reputation reader uses (`lib/soroban.ts`), then
+decodes the registration file into the explorer's row shape, so every adapter and the `AgentProfile` join run
+unchanged. It reads one of two scopes:
+
+- **The newest agents** (`REGISTRY_SCAN_LIMIT`; testnet's default, 50, when neither `EXPLORER_BASE_URL` nor
+  `REGISTRY_AGENT_IDS` is set). The Identity contract assigns ids in order from 0 and has no burn, so its
+  `total_agents` count names the window: ids `count − limit` to `count − 1`, read newest first. Lists and
+  searches stop at the window; a lookup by id reads any registered agent.
+- **An allowlist** (`REGISTRY_AGENT_IDS`): only those agents, and no lookup outside them.
+
+How it stays bounded and honest:
 
 - Feedback, stats, health and owner lookups live on `IndexerReads`, which only the explorer branch of the
   union carries. Tools reach them through `requireIndexer`, which throws `IndexerRequiredError`
   (`INDEXER_REQUIRED`) in registry mode. The type system stops a tool from calling one without that check.
-- The contract cannot be enumerated, so lists and searches cover the allowlist only (`registry-allowlist-only`),
-  and agents that fail to read are named in `unreadableAgentIds`. If nothing could be read because of an outage,
-  the request fails rather than returning an empty list.
-- There is no indexed reputation. Registry-mode results attach `source: { kind: "registry",
+- Coverage is never complete. An allowlist carries `registry-allowlist-only`; a scan that stops short of agent 0
+  carries `registry-newest-agents-only` and `registryAgentCount`. Agents that fail to read are named in
+  `unreadableAgentIds`. If the count or the chain itself can't be read, the request fails rather than returning
+  an empty list; an unreadable registration file is the registrant's problem and only marks that agent.
+- At most 32 agents are read at once (registration hosts can be slow), and their contract simulations pass a
+  narrower gate of 6, so the RPC sees the same load as before. Rows are cached for 60 s, the count for 30 s, and
+  a registration file that could not be read for 60 s too, so repeated searches don't fetch it again.
+- There is no indexed reputation. Registry-mode results attach `source: { kind: "registry", scope,
   reputationIndexed: false }`, and summary text does not print the zero counts as if they had been measured.
 - A `minExplorerScore` given as an argument or as a number in the query is refused. One the parser inferred
   from a quality word ("best", "trusted") is a ranking preference, not a stated filter, so `queryMinScore`
@@ -193,10 +206,32 @@ the explorer's row shape, so every adapter and the `AgentProfile` join run uncha
   the whole search on the most common phrasings.
 - Registration files that predate `services` and list `endpoints: [{ type, url }]` are read the way the SDK's
   edit path converts them.
-- Registration files are fetched only for allowlisted agents (never for an id a caller supplies), with no
-  redirects, a 10 s timeout and a 64 KiB cap. Schemes other than `data:` and `https:` fail closed.
-- The Worker never enters registry mode: it forwards a closed set of variables, and `REGISTRY_AGENT_IDS` is not
-  one of them.
+- Registration files are read from a `data:` URI or an `https:` URL with no redirects, a 10 s timeout and a
+  64 KiB cap. Any registrant chooses that URL, so a local or private host (`localhost`, an IP literal,
+  `*.local`, …) is refused before any request (`lib/http.ts`). Other schemes fail closed.
+- The Worker never enters registry mode: its canonical-config check refuses `REGISTRY_AGENT_IDS`,
+  `REGISTRY_SCAN_LIMIT` and any network but mainnet with a 503, and its deploy validator keeps them out of
+  `wrangler.jsonc`.
+
+### Service-aware search
+
+Text matching is shared by both sources (`lib/text-match.ts`): the query's keywords are folded and stemmed, then
+matched as substrings of an agent's name, description and registration service entries. Each kept row records
+which fields matched, and `find_agent` / `rank_agent` return it as `match`.
+
+In registry mode a search also matches the services of a Provider Standard manifest
+(`ProviderManifestService.searchServices`): for a row that names one and does not already match, the manifest is
+fetched the way `get_provider_manifest` fetches it (public HTTPS, no redirect, 256 KiB, `application/json`,
+I-JSON; 5 s), parsed, checked to take payment on this network, and bound to the row ([I2] the manifest names the
+agent, [I3] `payTo` is the on-chain wallet; [I1] holds because the row is the on-chain registration). Only then
+are its services' name, title, description and tags matched; nothing else is read, no Validation Registry
+record either. At most 10 manifests per search, newest agents first, 4 at a time. The manifest cache is shared
+with `get_provider_manifest` (60 s); an unreachable one is skipped for 30 s; and agents whose manifest was needed
+but not read are named in `unsearchedManifestAgentIds`. A deployment with `fetchProviderDocuments: false` (the
+public Worker) passes `matchManifests: false` and fetches none.
+
+The explorer path does not do this: its v1 list omits `services[]`, so knowing which candidates name a manifest
+would take one detail read each on every search, and the hosted Worker fetches no registrant-chosen URL.
 
 The scale fix belongs upstream, not in another database here. The proposed cursor-based discovery contract,
 freshness metadata, stable ordering, and ownership boundary are in
