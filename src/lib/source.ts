@@ -7,9 +7,10 @@
  *   - ExplorerService (explorer.ts): the indexer. It enumerates the registry
  *     and also answers feedback, stats, health and owner lookups.
  *   - RegistryService (registry-source.ts): keyless reads of the Identity
- *     contract for an operator allowlist (REGISTRY_AGENT_IDS), for networks
- *     with no indexer. It can only enumerate that allowlist, and it has no
- *     indexed reputation.
+ *     contract, for networks with no indexer: an operator allowlist
+ *     (REGISTRY_AGENT_IDS) or the newest registered agents (REGISTRY_SCAN_LIMIT,
+ *     testnet's default). It enumerates only that scope, and it has no indexed
+ *     reputation.
  *
  * Reads only an indexer can answer live on {@link IndexerReads}, which only the
  * explorer branch of the union carries. A caller reaches them through
@@ -78,7 +79,16 @@ export type AgentSource = IndexerSource | RegistrySource;
 /** Attached as `source` to registry-mode results; explorer results carry none. */
 export interface RegistrySourceNote {
   kind: "registry";
-  /** Agents the operator allowlisted. Lists and searches never see past them. */
+  /**
+   * Which agents lists and searches read: the operator's allowlist
+   * (REGISTRY_AGENT_IDS), or the newest agents the Identity contract registered
+   * (REGISTRY_SCAN_LIMIT; testnet's default).
+   */
+  scope: "allowlist" | "newest";
+  /**
+   * The most agents a list or search reads: the allowlist's size, or the scan
+   * limit. Lists and searches never see past them.
+   */
   allowlistSize: number;
   /** Always false: no indexer, so scores and feedback counts are not measured. */
   reputationIndexed: false;

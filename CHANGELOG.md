@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Testnet works with no setting.** With `STELLAR_NETWORK=testnet` and no other data source, the server reads the
+  newest agents straight from the testnet Identity contract: `total_agents` gives the count (the contract assigns
+  ids in order from 0 and has no burn), then the newest 50 are read with the existing registry-mode reads, newest
+  first. An agent that registered a moment ago is found by the next search, with no allowlist. Coverage stays
+  honest: never complete, `registry-newest-agents-only` while older agents exist, the new `registryAgentCount`
+  (how many agents exist), and `unreadableAgentIds` for agents whose registration file could not be read. Lists
+  and searches stop at the window; a lookup by id (`profile`, `get_provider_manifest`, `rank_agent` ids) reads any
+  registered agent. Rows are cached for 60 s and the count for 30 s; a registration file that could not be read is
+  not fetched again for 60 s. Up to 32 agents are read at once, their contract simulations through a gate of 6.
+  - New setting `REGISTRY_SCAN_LIMIT` (1–50; CLI `--registry-scan-limit`, `setup --registry-scan-limit`): how many
+    of the newest agents to read. Testnet's default is 50; on mainnet, setting it replaces the explorer. It can't
+    be combined with `EXPLORER_BASE_URL` or `REGISTRY_AGENT_IDS`, which keep working as before.
+  - Registry-mode results carry `source.scope`: `"newest"` or `"allowlist"`. The server instructions, the CLI
+    banner, coverage notices and `doctor` name the scope. In a scan, `doctor` passes even when some registrations
+    can't be read: those are the registrants' to fix.
+- **Searches match a provider's services.** In registry mode, an agent whose registration names a Provider Standard
+  manifest is also matched against that manifest's services: each service's name, title, description and tags.
+  Only a manifest that is ok and bound to the agent counts ([I2] it names the agent, [I3] its `payTo` is the
+  agent's on-chain wallet; [I1] holds because the registration was read on chain), so an agent cannot borrow
+  another provider's words. A manifest is read only for an agent whose registration text did not already match:
+  at most 10 per search, newest agents first, 4 at a time, through the same guarded reader and 60 s cache as
+  `get_provider_manifest` (5 s deadline). An unreachable manifest is skipped for 30 s, and agents whose manifest a
+  search needed but could not read are listed in the new `coverage.unsearchedManifestAgentIds` (limitation
+  `provider-manifests-not-searched`). A deployment with `fetchProviderDocuments: false` fetches none. The explorer
+  path is unchanged: its v1 list omits `services[]`, and the hosted Worker fetches no registrant-chosen URL.
+- **Every keyword-search row says why it matched.** `find_agent` and `rank_agent` (with a query) rows carry
+  `match.fields` (`name`, `description`, `registrationServices`, `manifestServices`), and `match.manifestServices`
+  holds the matching manifest services' `{ name, title }` in a sanitized, labeled `selfDeclared` slot. The CLI
+  `find` and `rank` tables show a `MATCHED` column, and `find` names the manifest services that matched. Matching
+  moved to `src/lib/text-match.ts`, shared by both sources, with the same rules as before; `matchAgentsByQuery`
+  and `stem` are still exported from `explorer.ts`.
+- `coverage.unreadableAgentIds`, `registryAgentCount` and `unsearchedManifestAgentIds` are now declared in the
+  output schemas. All schema changes are additive.
 - **`get_provider_manifest`** (CLI `manifest <id>`): the Provider Standard v1 (`stellar-agent-services/provider@1`)
   step between discovery and payment. For one agent it finds the manifest its registration names
   (`{ name: "stellar-agent-services", version: "1" }`), fetches it the way the standard tells clients to (public
@@ -110,6 +143,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Registration files are fetched only from public hosts.** Registry mode refused only non-`https:` URIs; an
+  `https:` registration URL naming `localhost`, an IP literal, a single-label or `.local`/`.internal` host is now
+  refused before any request too, as manifest URLs already were. This matters now that testnet's default scan reads
+  registrations any registrant chose (several of the newest testnet registrations point at `localhost`).
+- The hosted Worker reads `REGISTRY_SCAN_LIMIT` so its canonical-config check refuses it (503), as it refuses
+  `REGISTRY_AGENT_IDS` and testnet.
 - **Provider documents are the only agent-chosen URLs the local server fetches, and the public Worker fetches
   none.** `get_provider_manifest` reads a registration's manifest (and, over the explorer, the registration file)
   with one HTTPS `GET` each: no redirect, a 10 s deadline, a size cap, and IP-literal, `localhost`, single-label and
@@ -146,6 +185,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `STELLAR_NETWORK=testnet` no longer refuses to start without `EXPLORER_BASE_URL` or `REGISTRY_AGENT_IDS`: it reads
+  the newest agents of the testnet Identity contract instead (see Added). It still never reads the mainnet-only
+  default explorer, so testnet rows and testnet on-chain reads always describe one chain. `setup --network testnet`
+  no longer needs a data-source flag either.
 - Ranking now uses the versioned `stellar-agent-search-declared-evidence-v1` policy: normalized indexed quality
   multiplied by a fixed evidence index (`0.4 × capped volume + 0.6 × effective breadth`). Owner-declared
   capabilities and verification state add zero points; there is no novelty floor. `rankVersion`,

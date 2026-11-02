@@ -22,7 +22,7 @@
       "environmentVariables": [
         {
           "name": "STELLAR_NETWORK",
-          "description": "Stellar network to target: mainnet | testnet. testnet also requires EXPLORER_BASE_URL or REGISTRY_AGENT_IDS — the default explorer indexes mainnet only, and the server refuses to start with neither.",
+          "description": "Stellar network to target: mainnet | testnet. The default explorer indexes mainnet only, so testnet never uses it: with no other data source, testnet reads its newest 50 agents straight from the testnet Identity contract (registry mode).",
           "default": "mainnet"
         },
         {
@@ -31,7 +31,11 @@
         },
         {
           "name": "REGISTRY_AGENT_IDS",
-          "description": "Registry mode: comma-separated agent ids read straight from the Identity contract, with no explorer. Tools that need an indexer return INDEXER_REQUIRED. Not combinable with EXPLORER_BASE_URL."
+          "description": "Registry mode: comma-separated agent ids read straight from the Identity contract, with no explorer. Tools that need an indexer return INDEXER_REQUIRED. Not combinable with another data source."
+        },
+        {
+          "name": "REGISTRY_SCAN_LIMIT",
+          "description": "Registry mode over the newest agents: how many (1-50) of the most recently registered agents lists and searches read. Testnet's default (50); on mainnet it replaces the explorer. Not combinable with another data source."
         },
         {
           "name": "TRUSTED_VALIDATORS",

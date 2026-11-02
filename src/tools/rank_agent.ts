@@ -24,6 +24,7 @@ import {
   MAX_QUERY_LENGTH,
   queryMinScore,
   rankAndVerify,
+  searchesManifests,
   sourceFields,
   sourceText,
   summarizeRanked,
@@ -128,6 +129,7 @@ async function gatherByQuery(deps: ToolDeps, query: string): Promise<FindAgentsR
     filters,
     pages: 2,
     match: "any",
+    matchManifests: searchesManifests(deps),
   });
   return score.dropped
     ? { ...discovery, coverage: withImpliedScoreDropped(discovery.coverage) }
@@ -178,12 +180,14 @@ export function registerRankAgent(server: McpServer, deps: ToolDeps): void {
 
       let pool: AgentResponse[];
       let coverage: DiscoveryCoverage | undefined;
+      let matches: FindAgentsResult["matches"];
       if (hasIds) {
         pool = await gatherByIds(deps, args.agentIds!);
       } else {
         const discovery = await gatherByQuery(deps, args.query!);
         pool = discovery.agents;
         coverage = discovery.coverage;
+        matches = discovery.matches;
       }
 
       const rows = await rankAndVerify(deps, pool, {
@@ -192,6 +196,7 @@ export function registerRankAgent(server: McpServer, deps: ToolDeps): void {
         verifyTopK: Math.min(args.limit, VERIFY_CAP),
         limit: args.limit,
         includeBreakdown: true,
+        ...(matches ? { matches } : {}),
       });
 
       return toolResult(summarizeRanked(rows) + sourceText(deps, coverage), {

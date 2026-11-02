@@ -4,7 +4,9 @@
  * NL query is parsed deterministically (lib/nlparse), explicit args override the
  * inferred filters, candidates are fetched via getAgents({search}) + client-side
  * filtering (the explorer /search substring-matches poorly and has no score
- * sort), then ranked client-side over the fetched pool.
+ * sort), then ranked client-side over the fetched pool. Keywords are matched by
+ * lib/text-match.ts; in registry mode that includes the services of a bound
+ * Provider Standard manifest, and each row's `match` says why it was kept.
  */
 
 import { z } from "zod";
@@ -18,6 +20,7 @@ import {
   MAX_QUERY_LENGTH,
   queryMinScore,
   rankAndVerify,
+  searchesManifests,
   sourceFields,
   sourceText,
   summarizeRanked,
@@ -131,6 +134,7 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
         filters,
         pages: CANDIDATE_PAGES,
         match: "any",
+        matchManifests: searchesManifests(deps),
       });
       const coverage = score.dropped
         ? withImpliedScoreDropped(discovery.coverage)
@@ -142,6 +146,7 @@ export function registerFindAgent(server: McpServer, deps: ToolDeps): void {
         verifyTopK: VERIFY_TOP_K,
         limit: args.limit,
         includeBreakdown: false,
+        ...(discovery.matches ? { matches: discovery.matches } : {}),
       });
 
       const filterRecord: Record<string, unknown> = {};

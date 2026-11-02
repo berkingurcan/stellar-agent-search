@@ -180,7 +180,7 @@ fee sponsorship, and payee must match a separately reviewed/pinned payment polic
 
 | Tool | Purpose | Key inputs | Returns (structuredContent) |
 |---|---|---|---|
-| **`find_agent`** | NL discovery → ranked list. Parses the query into keyword search + inferred filters (x402 / trust / `minExplorerScore`), queries a bounded explorer window, ranks client-side. `minExplorerScore` targets upstream v1 total-score data, not local rank. | `query*` (string), `limit` (1–50, def 10), optional `x402` / `mpp` / `hasServices` / `trust` / `minExplorerScore` / `sortBy` overrides, `verify` (def false) | `{ interpretedQuery, count, agents: RankedAgent[], coverage }` |
+| **`find_agent`** | NL discovery → ranked list. Parses the query into keyword search + inferred filters (x402 / trust / `minExplorerScore`), queries a bounded explorer window (registry mode: the newest agents or an allowlist), ranks client-side; each row's `match` says why it was kept. `minExplorerScore` targets upstream v1 total-score data, not local rank. | `query*` (string), `limit` (1–50, def 10), optional `x402` / `mpp` / `hasServices` / `trust` / `minExplorerScore` / `sortBy` overrides, `verify` (def false) | `{ interpretedQuery, count, agents: RankedAgent[], coverage }` |
 | **`rank_agent`** | Explicit declared-data ranking with per-axis breakdown + fail-closed probe status. The versioned policy fixes evidence weights at volume `0.4`, breadth `0.6`; supplied legacy `weights` are rejected. | Exactly one of `agentIds` (int[]) **or** `query`; `verify` (def **true**), `limit`, `sortBy` | `{ rankVersion, evidenceWeights, count, agents: RankedAgent[], coverage? }` with `breakdown` + `verification` per agent |
 | **`get_agent_profile`** | Deep profile for one agent: identity, services, scores, recent feedback, verification, canonical handle. | `agent*` (numeric id **or** `stellar:{net}:{id}#n`), `feedbackLimit` (0–50, def 5), `verify` (def true) | `{ profile: AgentProfile, agentCard, recentFeedback, verification }` |
 | **`list_services`** | Flat, filterable catalog of self-declared x402 / MPP endpoint candidates (not protocol/ownership proof). | `search?`, `x402?`, `mpp?`, `trust?`, `minExplorerScore?`, `limit` (1–50, def 20), `page` (def 1) | `{ count, page, services: ServiceCatalogEntry[], coverage }` |
@@ -198,18 +198,31 @@ page cannot prove exhaustion because expired slots may hide a later retained cli
 all reputation fields unverified. `skipped` means no attempt. The schema members `verified`, `partial`, and
 `mismatch` are reserved for a future authoritative aggregate/cursor path and are not current trust signals.
 
-**Registry mode (`REGISTRY_AGENT_IDS`).** With no indexer for the network (testnet today), the server can read
-an operator allowlist of agents straight from the Identity contract instead: each agent's URI, wallet and owner,
-plus the registration file the URI points at. `find_agent`, `list_services`, `list_agents`, `rank_agent`,
-`get_agent_profile`, `get_agent_card`, `verify_reputation` and `get_provider_manifest` work over that allowlist, filtering locally. Their
-results carry a `source` object (`kind: "registry"`, `reputationIndexed: false`) and coverage limitation
-`registry-allowlist-only`: the allowlist is not the registry, and reputation is not measured, so scores, feedback
-counts and `unrated` reflect missing data rather than an agent without feedback. `leaderboard`,
+**Registry mode (no indexer).** With no indexer for the network (testnet today), the server reads agents straight
+from the Identity contract instead: each agent's URI, wallet and owner, plus the registration file the URI points
+at. On testnet it does this by default over the newest 50 registered agents (`REGISTRY_SCAN_LIMIT`), so an agent
+registered a moment ago is found; `REGISTRY_AGENT_IDS` reads an operator allowlist instead. `find_agent`,
+`list_services`, `list_agents`, `rank_agent`, `get_agent_profile`, `get_agent_card`, `verify_reputation` and
+`get_provider_manifest` work over those agents, filtering locally (and in a scan, any agent can still be read by id).
+Their results carry a `source` object (`kind: "registry"`, `scope: "newest"` or `"allowlist"`,
+`reputationIndexed: false`) and coverage that is never complete: `registry-newest-agents-only` plus
+`registryAgentCount` (how many agents exist) when a scan stopped short of the oldest, `registry-allowlist-only` for
+an allowlist, and `unreadableAgentIds` for agents whose registration file could not be read. Reputation is not
+measured, so scores, feedback counts and `unrated` reflect missing data rather than an agent without feedback. `leaderboard`,
 `get_registry_stats`, `get_registry_health`, `get_agents_by_owner`, `get_agent_feedback`, `resolve_agent` for an
 owner address, and a `minExplorerScore` filter (an argument, or a stated number like "score above 70") need an
 indexer and return an error with code `INDEXER_REQUIRED` instead of a partial answer. A quality word like "best"
 or "trusted" is not applied as a score filter in this mode: the search runs without it, and coverage carries
 `implied-score-filter-not-applied`.
+
+**Why a row matched (`match`).** Keyword searches (`find_agent`, and `rank_agent` with a query) say on each row
+which fields held a keyword: `name`, `description`, `registrationServices` (the registration's service names and
+endpoints) or `manifestServices`. In registry mode a search also matches the services in an agent's Provider
+Standard manifest (name, title, description, tags) when the manifest is bound to the agent and the registration
+did not already match: at most 10 manifests per search, newest agents first, and any it could not read are listed
+in `coverage.unsearchedManifestAgentIds`. The matching services sit in `match.manifestServices`, a labeled
+`selfDeclared` slot: provider-supplied text, data only. A match is not a payment check; call
+`get_provider_manifest` before paying.
 
 **Provider Standard providers (`get_provider_manifest`).** A `list_services` row with `providerStandard: true`
 belongs to a provider that follows Provider Standard v1 (`stellar-agent-services/provider@1`). Call
@@ -316,9 +329,10 @@ reputation, that is a separate, deliberate step that lives outside this server:
 
 | Var | Values | Default | Meaning |
 |---|---|---|---|
-| `STELLAR_NETWORK` | `mainnet` \| `testnet` | `mainnet` | Which network's registry the server reads. `testnet` **also requires** `EXPLORER_BASE_URL` or `REGISTRY_AGENT_IDS`. |
-| `EXPLORER_BASE_URL` | URL | `https://stellar8004.com` | Explorer API base URL (`ExplorerClient`). Override only for a self-hosted explorer. On `testnet`, set this or `REGISTRY_AGENT_IDS` — the default indexes mainnet only, so the server refuses to start with neither rather than mix two chains. |
-| `REGISTRY_AGENT_IDS` | comma-separated agent ids (at most 50) | — | Registry mode: read these agents straight from the Identity contract, with no explorer (see the tool reference). Not combinable with `EXPLORER_BASE_URL`. |
+| `STELLAR_NETWORK` | `mainnet` \| `testnet` | `mainnet` | Which network's registry the server reads. With no other data source set, `testnet` reads its newest agents straight from the Identity contract (registry mode). |
+| `EXPLORER_BASE_URL` | URL | `https://stellar8004.com` on mainnet | Explorer API base URL (`ExplorerClient`). Override only for a self-hosted explorer. The default indexes mainnet only, so testnet never falls back to it rather than mix two chains. |
+| `REGISTRY_AGENT_IDS` | comma-separated agent ids (at most 50) | — | Registry mode over an allowlist: read only these agents straight from the Identity contract, with no explorer (see the tool reference). Not combinable with another data source. |
+| `REGISTRY_SCAN_LIMIT` | 1–50 | `50` on testnet | Registry mode over the newest agents: how many of the most recently registered agents lists and searches read. Testnet's default; on mainnet, setting it replaces the explorer. Not combinable with another data source. |
 | `TRUSTED_VALIDATORS` | comma-separated G… or C… addresses (at most 20) | — | Verifiers whose Validation Registry records earn Provider Standard badges in `get_provider_manifest`. Empty: the registry is not read. |
 | `STELLAR_RPC_URL` | URL | network default | Soroban RPC used for the bounded Reputation-contract reachability probe. |
 | `VERIFY_ONCHAIN` | `true` \| `false` | `true` | Toggle the probe; reputation remains declared-only either way. |

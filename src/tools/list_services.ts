@@ -25,6 +25,7 @@ import {
   handler,
   mapWithConcurrency,
   MAX_QUERY_LENGTH,
+  searchesManifests,
   sourceFields,
   sourceText,
   toolResult,
@@ -41,7 +42,14 @@ import { zDiscoveryCoverage, zSelfDeclaredSlot, zSourceNote } from "./schemas.js
 const CANDIDATE_PAGE_SIZE = 50;
 
 const inputShape = {
-  search: z.string().max(MAX_QUERY_LENGTH).optional().describe("Free-text filter over agent name/description."),
+  search: z
+    .string()
+    .max(MAX_QUERY_LENGTH)
+    .optional()
+    .describe(
+      "Free-text filter over agent name/description; in registry mode also the services of a bound Provider " +
+        "Standard manifest.",
+    ),
   x402: z.literal(true).optional().describe("When present, only x402 (USDC pay-per-call) services."),
   mpp: z.literal(true).optional().describe("When present, only MPP micropayment services."),
   trust: zTrust.optional(),
@@ -140,6 +148,7 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
         filters,
         pages: neededPages,
         match: "any",
+        matchManifests: searchesManifests(deps),
       });
       const pool = discovery.agents;
 
@@ -232,7 +241,7 @@ export function registerListServices(server: McpServer, deps: ToolDeps): void {
         (providerStandardRows > 0
           ? serverText` ${providerStandardRows} declare a Provider Standard v1 manifest (providerStandard: true); get_provider_manifest reads its prices, identity binding and badges.`
           : "") +
-        sourceText(deps);
+        sourceText(deps, discovery.coverage);
 
       // The list response and each detail hydration are independent v1 reads
       // with no shared revision/cursor. Even a one-page list cannot make the

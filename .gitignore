@@ -16,3 +16,6 @@ examples/run-*.journal.jsonl
 examples/x402-funded-*.lock.json
 .gstack/
 examples/.env
+
+# MCP client config written by `setup --scope project` while testing; per developer, never committed
+/.cursor/mcp.json

@@ -102,7 +102,7 @@ export function registerListAgents(server: McpServer, deps: ToolDeps): void {
         includeBreakdown: false,
       });
 
-      return toolResult(summarizeRanked(rows) + sourceText(deps), {
+      return toolResult(summarizeRanked(rows) + sourceText(deps, page.coverage), {
         count: rows.length,
         page: args.page,
         pagination: page.pagination,

@@ -2,10 +2,11 @@
  * stdio-registry-mode.test.ts — registry mode through the REAL built binary
  * (dist/index.js), launched the way an MCP client launches it.
  *
- * registry-mode.test.ts drives the same code in-process; this suite pins what only
- * the shipped artifact can show: the startup rules and their exit codes, the
- * registry-mode instructions over the wire, indexer-only tools refusing, a failed
- * allowlist read failing closed, and stdout staying JSON-RPC-only while registry
+ * registry-mode.test.ts and registry-scan.test.ts drive the same code in-process;
+ * this suite pins what only the shipped artifact can show: the startup rules and
+ * their exit codes, testnet starting on its newest-agents scan with no setting,
+ * the registry-mode instructions over the wire, indexer-only tools refusing, a
+ * failed read failing closed, and stdout staying JSON-RPC-only while registry
  * warnings go to stderr.
  *
  * Offline: STELLAR_RPC_URL points at a closed local port, so every Identity read
@@ -25,7 +26,14 @@ const CLOSED_RPC = "http://127.0.0.1:9";
 /** The caller's environment without any data-source setting it may carry. */
 function cleanEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {
   const env = { ...process.env };
-  for (const name of ["STELLAR_NETWORK", "STELLAR_RPC_URL", "EXPLORER_BASE_URL", "REGISTRY_AGENT_IDS", "VERIFY_ONCHAIN"]) {
+  for (const name of [
+    "STELLAR_NETWORK",
+    "STELLAR_RPC_URL",
+    "EXPLORER_BASE_URL",
+    "REGISTRY_AGENT_IDS",
+    "REGISTRY_SCAN_LIMIT",
+    "VERIFY_ONCHAIN",
+  ]) {
     delete env[name];
   }
   return { ...env, ...overrides };
@@ -95,8 +103,16 @@ beforeAll(() => {
 
 describe("the built binary refuses an ambiguous data source at startup", () => {
   const cases: Array<[string, Record<string, string>, RegExp]> = [
-    ["testnet with no data source", { STELLAR_NETWORK: "testnet" }, /requires an explicit EXPLORER_BASE_URL or REGISTRY_AGENT_IDS/],
-    ["testnet with a blank allowlist", { STELLAR_NETWORK: "testnet", REGISTRY_AGENT_IDS: "  " }, /requires an explicit EXPLORER_BASE_URL or REGISTRY_AGENT_IDS/],
+    [
+      "a scan limit and an allowlist at once",
+      { STELLAR_NETWORK: "testnet", REGISTRY_SCAN_LIMIT: "10", REGISTRY_AGENT_IDS: "1" },
+      /Set REGISTRY_SCAN_LIMIT or REGISTRY_AGENT_IDS, not both/,
+    ],
+    [
+      "a scan limit over the cap",
+      { STELLAR_NETWORK: "testnet", REGISTRY_SCAN_LIMIT: "51" },
+      /REGISTRY_SCAN_LIMIT must be a whole number of agents from 1 to 50/,
+    ],
     [
       "an explorer and an allowlist at once",
       { STELLAR_NETWORK: "testnet", REGISTRY_AGENT_IDS: "1", EXPLORER_BASE_URL: "https://indexer.example" },
@@ -177,5 +193,41 @@ describe("the built binary serves registry mode over stdio", () => {
     }
     expect(session.stderr).toContain("allowlisted agent could not be read");
     expect(session.stdout).not.toContain("allowlisted agent could not be read");
+  });
+});
+
+describe("the built binary reads testnet's newest agents with no data-source setting", () => {
+  let session: Session;
+  let initialize: Message;
+
+  beforeAll(async () => {
+    session = new Session(cleanEnv({ STELLAR_NETWORK: "testnet", STELLAR_RPC_URL: CLOSED_RPC, VERIFY_ONCHAIN: "false" }));
+    initialize = await session.request("initialize", {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "stdio-registry-scan-test", version: "0" },
+    });
+    session.notify("notifications/initialized");
+  }, 20_000);
+
+  afterAll(() => session?.close());
+
+  it("starts instead of refusing, and says it reads the newest agents", () => {
+    expect(initialize.result.serverInfo.name).toBe("stellar-agent-search");
+    expect(initialize.result.instructions).toMatch(/REGISTRY MODE: this server has no explorer/);
+    expect(initialize.result.instructions).toMatch(/newest agents registered on the Identity contract/);
+    expect(session.stderr).toContain("MCP stdio server ready on testnet");
+  });
+
+  it("fails closed when the agent count can't be read, instead of returning an empty result", async () => {
+    const response = await session.request("tools/call", { name: "find_agent", arguments: { query: "summarize" } });
+    expect(response.result.isError).toBe(true);
+    expect(errorBody(response).code).toBe("UPSTREAM_ERROR");
+  }, 20_000);
+
+  it("keeps stdout JSON-RPC-only", () => {
+    for (const line of session.stdout.split("\n").filter((l) => l.trim())) {
+      expect((JSON.parse(line) as Message).jsonrpc, line).toBe("2.0");
+    }
   });
 });

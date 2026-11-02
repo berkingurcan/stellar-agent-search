@@ -74,9 +74,9 @@ export interface ReputationReadClient {
 }
 
 /**
- * The three Identity reads `RegistryService` performs, structural for the same
- * reason. Only view methods are named here: the generated client also carries
- * the contract's owner-only methods, and nothing in this server may reach them.
+ * The three per-agent Identity reads, structural for the same reason. Only view
+ * methods are named here: the generated client also carries the contract's
+ * owner-only methods, and nothing in this server may reach them.
  */
 export interface IdentityReadClient {
   /** `Err` when the agent does not exist; an empty string when it has no URI. */
@@ -84,6 +84,16 @@ export interface IdentityReadClient {
   get_agent_wallet(args: { agent_id: number }): Promise<{ result: string | undefined }>;
   /** The non-panicking owner lookup: `undefined` when the agent does not exist. */
   find_owner(args: { agent_id: number }): Promise<{ result: string | undefined }>;
+}
+
+/** What `RegistryService` reads: the per-agent reads, and the count its newest-agents scan starts from. */
+export interface RegistryReadClient extends IdentityReadClient {
+  /**
+   * How many agents the contract has registered. It assigns ids in order from 0
+   * (`register*` returns the next one) and has no burn, so the newest agent is
+   * `total_agents - 1` and every lower id exists.
+   */
+  total_agents(): Promise<{ result: number }>;
 }
 
 /**
@@ -189,8 +199,8 @@ export function createReputationReadClient(
 export function createIdentityReadClient(
   cfg: Config,
   opts: SorobanReadClientOptions = {},
-): IdentityReadClient {
-  return createFetchReadClient<IdentityReadClient>(
+): RegistryReadClient {
+  return createFetchReadClient<RegistryReadClient>(
     IdentityClient,
     cfg.stellar.contracts.identity,
     cfg,

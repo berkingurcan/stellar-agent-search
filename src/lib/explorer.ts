@@ -13,8 +13,9 @@
  *   (c) `findAgents()` — the correct discovery primitive. The explorer's
  *       `/search` substring-matches poorly and there is NO server-side score
  *       sort (sortBy is only created_at|id), so discovery must fetch via
- *       getAgents({search}) and filter client-side over name/description; the
- *       ranking layer then ranks over the fetched candidates.
+ *       getAgents({search}) and filter client-side over name/description
+ *       (text-match.ts, shared with registry mode, which also records why each
+ *       row matched); the ranking layer then ranks over the fetched candidates.
  *
  * Errors are NOT swallowed here: the SDK's typed errors propagate unchanged so
  * the tool layer (wrapHandler) maps them via lib/errors.ts. We only use
@@ -34,8 +35,11 @@ import { systemClock, type Clock } from "./clock.js";
 import { classifyError, ExplorerScopeError, UpstreamDataError } from "./errors.js";
 import { MAX_AGENT_ID, validWalletOrNull } from "./identifier.js";
 import { log, type Logger } from "./logger.js";
-import { normalizeSearchText, unicodeTokens } from "./nlparse.js";
 import type { AgentListPage, IndexerSource, ListAgentsParams } from "./source.js";
+import { matchRows, type AgentMatch } from "./text-match.js";
+
+// The matcher moved to text-match.ts, which both sources share; these names stay importable from here.
+export { matchAgentsByQuery, stem } from "./text-match.js";
 
 // ---------------------------------------------------------------------------
 // TTL cache + single-flight (shared with reputation.ts)
@@ -153,6 +157,12 @@ export interface FindAgentsOptions {
   match?: "all" | "any";
   /** How many pages to fetch and concatenate (default 1; sources may ignore it). */
   pages?: number;
+  /**
+   * Registry mode: also match the services of a provider's bound Provider
+   * Standard manifest, which fetches it (default true). A deployment that must
+   * not fetch registrant-chosen URLs passes false. The explorer ignores it.
+   */
+  matchManifests?: boolean;
 }
 
 /**
@@ -655,7 +665,8 @@ export class ExplorerService implements IndexerSource {
     for (const a of collected) if (!byId.has(a.id)) byId.set(a.id, a);
     const agents = [...byId.values()];
 
-    const matched = matchAgentsByQuery(agents, q, opts.match ?? "all");
+    // v1 list rows carry no services[], so only the name and description are searched here.
+    const matched = matchRows(agents, q, opts.match ?? "all");
     if (matched === null) {
       return {
         agents: [],
@@ -666,7 +677,7 @@ export class ExplorerService implements IndexerSource {
         },
       };
     }
-    return { agents: matched, coverage };
+    return { agents: matched.agents, coverage, ...(matched.matches ? { matches: matched.matches } : {}) };
   }
 
   /** Backward-compatible discovery helper for callers that only need rows. */
@@ -688,74 +699,23 @@ export interface DiscoveryCoverage {
   hasMore?: boolean;
   /** Known upstream conditions that prevent a completeness claim. */
   limitations?: string[];
-  /** Registry mode: allowlisted agents that could not be read, so were not searched. */
+  /** Registry mode: agents in scope that could not be read, so were not searched. */
   unreadableAgentIds?: number[];
+  /** Registry mode, newest-agents scan: how many agents the Identity contract had registered when counted. */
+  registryAgentCount?: number;
+  /**
+   * Registry mode: agents whose Provider Standard manifest a search needed but did
+   * not read (unreachable, or past the per-search cap), so its services were not matched.
+   */
+  unsearchedManifestAgentIds?: number[];
 }
 
 export interface FindAgentsResult {
   agents: AgentResponse[];
   coverage: DiscoveryCoverage;
-}
-
-/**
- * Client-side text match over name, description and service name/endpoint.
- * An empty query keeps every row. Returns null when the query has text but no
- * search tokens, so the caller can say so instead of returning everything.
- */
-export function matchAgentsByQuery(
-  agents: AgentResponse[],
-  query: string,
-  mode: "all" | "any",
-): AgentResponse[] | null {
-  const q = query.trim();
-  if (!q) return agents;
-
-  const tokens = tokenize(q);
-  if (tokens.length === 0) return null;
-  // Keep 2-char stems (ai/ml/os/db/3d/io): dropping them made match:"all" stop
-  // REQUIRING those tokens, so "ai agent" wrongly matched "Payment Agent".
-  // tokenize() already floors at length 2, and stem() leaves short tokens as-is.
-  const stems = tokens.map(stem).filter((s) => s.length >= 2);
-  const qLower = normalizeSearchText(q);
-
-  const matchesAgent = (a: AgentResponse, requireAll: boolean): boolean => {
-    const svcText = (a.services ?? [])
-      .map((s) => `${s?.name ?? ""} ${s?.endpoint ?? ""}`)
-      .join(" ");
-    const haystack = normalizeSearchText(
-      `${a.name ?? ""} ${a.description ?? ""} ${svcText}`,
-    );
-    // Whole-query substring is always a match.
-    if (haystack.includes(qLower)) return true;
-    if (stems.length === 0) return false;
-    // Stem-aware token match so "scraper"/"scraping"/"scrapes" (stem "scrap")
-    // all hit the "Scrapper"/"Scrapes" agent, not just the literal spelling.
-    const hit = (s: string) => haystack.includes(s);
-    return requireAll ? stems.every(hit) : stems.some(hit);
-  };
-
-  // Strict (all tokens) first; if that empties the set, relax to any-token so a
-  // multi-word query still surfaces the closest agents rather than nothing.
-  const strict = agents.filter((a) => matchesAgent(a, mode === "all"));
-  if (strict.length > 0 || mode === "any") return strict;
-  return agents.filter((a) => matchesAgent(a, false));
-}
-
-/** Lowercase word tokens (length ≥ 2) for client-side substring filtering. */
-function tokenize(query: string): string[] {
-  return unicodeTokens(query).filter((t) => t.length >= 2);
-}
-
-/**
- * Crude English stem: strip a common trailing suffix down to a root of ≥3 chars.
- * Used for substring matching against the RAW haystack, so a stemmed query token
- * ("scrap" from "scraper"/"scraping") still hits an unstemmed on-chain name
- * ("Scrapper", "Scrapes"). Deliberately loose — discovery ranks results after.
- */
-export function stem(token: string): string {
-  const t = token.toLowerCase();
-  for (const suf of ["ping", "ning", "ging", "ing", "pers", "per", "ers", "er", "es", "ed", "s"]) {
-    if (t.endsWith(suf) && t.length - suf.length >= 3) return t.slice(0, t.length - suf.length);
-  }
-  return t;
+  /**
+   * Why each row matched the query, by agent id; absent when the query had no
+   * search words. Manifest service names and titles in it are raw provider text.
+   */
+  matches?: ReadonlyMap<number, AgentMatch>;
 }

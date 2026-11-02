@@ -29,7 +29,7 @@ import {
   getDefaultEnvironment,
   StdioClientTransport,
 } from "@modelcontextprotocol/client/stdio";
-import { parseRegistryAgentIds, parseTrustedValidators } from "../config.js";
+import { parseRegistryAgentIds, parseRegistryScanLimit, parseTrustedValidators } from "../config.js";
 
 export const SETUP_SERVER_NAME = "stellar-agent";
 const PACKAGE_NAME = "stellar-agent-search";
@@ -58,6 +58,7 @@ export interface SetupCommandOptions {
   network?: string;
   explorerUrl?: string;
   registryAgentIds?: string;
+  registryScanLimit?: string;
   trustedValidators?: string;
   rpcUrl?: string;
   noVerify?: boolean;
@@ -167,19 +168,21 @@ function parseOptions(options: SetupCommandOptions): ParsedOptions {
   if (options.explorerUrl) env.EXPLORER_BASE_URL = validateHttpUrl("--explorer-url", options.explorerUrl);
   const registryAgentIds = parseRegistryAgentIds(options.registryAgentIds);
   if (registryAgentIds) env.REGISTRY_AGENT_IDS = registryAgentIds.join(",");
+  const registryScanLimit = parseRegistryScanLimit(options.registryScanLimit);
+  if (registryScanLimit !== null) env.REGISTRY_SCAN_LIMIT = String(registryScanLimit);
   const trustedValidators = parseTrustedValidators(options.trustedValidators);
   if (trustedValidators.length > 0) env.TRUSTED_VALIDATORS = trustedValidators.join(",");
   if (options.rpcUrl) env.STELLAR_RPC_URL = validateHttpUrl("--rpc-url", options.rpcUrl);
   if (options.noVerify) env.VERIFY_ONCHAIN = "false";
-  if (env.EXPLORER_BASE_URL && env.REGISTRY_AGENT_IDS) {
-    throw new Error("setup takes --explorer-url or --registry-agent-ids, not both");
-  }
-  if (network === "testnet" && !env.EXPLORER_BASE_URL && !env.REGISTRY_AGENT_IDS) {
-    throw new Error(
-      "setup --network testnet requires --explorer-url for a testnet indexer, or --registry-agent-ids " +
-        "to read those agents straight from the testnet Identity contract",
-    );
-  }
+  const sources = [
+    env.EXPLORER_BASE_URL && "--explorer-url",
+    env.REGISTRY_AGENT_IDS && "--registry-agent-ids",
+    env.REGISTRY_SCAN_LIMIT && "--registry-scan-limit",
+  ].filter(Boolean);
+  if (sources.length === 2) throw new Error(`setup takes ${sources.join(" or ")}, not both`);
+  if (sources.length > 2) throw new Error(`setup takes one data source, not ${sources.join(", ")}`);
+  // Testnet with no source reads the newest agents straight from the testnet Identity contract (the server's
+  // default there), so it needs no flag.
 
   const version = validateExactVersion(options.version);
 

@@ -157,17 +157,18 @@ also raise `MCP_TIMEOUT` for the client.
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `STELLAR_NETWORK` | `mainnet` | `mainnet` or `testnet` (`testnet` also requires `EXPLORER_BASE_URL` or `REGISTRY_AGENT_IDS`) |
-| `EXPLORER_BASE_URL` | `https://stellar8004.com` | Explorer HTTP API base — **indexes mainnet only** |
-| `REGISTRY_AGENT_IDS` | — | Registry mode: comma-separated agent ids read straight from the Identity contract, no explorer (see the README). Not combinable with `EXPLORER_BASE_URL` |
+| `STELLAR_NETWORK` | `mainnet` | `mainnet` or `testnet`. With no other data source set, `testnet` reads its newest 50 agents straight from the testnet Identity contract (registry mode, see the README) |
+| `EXPLORER_BASE_URL` | `https://stellar8004.com` on mainnet | Explorer HTTP API base — **indexes mainnet only**, so testnet never falls back to it |
+| `REGISTRY_AGENT_IDS` | — | Registry mode over an allowlist: comma-separated agent ids read straight from the Identity contract, no explorer. Not combinable with another data source |
+| `REGISTRY_SCAN_LIMIT` | `50` on testnet | Registry mode over the newest agents: how many (1–50) the scan reads; on mainnet, setting it replaces the explorer. Not combinable with another data source |
 | `STELLAR_RPC_URL` | `https://mainnet.sorobanrpc.com` | Soroban RPC for the bounded Reputation-contract reachability probe |
 | `VERIFY_ONCHAIN` | `true` | `false` = skip the probe; reputation remains declared-only either way |
 | `RANK_SCORE_MAX` | `100` | Fixed v1 compatibility assertion; any other value fails startup |
 
 The fixed `stellar-agent-search-declared-evidence-v1` rank policy normalizes quality against exactly `100` and
 uses evidence weights volume `0.4` and breadth `0.6`; a changed `RANK_SCORE_MAX` and retired `RANK_W_*`
-variables are rejected. CLI flags override env (`--network`, `--explorer-url`,
-`--rpc-url`, `--no-verify`, `--limit`, `--min-explorer-score`,
+variables are rejected. CLI flags override env (`--network`, `--explorer-url`, `--registry-agent-ids`,
+`--registry-scan-limit`, `--trusted-validators`, `--rpc-url`, `--no-verify`, `--limit`, `--min-explorer-score`,
 `--x402`, `--mpp`, `--json`). Setup adds `--client`, `--scope`, `--check`, `--dry-run`, and `--handshake`.
 Precedence is **flag → env → default**.
 

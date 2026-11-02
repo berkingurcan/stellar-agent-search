@@ -1,7 +1,8 @@
 /**
  * mcp-surface.test.ts — pin what a client sees before it calls anything: the server
- * instructions (explorer and registry mode), every tool's input and output schema, the
- * prompts, the resource templates and the static resources.
+ * instructions (explorer, registry mode over an allowlist, and registry mode over the
+ * newest agents), every tool's input and output schema, the prompts, the resource
+ * templates and the static resources.
  *
  * The snapshot is test/__surface__/mcp-surface.json. Any change to the surface fails here
  * until the snapshot is regenerated (`npx vitest run test/mcp-surface.test.ts -u`), so the
@@ -43,7 +44,7 @@ afterEach(async () => {
 
 async function surfaceOf(config: Config) {
   const source =
-    config.registryAgentIds === null
+    config.explorerBaseUrl !== null
       ? new ExplorerService(config, { client: offline })
       : new RegistryService(config, { client: offline, fetch: offline });
   const deps: ToolDeps = { config, source, verifier: new ReputationVerifier(config) };
@@ -72,16 +73,24 @@ describe("MCP surface", () => {
     const registry = await surfaceOf(
       loadConfig({ STELLAR_NETWORK: "testnet", REGISTRY_AGENT_IDS: "1,2", VERIFY_ONCHAIN: "false" }),
     );
+    // Testnet with no data source set: the newest agents, read straight from the Identity contract.
+    const registryScan = await surfaceOf(loadConfig({ STELLAR_NETWORK: "testnet", VERIFY_ONCHAIN: "false" }));
 
     // Registry mode registers the same surface and changes only what the instructions say;
     // its indexer-only tools refuse at call time instead of disappearing from the list.
     const { instructions: explorerInstructions, ...explorerRest } = explorer;
     const { instructions: registryInstructions, ...registryRest } = registry;
+    const { instructions: registryScanInstructions, ...registryScanRest } = registryScan;
     expect(registryRest).toEqual(explorerRest);
+    expect(registryScanRest).toEqual(explorerRest);
     expect(explorer.resources.every((r) => !r.uri.startsWith("stellar8004://agent/"))).toBe(true);
 
     const snapshot = {
-      instructions: { explorer: explorerInstructions, registry: registryInstructions },
+      instructions: {
+        explorer: explorerInstructions,
+        registry: registryInstructions,
+        registryScan: registryScanInstructions,
+      },
       ...explorerRest,
     };
     await expect(`${JSON.stringify(snapshot, null, 2)}\n`).toMatchFileSnapshot(SNAPSHOT);

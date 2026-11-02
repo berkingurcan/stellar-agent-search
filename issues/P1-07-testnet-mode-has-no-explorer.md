@@ -1,7 +1,7 @@
 # P1-07 — `STELLAR_NETWORK=testnet` has no explorer and cannot work
 
-**Owner:** Code · **Status:** resolved — testnet now refuses to start without a testnet data source (an explicit
-explorer, or registry mode)
+**Owner:** Code · **Status:** resolved — testnet never reads the mainnet explorer; with no data source set it reads
+the newest agents straight from the testnet Identity contract (registry mode)
 
 ## Problem
 
@@ -62,7 +62,18 @@ sources would answer the same question differently. In registry mode `explorerBa
 fall back to the mainnet default. `test/fixes.test.ts` pins the new combinations; `test/registry-mode.test.ts`
 pins what each tool does in that mode, including the indexer-only tools that return `INDEXER_REQUIRED`.
 
+## Follow-up: testnet works with no setting
+
+The startup refusal left a gap: a provider that had just registered on testnet could not be found unless the
+searcher already knew its id. Testnet now defaults to registry mode over the **newest agents**: the Identity
+contract assigns ids in order from 0 and has no burn, so `total_agents` names the newest, and the server reads the
+newest 50 (`REGISTRY_SCAN_LIMIT`, 1–50) with the same per-agent reads. Coverage says the scan is bounded
+(`registry-newest-agents-only`, `registryAgentCount`). The rule that matters here is unchanged: testnet never
+reads the mainnet-only default explorer, so the rows and the on-chain reads describe one chain.
+`EXPLORER_BASE_URL` and `REGISTRY_AGENT_IDS` still choose another source, and any two sources at once are
+refused. `test/fixes.test.ts`, `test/registry-scan.test.ts` and `test/stdio-registry-mode.test.ts` pin it.
+
 ## Acceptance
 
-- [x] Either testnet mode returns testnet data, or it refuses to run without an explicit explorer. — refuses, and
-  with `REGISTRY_AGENT_IDS` it now returns testnet data read directly from the Identity contract.
+- [x] Either testnet mode returns testnet data, or it refuses to run without an explicit explorer. — it returns
+  testnet data read directly from the Identity contract: the newest agents by default, or the allowlisted ones.

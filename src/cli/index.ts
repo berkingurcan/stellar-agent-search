@@ -25,6 +25,7 @@ import {
   mapWithConcurrency,
   queryMinScore,
   rankAndVerify,
+  searchesManifests,
   toRankInput,
   VERIFY_TOP_K,
   withImpliedScoreDropped,
@@ -50,6 +51,7 @@ import {
 import { buildServer, SERVER_NAME } from "../server.js";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { MANIFEST_SERVICE_NAME, MANIFEST_SERVICE_VERSION } from "../lib/provider-standard.js";
+import type { MatchField } from "../lib/text-match.js";
 import { providerManifestReport } from "../tools/get_provider_manifest.js";
 import { executeSetup, formatSetupReport } from "./setup.js";
 
@@ -63,6 +65,7 @@ export interface CliFlags {
   network?: string;
   explorerUrl?: string;
   registryAgentIds?: string;
+  registryScanLimit?: string;
   trustedValidators?: string;
   rpcUrl?: string;
   verify: boolean;
@@ -92,6 +95,7 @@ const VALUE_FLAGS = new Map<string, keyof CliFlags>([
   ["-n", "network"],
   ["--explorer-url", "explorerUrl"],
   ["--registry-agent-ids", "registryAgentIds"],
+  ["--registry-scan-limit", "registryScanLimit"],
   ["--trusted-validators", "trustedValidators"],
   ["--rpc-url", "rpcUrl"],
   ["--limit", "limit"],
@@ -204,6 +208,7 @@ export function buildConfig(flags: CliFlags, baseEnv: NodeJS.ProcessEnv = proces
   if (flags.network) env.STELLAR_NETWORK = flags.network;
   if (flags.explorerUrl) env.EXPLORER_BASE_URL = flags.explorerUrl;
   if (flags.registryAgentIds) env.REGISTRY_AGENT_IDS = flags.registryAgentIds;
+  if (flags.registryScanLimit) env.REGISTRY_SCAN_LIMIT = flags.registryScanLimit;
   if (flags.trustedValidators) env.TRUSTED_VALIDATORS = flags.trustedValidators;
   if (flags.rpcUrl) env.STELLAR_RPC_URL = flags.rpcUrl;
   if (flags.verify) env.VERIFY_ONCHAIN = "true";
@@ -260,6 +265,8 @@ function rowName(r: RankedRow): string {
 }
 
 function rankRowsTable(rows: RankedRow[]): string {
+  // A text search says which fields each row matched on; an id set or an empty query has nothing to say.
+  const matched = rows.some((r) => r.match);
   const body = rows.map((r) => [
     String(r.rank),
     String(r.id),
@@ -271,12 +278,27 @@ function rankRowsTable(rows: RankedRow[]): string {
     // hasServices flag is authoritative for this table; printing the local
     // array length falsely showed 0 for service-bearing agents.
     yn(r.capabilities.hasServices),
+    ...(matched ? [matchLabel(r)] : []),
     truncate(rowName(r), 32),
   ]);
   return table(
-    ["#", "ID", "SCORE", "STATUS", "X402", "MPP", "SVC", "NAME (self-declared, unverified)"],
+    [
+      "#", "ID", "SCORE", "STATUS", "X402", "MPP", "SVC",
+      ...(matched ? ["MATCHED"] : []),
+      "NAME (self-declared, unverified)",
+    ],
     body,
   );
+}
+
+/** One line per row whose Provider Standard manifest services matched, from the sanitized slot. */
+function manifestMatchLines(rows: RankedRow[]): string[] {
+  return rows.flatMap((r) => {
+    const services = r.match?.manifestServices?.value ?? [];
+    if (services.length === 0) return [];
+    const names = services.map((s) => (s.title ? `${s.name} (${truncate(s.title, 40)})` : s.name));
+    return [`  agent ${r.id} matched manifest service(s): ${truncate(names.join(", "), 90)}`];
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +351,7 @@ async function gatherByQuery(deps: ToolDeps, query: string, flags: CliFlags): Pr
     filters,
     pages: CANDIDATE_PAGES,
     match: "any",
+    matchManifests: searchesManifests(deps),
   });
   return score.dropped
     ? { ...discovery, coverage: withImpliedScoreDropped(discovery.coverage) }
@@ -337,13 +360,40 @@ async function gatherByQuery(deps: ToolDeps, query: string, flags: CliFlags): Pr
 
 function coverageNotice(coverage: DiscoveryCoverage): string | null {
   if (coverage.coverageComplete) return null;
-  const more = coverage.hasMore === true ? "; additional explorer pages exist" : "";
   const dropped = coverage.limitations?.includes(IMPLIED_SCORE_NOT_APPLIED)
     ? `\n${INFO} a quality word in the query (such as "best" or "trusted") implies a minimum score, ` +
       `which registry mode cannot apply; results are not filtered by score.`
     : "";
+  const unreadable = coverage.unreadableAgentIds?.length ?? 0;
+  const unreadableText = unreadable > 0 ? `; ${unreadable} could not be read (their registration files)` : "";
+  const unsearched = coverage.unsearchedManifestAgentIds ?? [];
+  const manifests =
+    unsearched.length > 0
+      ? `\n${INFO} the Provider Standard manifest of agent(s) ${unsearched.join(", ")} could not be read, so ` +
+        `their services were not searched.`
+      : "";
+  if (coverage.registryAgentCount !== undefined) {
+    // A newest-agents scan of the Identity contract.
+    const read = coverage.recordsScanned + unreadable;
+    const older = coverage.hasMore === true ? `; the ${coverage.registryAgentCount - read} older ones were not searched` : "";
+    return `${INFO} registry scan read the newest ${read} of ${coverage.registryAgentCount} registered agent(s)` +
+      `${unreadableText}${older}.${dropped}${manifests}`;
+  }
+  const more = coverage.hasMore === true ? "; additional explorer pages exist" : "";
   return `${INFO} bounded discovery scanned ${coverage.recordsScanned} record(s) across ` +
-    `${coverage.pagesScanned} page(s)${more}; results are not registry-global.${dropped}`;
+    `${coverage.pagesScanned} page(s)${more}${unreadableText}; results are not registry-global.${dropped}${manifests}`;
+}
+
+/** Short words for match fields in the find table. */
+const MATCH_LABELS: Record<MatchField, string> = {
+  name: "name",
+  description: "desc",
+  registrationServices: "svc",
+  manifestServices: "manifest",
+};
+
+function matchLabel(r: RankedRow): string {
+  return r.match ? r.match.fields.map((f) => MATCH_LABELS[f]).join("+") : "-";
 }
 
 async function gatherByIds(deps: ToolDeps, ids: number[]): Promise<AgentResponse[]> {
@@ -380,6 +430,7 @@ async function cmdFind(deps: ToolDeps, flags: CliFlags): Promise<number> {
     verifyTopK: Math.min(flags.limit ?? 10, VERIFY_TOP_K),
     limit: flags.limit ?? 10,
     includeBreakdown: false,
+    ...(discovery.matches ? { matches: discovery.matches } : {}),
   });
   if (flags.json) {
     out(JSON.stringify({ query, count: rows.length, agents: rows, coverage: discovery.coverage }, null, 2));
@@ -387,13 +438,20 @@ async function cmdFind(deps: ToolDeps, flags: CliFlags): Promise<number> {
   }
   if (rows.length === 0) {
     out(`No agents matched "${query}" on ${deps.config.network}.`);
+    const notice = coverageNotice(discovery.coverage);
+    if (notice) out(notice);
     return 0;
   }
   out(`${rows.length} agent(s) for "${query}" on ${deps.config.network}:`);
   out();
   out(rankRowsTable(rows));
+  const manifestLines = manifestMatchLines(rows);
+  if (manifestLines.length > 0) {
+    out();
+    for (const line of manifestLines) out(line);
+  }
   out();
-  out(`${INFO} names/descriptions are self-declared & unverified. Run: profile <id> for detail.`);
+  out(`${INFO} names, descriptions and services are self-declared & unverified. Run: profile <id> for detail.`);
   const notice = coverageNotice(discovery.coverage);
   if (notice) out(notice);
   return 0;
@@ -409,6 +467,7 @@ async function cmdRank(deps: ToolDeps, flags: CliFlags): Promise<number> {
   const allNumeric = rest.every((t) => /^\d+$/.test(t));
   let pool: AgentResponse[];
   let coverage: DiscoveryCoverage | undefined;
+  let matches: FindAgentsResult["matches"];
   if (allNumeric) {
     const ids = rest.map(Number);
     if (ids.some((id) => !Number.isSafeInteger(id) || id < 0 || id > MAX_AGENT_ID)) {
@@ -419,6 +478,7 @@ async function cmdRank(deps: ToolDeps, flags: CliFlags): Promise<number> {
     const discovery = await gatherByQuery(deps, rest.join(" "), flags);
     pool = discovery.agents;
     coverage = discovery.coverage;
+    matches = discovery.matches;
   }
 
   if (pool.length === 0) {
@@ -432,6 +492,7 @@ async function cmdRank(deps: ToolDeps, flags: CliFlags): Promise<number> {
     verifyTopK: Math.min(flags.limit ?? 10, 25),
     limit: flags.limit ?? 10,
     includeBreakdown: true,
+    ...(matches ? { matches } : {}),
   });
 
   if (flags.json) {
@@ -574,6 +635,7 @@ async function cmdServices(deps: ToolDeps, flags: CliFlags): Promise<number> {
     filters,
     pages: CANDIDATE_PAGES,
     match: "any",
+    matchManifests: searchesManifests(deps),
   });
   const pool = discovery.agents;
 
@@ -821,20 +883,36 @@ async function cmdDoctor(deps: ToolDeps, flags: CliFlags): Promise<number> {
     detail: keyless ? "keyless (no signer, no writes)" : "STELLAR_PRIVATE_KEY present but IGNORED (keyless)",
   });
 
-  // 3. data source: explorer health, or in registry mode a read of the allowlist
+  // 3. data source: explorer health, or in registry mode a read of its agents
   if (deps.source.kind === "registry") {
-    const ids = cfg.registryAgentIds ?? [];
+    const unavailable = "; no explorer, so feedback, stats, health and owner lookups are unavailable";
     try {
       const { coverage } = await deps.source.findAgentsWithCoverage("");
       const unreadable = coverage.unreadableAgentIds ?? [];
-      checks.push({
-        name: "registry",
-        ok: unreadable.length === 0,
-        detail:
-          `registry mode: ${coverage.recordsScanned}/${ids.length} allowlisted agent(s) read from the Identity contract` +
-          (unreadable.length > 0 ? `; unreadable: ${unreadable.join(", ")}` : "") +
-          "; no explorer, so feedback, stats, health and owner lookups are unavailable",
-      });
+      if (deps.source.describe().scope === "allowlist") {
+        const ids = cfg.registryAgentIds ?? [];
+        checks.push({
+          name: "registry",
+          // The operator chose these agents, so each one should read.
+          ok: unreadable.length === 0,
+          detail:
+            `registry mode: ${coverage.recordsScanned}/${ids.length} allowlisted agent(s) read from the Identity contract` +
+            (unreadable.length > 0 ? `; unreadable: ${unreadable.join(", ")}` : "") +
+            unavailable,
+        });
+      } else {
+        const window = coverage.recordsScanned + unreadable.length;
+        checks.push({
+          name: "registry",
+          // Registrants choose their files; one that can't be read is theirs to fix, not this server's.
+          ok: true,
+          detail:
+            `registry mode: read the newest ${window} of ${coverage.registryAgentCount ?? "?"} agent(s) registered ` +
+            `on the Identity contract, ${coverage.recordsScanned} with a readable registration file` +
+            (unreadable.length > 0 ? ` (unreadable: ${unreadable.join(", ")})` : "") +
+            unavailable,
+        });
+      }
     } catch (e) {
       checks.push({ name: "registry", ok: false, detail: `registry mode: ${classifyError(e).error}` });
     }
@@ -993,6 +1071,9 @@ FLAGS
   --explorer-url <url>          Explorer API base (env EXPLORER_BASE_URL)
   --registry-agent-ids <ids>    Registry mode: read these agents from the Identity contract, no
                                 explorer (env REGISTRY_AGENT_IDS; e.g. 12,40)
+  --registry-scan-limit <n>     Registry mode: search the newest n (1-50) agents registered on the
+                                Identity contract, no explorer (env REGISTRY_SCAN_LIMIT). testnet does
+                                this by default with 50 when no explorer or allowlist is set
   --trusted-validators <G…>     Validation Registry validators whose Provider Standard records
                                 earn badges (env TRUSTED_VALIDATORS; comma-separated)
   --rpc-url <url>               Soroban RPC (env STELLAR_RPC_URL)
@@ -1060,6 +1141,7 @@ export async function runCli(
         network: flags.network,
         explorerUrl: flags.explorerUrl,
         registryAgentIds: flags.registryAgentIds,
+        registryScanLimit: flags.registryScanLimit,
         trustedValidators: flags.trustedValidators,
         rpcUrl: flags.rpcUrl,
         noVerify: flags.noVerify,
@@ -1072,9 +1154,14 @@ export async function runCli(
     const deps = depsOverride ?? createToolDeps(buildConfig(flags));
     if (deps.source.kind === "registry" && !flags.json && flags.command !== "doctor") {
       // stderr, so piped stdout stays the command's own output.
+      const { scope, allowlistSize } = deps.source.describe();
       err(
-        `${INFO} registry mode: ${deps.source.describe().allowlistSize} allowlisted agent(s) read from the ` +
-          `Identity contract; reputation is not indexed, so scores and feedback counts are not measured.`,
+        scope === "allowlist"
+          ? `${INFO} registry mode: ${allowlistSize} allowlisted agent(s) read from the Identity contract; ` +
+              `reputation is not indexed, so scores and feedback counts are not measured.`
+          : `${INFO} registry mode: no explorer, so agents are read straight from the ${deps.config.network} ` +
+              `Identity contract and searches cover the newest ${allowlistSize}; reputation is not indexed, so ` +
+              `scores and feedback counts are not measured.`,
       );
     }
     switch (flags.command) {

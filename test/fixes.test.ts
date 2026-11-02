@@ -231,29 +231,59 @@ describe("server capabilities: declare only what we exercise", () => {
   });
 });
 
-describe("testnet + mainnet-only explorer is refused, not silently mixed (config)", () => {
+describe("testnet + mainnet-only explorer is never mixed (config)", () => {
   // The default explorer indexes mainnet only. Pairing it with STELLAR_NETWORK=testnet
   // would serve mainnet registry rows alongside testnet on-chain reads — two chains
-  // described as one. Testnet therefore needs a source on its own chain: an explicit
-  // explorer, or registry mode (REGISTRY_AGENT_IDS: the testnet Identity contract
-  // read directly). With neither, the launch is refused: degrade closed, never fake.
-  it("refuses to start on testnet with neither EXPLORER_BASE_URL nor REGISTRY_AGENT_IDS", () => {
-    expect(() => loadConfig({ STELLAR_NETWORK: "testnet" } as NodeJS.ProcessEnv)).toThrow(
-      /testnet requires an explicit EXPLORER_BASE_URL or REGISTRY_AGENT_IDS/i,
-    );
+  // described as one. Testnet therefore reads a source on its own chain: an explicit
+  // explorer, registry mode over an allowlist (REGISTRY_AGENT_IDS), or by default
+  // registry mode over the newest agents of the testnet Identity contract.
+  it("reads testnet's newest agents from its own Identity contract when no source is set, never the mainnet explorer", () => {
+    const cfg = loadConfig({ STELLAR_NETWORK: "testnet" } as NodeJS.ProcessEnv);
+    expect(cfg.network).toBe("testnet");
+    expect(cfg.explorerBaseUrl).toBeNull();
+    expect(cfg.registryAgentIds).toBeNull();
+    expect(cfg.registryScanLimit).toBe(50);
+    expect(cfg.stellar.contracts.identity).toBe(loadConfig({ STELLAR_NETWORK: "testnet", REGISTRY_AGENT_IDS: "1" }).stellar.contracts.identity);
+    // Mainnet keeps the explorer.
+    expect(loadConfig({ STELLAR_NETWORK: "mainnet" }).registryScanLimit).toBeNull();
   });
 
-  it("treats a blank or whitespace EXPLORER_BASE_URL or REGISTRY_AGENT_IDS as absent", () => {
+  it("treats a blank or whitespace EXPLORER_BASE_URL, REGISTRY_AGENT_IDS or REGISTRY_SCAN_LIMIT as absent", () => {
     for (const blank of ["", "   "]) {
       for (const env of [
         { STELLAR_NETWORK: "testnet", EXPLORER_BASE_URL: blank },
         { STELLAR_NETWORK: "testnet", REGISTRY_AGENT_IDS: blank },
+        { STELLAR_NETWORK: "testnet", REGISTRY_SCAN_LIMIT: blank },
       ]) {
-        expect(() => loadConfig(env as NodeJS.ProcessEnv), JSON.stringify(env)).toThrow(
-          /testnet requires an explicit EXPLORER_BASE_URL or REGISTRY_AGENT_IDS/i,
-        );
+        const cfg = loadConfig(env as NodeJS.ProcessEnv);
+        expect(cfg.explorerBaseUrl, JSON.stringify(env)).toBeNull();
+        expect(cfg.registryScanLimit, JSON.stringify(env)).toBe(50);
       }
+      expect(loadConfig({ STELLAR_NETWORK: "mainnet", REGISTRY_SCAN_LIMIT: blank }).explorerBaseUrl).toBe(
+        "https://stellar8004.com",
+      );
     }
+  });
+
+  it("takes REGISTRY_SCAN_LIMIT from 1 to 50, on testnet or as an explicit choice on mainnet", () => {
+    expect(loadConfig({ STELLAR_NETWORK: "testnet", REGISTRY_SCAN_LIMIT: " 20 " }).registryScanLimit).toBe(20);
+    const mainnet = loadConfig({ STELLAR_NETWORK: "mainnet", REGISTRY_SCAN_LIMIT: "1" });
+    expect(mainnet.registryScanLimit).toBe(1);
+    expect(mainnet.explorerBaseUrl).toBeNull();
+    for (const bad of ["0", "51", "-1", "1.5", "abc", "1e1"]) {
+      expect(() => loadConfig({ STELLAR_NETWORK: "testnet", REGISTRY_SCAN_LIMIT: bad }), bad).toThrow(
+        /REGISTRY_SCAN_LIMIT must be a whole number of agents from 1 to 50/,
+      );
+    }
+  });
+
+  it("refuses a scan limit together with another data source", () => {
+    expect(() =>
+      loadConfig({ STELLAR_NETWORK: "testnet", REGISTRY_SCAN_LIMIT: "10", REGISTRY_AGENT_IDS: "12" }),
+    ).toThrow(/Set REGISTRY_SCAN_LIMIT or REGISTRY_AGENT_IDS, not both/);
+    expect(() =>
+      loadConfig({ STELLAR_NETWORK: "testnet", REGISTRY_SCAN_LIMIT: "10", EXPLORER_BASE_URL: "https://testnet.example.com" }),
+    ).toThrow(/Set REGISTRY_SCAN_LIMIT or EXPLORER_BASE_URL, not both/);
   });
 
   it("starts, and warns about nothing, on mainnet or with an explicit testnet explorer", () => {
@@ -274,6 +304,7 @@ describe("testnet + mainnet-only explorer is refused, not silently mixed (config
         env.EXPLORER_BASE_URL ?? "https://stellar8004.com",
       );
       expect(cfg.registryAgentIds, JSON.stringify(env)).toBeNull();
+      expect(cfg.registryScanLimit, JSON.stringify(env)).toBeNull();
     }
   });
 

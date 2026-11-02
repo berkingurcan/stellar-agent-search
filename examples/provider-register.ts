@@ -116,13 +116,17 @@ async function main(): Promise<void> {
     const sent = await tx.signAndSend();
     const agentId = sent.result;
     console.log(`\nregistered agent #${agentId} on ${net} (owner ${keypair.publicKey()})`);
-    console.log("\nSee it the way other agents will (reads the Identity contract directly, no indexer wait):");
-    console.log(
-      `  STELLAR_NETWORK=${net} REGISTRY_AGENT_IDS=${agentId} npx -y stellar-agent-search@0.1.0 profile ${agentId}`,
-    );
-    console.log(
-      `  STELLAR_NETWORK=${net} REGISTRY_AGENT_IDS=${agentId} npx -y stellar-agent-search@0.1.0 find "<a query your users would type>"`,
-    );
+    // Registry mode is newer than the published stellar-agent-search@0.1.0, so these run from this checkout.
+    console.log("\nSee it the way other agents will, straight from the Identity contract (npm run build first):");
+    if (net === "testnet") {
+      // Testnet reads its newest agents by default, so a search finds the new agent right away.
+      console.log(`  STELLAR_NETWORK=testnet node dist/index.js profile ${agentId}`);
+      console.log(`  STELLAR_NETWORK=testnet node dist/index.js find "<a query your users would type>"`);
+    } else {
+      // Mainnet searches go through the explorer, which indexes the agent shortly; an allowlist reads it now.
+      console.log(`  STELLAR_NETWORK=mainnet REGISTRY_AGENT_IDS=${agentId} node dist/index.js profile ${agentId}`);
+      console.log(`  npx -y stellar-agent-search@0.1.0 find "<a query your users would type>"   # once indexed`);
+    }
   } catch (err) {
     throw new Error(`registration failed: ${formatSorobanError(err)}`);
   }

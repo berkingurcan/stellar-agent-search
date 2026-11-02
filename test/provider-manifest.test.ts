@@ -19,7 +19,7 @@ import { ExplorerService } from "../src/lib/explorer.js";
 import { ProviderManifestService } from "../src/lib/provider-manifest.js";
 import { RegistryService } from "../src/lib/registry-source.js";
 import { ReputationVerifier } from "../src/lib/reputation.js";
-import type { IdentityReadClient, ValidationReadClient } from "../src/lib/soroban.js";
+import type { IdentityReadClient, RegistryReadClient, ValidationReadClient } from "../src/lib/soroban.js";
 import {
   NO_TRUSTED_VALIDATORS,
   RECEIPT_BADGES_NOT_DERIVED,
@@ -129,8 +129,9 @@ function routes(map: Record<string, () => Response | Promise<Response>>) {
   });
 }
 
-function identity(agent: { uri: string; owner?: string; wallet?: string } = { uri: toDataUri(REGISTRATION) }): IdentityReadClient {
+function identity(agent: { uri: string; owner?: string; wallet?: string } = { uri: toDataUri(REGISTRATION) }): RegistryReadClient {
   return {
+    total_agents: async () => ({ result: 8 }),
     agent_uri: async () => ({ result: { isOk: () => true, unwrap: () => agent.uri } }),
     get_agent_wallet: async () => ({ result: "wallet" in agent ? agent.wallet : WALLET }),
     find_owner: async () => ({ result: agent.owner ?? OWNER }),

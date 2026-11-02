@@ -160,10 +160,10 @@ The current v1 integration is useful and intentionally honest, but not globally 
 | Concern | Current behavior |
 |---|---|
 | Read boundary | `ExplorerService` wraps the upstream `ExplorerClient`; there is no Supabase dependency |
-| Network | Mainnet by default; testnet requires an explicit Explorer URL rather than silently reading mainnet |
+| Network | Mainnet by default. Testnet never reads the mainnet Explorer: it uses an explicit testnet Explorer URL, or by default reads the newest agents straight from the testnet Identity contract (registry mode) |
 | Registry identity | v1 metadata names chain/network but not the exact Identity contract; the MCP treats that contract scope as unattested rather than trusting the hostname |
 | Filters | MCP `x402`, `mpp`, `hasServices`, `trust`, and explicit `minExplorerScore` are sent to the v1 list (`minExplorerScore` maps to upstream `minScore`; it is not local rank) |
-| Text | The v1 list projection omits `services[]`, so the bounded first-pass stem match can use only fetched agent name/description; service text is not globally searchable today |
+| Text | The v1 list projection omits `services[]`, so the bounded first-pass stem match can use only fetched agent name/description; service text is not searchable over the Explorer today (registry mode, which reads registrations and bound Provider Standard manifests itself, matches service text) |
 | Pagination | v1 uses page/offset pagination; every MCP walk has a hard page cap |
 | Coverage | `hasMore: false` proves only that the observed v1 pagination ended; without a revision-bound snapshot, v1 always reports `coverageComplete: false` and `snapshotConsistent: false` |
 | Reliability | SDK timeout/retries/rate-limit handling plus process-local TTL cache and single-flight |

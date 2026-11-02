@@ -12,13 +12,16 @@ startCommand:
         type: string
         enum: ["mainnet", "testnet"]
         default: "mainnet"
-        description: "Stellar network to target. 'testnet' also requires EXPLORER_BASE_URL or REGISTRY_AGENT_IDS."
+        description: "Stellar network to target. With no other data source, 'testnet' reads its newest 50 agents straight from the testnet Identity contract."
       EXPLORER_BASE_URL:
         type: string
-        description: "Override the stellar-8004 explorer API base URL. On 'testnet', set this or REGISTRY_AGENT_IDS — the default explorer indexes mainnet only, and the server refuses to start with neither."
+        description: "Override the stellar-8004 explorer API base URL. The default indexes mainnet only, so 'testnet' never falls back to it."
       REGISTRY_AGENT_IDS:
         type: string
-        description: "Registry mode: comma-separated agent ids read straight from the Identity contract, with no explorer. Not combinable with EXPLORER_BASE_URL."
+        description: "Registry mode: comma-separated agent ids read straight from the Identity contract, with no explorer. Not combinable with another data source."
+      REGISTRY_SCAN_LIMIT:
+        type: string
+        description: "Registry mode over the newest agents: how many (1-50) of the most recently registered agents to read. Testnet's default (50); on mainnet it replaces the explorer. Not combinable with another data source."
       TRUSTED_VALIDATORS:
         type: string
         description: "Comma-separated G… or C… addresses of the verifiers whose Validation Registry records earn Provider Standard badges in get_provider_manifest. Empty: the registry is not read."
@@ -39,6 +42,7 @@ startCommand:
         STELLAR_NETWORK: config.STELLAR_NETWORK || "mainnet",
         ...(config.EXPLORER_BASE_URL ? { EXPLORER_BASE_URL: config.EXPLORER_BASE_URL } : {}),
         ...(config.REGISTRY_AGENT_IDS ? { REGISTRY_AGENT_IDS: config.REGISTRY_AGENT_IDS } : {}),
+        ...(config.REGISTRY_SCAN_LIMIT ? { REGISTRY_SCAN_LIMIT: config.REGISTRY_SCAN_LIMIT } : {}),
         ...(config.TRUSTED_VALIDATORS ? { TRUSTED_VALIDATORS: config.TRUSTED_VALIDATORS } : {}),
         ...(config.STELLAR_RPC_URL ? { STELLAR_RPC_URL: config.STELLAR_RPC_URL } : {}),
         ...(config.VERIFY_ONCHAIN ? { VERIFY_ONCHAIN: config.VERIFY_ONCHAIN } : {})

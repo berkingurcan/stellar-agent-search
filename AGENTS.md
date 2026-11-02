@@ -25,8 +25,11 @@ rank and vet other on-chain agents, and see which ones declare x402 (USDC pay-pe
 3. **`score` is a heuristic** (`stellar-agent-search-declared-evidence-v1`): quality × evidence strength. It is not a
    probability. `lowEvidence` / `unrated` flags matter.
 4. **Coverage is bounded.** `coverage.coverageComplete: false` means "a window was scanned", not "nothing else exists".
-5. **Default network is mainnet.** Testnet requires `STELLAR_NETWORK=testnet` plus `REGISTRY_AGENT_IDS` or
-   `EXPLORER_BASE_URL`.
+5. **Default network is mainnet.** `STELLAR_NETWORK=testnet` alone works: with no indexer, it reads the newest
+   50 testnet agents straight from the Identity contract (`REGISTRY_SCAN_LIMIT`), so coverage is bounded and
+   reputation is not indexed. `REGISTRY_AGENT_IDS` reads only the agents you name instead; `EXPLORER_BASE_URL` a
+   testnet indexer. This is unreleased: the published `0.1.0` still refuses testnet without `EXPLORER_BASE_URL`, so
+   run testnet from a checkout (`node dist/index.js`) until the next release.
 6. **A Provider Standard provider is payable only when `get_provider_manifest` says so**: `status: "ok"` and
    `identityBound: true`. Its badges count only when `conformance.status` is `attested`, which needs
    `TRUSTED_VALIDATORS`; `not-configured` says nothing about the provider.
@@ -65,7 +68,7 @@ node dist/index.js find "web scraper"            # CLI; bare `node dist/index.js
 |---|---|
 | `src/index.ts`, `src/server.ts` | Entry (CLI vs MCP dispatch), MCP wiring |
 | `src/tools/` | One file per tool; `schemas.ts` (zod), `shared.ts` (adapters) |
-| `src/lib/` | `explorer` (reads), `registry-source` (contract-only mode), `reputation` (fail-closed probe), `ranking`, `nlparse`, `sanitize`, `agentcard`; `provider-standard` (manifest reader), `provider-manifest` (fetch + [I1]–[I3] binding), `validation` (Validation Registry badges), `http` (guarded fetch) |
+| `src/lib/` | `explorer` (reads), `registry-source` (contract-only mode: an allowlist or the newest agents), `text-match` (keyword matching and match reasons), `reputation` (fail-closed probe), `ranking`, `nlparse`, `sanitize`, `agentcard`; `provider-standard` (manifest reader), `provider-manifest` (fetch + [I1]–[I3] binding, search reads), `validation` (Validation Registry badges), `http` (guarded fetch) |
 | `src/resources/`, `src/prompts/`, `src/cli/` | Resources, slash prompts, human CLI + `setup` |
 | `examples/` | The **only** keyed code: `x402-demo.ts`, `provider-register.ts`; plus keyless `consumer-mcp-client.ts` |
 | `worker/`, `web/` | Cloudflare remote adapter (not live), landing site |

@@ -49,6 +49,19 @@ export class RegistryReadError extends Error {
 }
 
 /**
+ * The chain was read, but the registration file its URI names was not: a bad
+ * URI, an unreachable or refused host, or a file that is not a JSON object. The
+ * registrant's problem rather than an outage, so a scan reports the agent as
+ * unreadable instead of failing.
+ */
+export class RegistrationUnreadableError extends RegistryReadError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "RegistrationUnreadableError";
+  }
+}
+
+/**
  * The request needs an indexer, and this server reads the registry directly.
  * Registry mode has no feedback history, stats, health, owner index or indexed
  * reputation, so it refuses rather than answer from a partial view.
@@ -57,8 +70,8 @@ export class IndexerRequiredError extends Error {
   constructor(feature: string) {
     super(
       `${feature} needs an indexer, and this server is in registry mode: it reads the Identity contract ` +
-        `directly for the agents in REGISTRY_AGENT_IDS. To use it, set EXPLORER_BASE_URL to an indexer ` +
-        `for this network instead.`,
+        `directly (the agents in REGISTRY_AGENT_IDS, or the newest registered agents). To use it, set ` +
+        `EXPLORER_BASE_URL to an indexer for this network instead.`,
     );
     this.name = "IndexerRequiredError";
   }
