@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Ready for Stellar Protocol 30 (mainnet 2026-11-23).** The single runtime Stellar SDK moves from `16.2.0` to
+  `16.4.1`, the first v16 release that reads Protocol 30 ledger headers. The package still ships exactly one
+  `@stellar/stellar-sdk` (v16) graph; the release-hardening test and `docs/architecture.md` pin the new version.
+
 ### Added
 
 - **Testnet works with no setting.** With `STELLAR_NETWORK=testnet` and no other data source, the server reads the

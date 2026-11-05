@@ -175,7 +175,7 @@ describe("real release fail-closed gates", () => {
       packages: Record<string, { version?: string; dev?: boolean }>;
     };
 
-    expect(pkg.dependencies["@stellar/stellar-sdk"]).toBe("16.2.0");
+    expect(pkg.dependencies["@stellar/stellar-sdk"]).toBe("16.4.1");
     expect(pkg.devDependencies["@trionlabs/stellar8004"]).toBe("0.0.11");
     expect(pkg.devDependencies["@x402/stellar"]).toBe("~2.20.0");
     expect(pkg.dependencies).not.toHaveProperty("@trionlabs/stellar8004");
@@ -187,7 +187,7 @@ describe("real release fail-closed gates", () => {
       path.endsWith("node_modules/@stellar/stellar-sdk"),
     );
     expect(sdkInstalls).toEqual(["node_modules/@stellar/stellar-sdk"]);
-    expect(lock.packages["node_modules/@stellar/stellar-sdk"]?.version).toBe("16.2.0");
+    expect(lock.packages["node_modules/@stellar/stellar-sdk"]?.version).toBe("16.4.1");
     expect(lock.packages["node_modules/@trionlabs/stellar8004"]?.dev).toBe(true);
     expect(lock.packages["node_modules/@x402/stellar"]?.dev).toBe(true);
 

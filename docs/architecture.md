@@ -414,10 +414,10 @@ The npm artifact vendors the exact-pinned `@trionlabs/stellar8004@0.0.11` implem
 code as the canonical ABI/API implementation without making consumers install the upstream package's
 Stellar SDK v15 dependency. `THIRD_PARTY_NOTICES.md` ships in the tarball with its MIT notice.
 
-The artifact keeps `@stellar/stellar-sdk@16.2.0` as its only Stellar runtime dependency. A root override
+The artifact keeps `@stellar/stellar-sdk@16.4.1` as its only Stellar runtime dependency. A root override
 forces the development-only upstream SDK and x402 demo onto that same physical v16 instance, so the workspace
 lock contains one SDK install rather than parallel v15/v16 trees. A clean packed-consumer install independently
-proves the released graph: one v16.2.0 SDK, no `@trionlabs/stellar8004` or x402 runtime package, and zero
+proves the released graph: one v16.4.1 SDK, no `@trionlabs/stellar8004` or x402 runtime package, and zero
 production vulnerabilities at the high audit threshold.
 
 Stellar SDK v16's default `/contract` and `/rpc` exports are fetch-based; axios is opt-in under
